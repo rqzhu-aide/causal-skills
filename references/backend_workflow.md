@@ -62,17 +62,17 @@ For every `execution_authorized` step, include an `execution` object inside that
 step. Only one pending step is active at a time:
 
 ```yaml
-- id: run_taxa_audit
+- id: run_cate_support_audit
   agent_called: data_analyst
   mode: execution_authorized
-  action_goal: "Run a genus-level baseline-to-end taxa-change audit."
+  action_goal: "Run a CATE support audit for baseline covariates and follow-up outcomes."
   status: pending
   refs:
-    - outputs/data/avocado_gg.csv
+    - outputs/data/study_data.csv
   execution:
-    analysis_dir: outputs/analyses/run_taxa_audit
-    scope: "Profile baseline-to-end genus-level taxa changes for Avocado versus Control."
-    claim_boundary: "Descriptive/data-support audit only; no causal claim."
+    analysis_dir: outputs/analyses/run_cate_support_audit
+    scope: "Profile covariate support, outcome availability, and subgroup sample size for a possible CATE analysis."
+    claim_boundary: "Descriptive/data-support audit only; no heterogeneous causal effect claim."
     expected_outputs:
       - source
       - note
