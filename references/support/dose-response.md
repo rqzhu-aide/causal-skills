@@ -1,6 +1,6 @@
 # Support: dose-response
 
-Context only. Relevant when treatment or exposure is continuous, ordinal, multi-level, cumulative, duration-based, intensity-based, threshold-based, or naturally framed as an exposure-response curve. The selected design route owns execution, YAML updates, diagnostics, and artifact records.
+Context only. Relevant when treatment or exposure is continuous, ordinal, multi-level, cumulative, duration-based, intensity-based, threshold-based, or naturally framed as an exposure-response curve. The selected design route owns execution, diagnostics, and the controller submission.
 
 ## Additional Information
 
@@ -45,7 +45,9 @@ Context only. Relevant when treatment or exposure is continuous, ordinal, multi-
 
 ## Other Considerations
 
-- Have the selected design route flag `statistical-validity` follow-up in its scope or execution notes, especially for dose support, sparse tails, positivity, balance across dose, threshold stability, continuous-treatment DML, TMLE shift estimators, flexible dose nuisance models, or high-dimensional dose adjustment.
+- Flag `statistical-validity` follow-up only when unresolved dose support,
+  positivity, threshold stability, or nuisance-model concerns exceed the
+  selected design's normal diagnostics.
 - Consider `heterogeneous-effects` if the dose-response curve may differ across baseline groups, sites, cohorts, or risk levels.
 - Consider `non-continuous-outcomes` when dose-response is evaluated on risk, rates, events, categories, or survival scales.
 - Consider `mediation` if dose affects intermediate biomarkers, adherence, behavior, or mechanisms that the user wants to interpret.

@@ -1,8 +1,8 @@
 # Route: causal_discovery
 
 Use this route for exploratory causal discovery, graph-structure support, and
-discovery sidecar artifacts. Do not produce a standalone user-facing answer;
-provide internal findings for `team_lead` to synthesize.
+discovery sidecar artifacts. This worker remains silent and submits internal
+findings for `team_lead` to synthesize.
 
 This is a core route, not a method route. It helps the team reason about
 candidate graphs, local variable neighborhoods, temporal tiers, edge/path
@@ -11,21 +11,17 @@ artifacts that may support later causal review.
 
 ## Plan Entry
 
-Read `next_step_plan` before route work.
+Read the validated state before route work. Proceed only at `worker_pending`
+when the committed plan's worker route is exactly `causal_discovery`.
 
-Expected entry:
-
-```yaml
-next_step_plan:
-  - id: causal_discovery
-```
-
-If no `next_step_plan` entry has `id: causal_discovery`, do not proceed with
-causal discovery work.
-
-Use the current user message, live state, inspectable data, and routed
-graph/data/artifact materials as the assignment. Do not update `next_step_plan`
-or `project_summary`; `team_lead` handles aggregate cleanup after synthesis.
+Use `state_meta.active_operation.intent_summary`, live state, inspectable data,
+routed graph/data/artifact materials, and any consistent detail still available
+from the operation-opening message as the assignment. On resume, a new message
+does not change it. Submit one `statectl apply` JSON payload with
+`actor: causal_discovery`, `updates` containing only `discovery_sidecar` and
+`council_chamber.causal_discovery`, and optional top-level `artifact`. The
+controller owns timestamps, artifact records, and transition to `lead_pending`;
+never edit the YAML, plan, or project summary directly.
 
 ## Discovery Engineering Scope
 
@@ -112,10 +108,8 @@ If diagnostics are missing, label the finding as `candidate_only` or
 
 ## Discovery Sidecar Updates
 
-Update `project_state.yaml` fields under `discovery_sidecar` when supported by
-the request:
+Submit supported `discovery_sidecar` fields when supported by the request:
 
-- `last_updated`: local update time in `HH:MM:SS` format.
 - `status`: `not_started`, `scoped`, `artifact_created`, `reviewed`, or
   `blocked`.
 - `goal`: discovery purpose or graph question.
@@ -134,11 +128,11 @@ the request:
 
 ## Council Chamber Updates
 
-Refresh only `council_chamber.causal_discovery`.
+Submit chamber feedback only under
+`updates.council_chamber.causal_discovery`.
 
 Set:
 
-- `last_updated`: local update time in `HH:MM:SS` format.
 - `current_status`: one short sentence on what discovery could scope, review,
   create, or why it was blocked.
 - `summary`: compact synthesis of what was scoped, reviewed, created, or
@@ -164,18 +158,14 @@ Valid discovery artifacts include graph objects, edge tables, local-neighborhood
 tables, stability tables, graph plots, diagnostic figures, source scripts,
 notebooks, manifests, and technical notes.
 
-When a graph object, table, figure, script, notebook, manifest, or technical
-note is created:
+When a graph object, table, figure, script, notebook, or technical note is
+created, follow `references/artifact_output_policy.md`: reserve first, write and
+validate temporary output, atomically publish it with its completion manifest,
+then include the completed artifact and compact `discovery_sidecar` references
+in `statectl apply`.
 
-1. Save the output under one meaningful project subfolder directly under
-   `output/`, such as `output/local_neighborhood_discovery` or
-   `output/graph_stability_review`.
-2. Record output paths in `discovery_sidecar.artifact_refs`.
-3. Append one `artifact_records` entry with `route: causal_discovery`,
-   `location`, `created_at`, and a short summary.
-
-Do not create `artifact_records` entries for verbal discovery framing or for
-inspecting existing files without creating a new output location.
+Do not reserve or submit an artifact for verbal discovery framing or for
+inspecting existing files without creating new durable output.
 
 ## Boundaries
 

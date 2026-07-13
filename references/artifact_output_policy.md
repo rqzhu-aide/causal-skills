@@ -1,79 +1,84 @@
 # Artifact Output Policy
 
-Load this reference only when a route created or reviewed durable output,
-`artifact_records` need updating, or report/analysis/discovery output status
-must be set.
+Load this reference only when a worker will create durable output. Existing-file
+review alone does not create an artifact record.
 
-## Output Locations
+## Worker Lifecycle
 
-For any created artifact, analysis output, or report output, use one meaningful
-location directly under `output/`, such as `output/data_audit_readiness` or
-`output/randomized_cate_execution`. Do not use route-specific nested folders or
-timestamp-only locations.
+Use exactly one reserved artifact per output-producing operation:
 
-Use this shared `artifact_records` shape:
+1. Call `statectl reserve-artifact` before creating durable output. Request a
+   meaningful file or directory name tied to the work, never a timestamp-only
+   name. The controller returns an operation-unique
+   `artifact_intent.location` directly under `output/`, a project-relative
+   `temporary_path`, and `manifest_path`.
+2. Write only to `temporary_path`. Do not write into an unrelated output folder
+   or adopt an unreserved path.
+3. Validate the output in proportion to its type: files open or parse, required
+   tables/figures exist, code or notebooks are runnable when required, and
+   reports render with their required content and boundary language.
+4. Prepare the completion manifest using the exact shape below. `route` is
+   `analysis_execution` for every design route; `files` contains
+   project-relative final-output paths. Do not add design-specific fields or
+   change controller-issued identity fields.
 
-```yaml
-artifact_records:
-  - route: data_audit | causal_discovery | analysis_execution | report_writer
-    location: "output/meaningful_name"
-    created_at: "HH:MM:SS"
-    summary: "Brief summary of the work, findings, limits, or suggested additional work."
-```
+   ```json
+   {
+     "schema_version": 1,
+     "operation_id": "<active operation UUID>",
+     "route": "<artifact route>",
+     "scope_ref": null,
+     "files": ["<project-relative output path>"],
+     "completed_at": "<RFC3339 UTC>",
+     "summary": "<compact evidence and limitation summary>"
+   }
+   ```
 
-Route-specific fields may be included when useful, such as `design` and
-`support` for `analysis_execution`.
+   For approved analysis or report output, replace `null` with the exact active
+   `{kind, id, revision}` scope object.
+5. Publish by artifact kind:
+   - For a directory, write and validate `artifact-manifest.json` inside the
+     temporary directory, then atomically move that directory to
+     `artifact_intent.location`.
+   - For a file, atomically move the validated file to
+     `artifact_intent.location`, then atomically install the manifest at
+     `manifest_path` through a same-directory temporary file.
+6. Submit the owner-scoped state patch and matching `artifact: {summary}`
+   through `statectl apply`. The controller verifies the reservation, final
+   location, manifest, and summary before recording the artifact.
 
-For `route: report_writer`, the summary should state output kind, evidence
-basis, and causal limitation or inherited boundary. Keep the same shape; do not
-add format-specific fields.
+If output succeeds but `apply` fails, preserve the completed output and
+manifest. On resume, reuse them only when the controller reports that they match
+the active operation; correct and retry the patch without regenerating output.
 
-## Aggregate Output Flags
+If interruption leaves the exact active operation's reserved final location
+without a manifest, inspect only that location. Complete its manifest only after
+the output validates against the persisted assignment; otherwise leave it
+unrecorded and report the blocker through the worker handoff. Never scan for,
+adopt, delete, or replace another path.
 
-When `analysis_execution` creates any analysis result, table, figure, model
-output, diagnostic output, written result note, or artifact intended as
-analysis output, set:
-
-```yaml
-project_summary:
-  analysis_output: exist
-```
-
-Record the output location in `artifact_records`; do not list every file.
-
-When `analysis_execution` only prepares scope/readiness feedback, do not accept
-or create `artifact_records`. Scope feedback lives in
-`council_chamber.analysis_execution.<design_id>`.
-
-When `report_writer` creates or revises an HTML report or bounded report-scoped
-output, set:
-
-```yaml
-project_summary:
-  report_output: exist
-```
-
-Keep the durable summary in `report_assembly.draft_notes`, the format in
-`report_assembly.current_format`, and any output location in `artifact_records`.
-
-Data-audit artifacts may be recorded in `artifact_records` when actual data or
-files exist and a useful audit output was created. Causal-discovery sidecar
-artifacts may be recorded only when bounded discovery work creates an output.
-Neither should set `project_summary.analysis_output: exist` unless the artifact
-is intended as analysis output for reporting. `domain_expert` should record
-source checks and domain practice in `domain_knowledge`, not create output
-folders or `artifact_records` entries.
-
-When `causal_discovery` creates graph objects, edge tables, local-neighborhood
-tables, stability tables, plots, source files, manifests, or technical notes,
-set `discovery_sidecar_output: exist` and record the output in
-`artifact_records`.
+Never append, replace, or timestamp `artifact_records` directly. A successful
+controller append has this identity-bearing form:
 
 ```yaml
-project_summary:
-  discovery_sidecar_output: exist
+- artifact_id: <controller UUID>
+  operation_id: <active operation UUID>
+  route: data_audit | causal_discovery | analysis_execution | report_writer
+  location: output/<reserved name>
+  created_at: <RFC3339 UTC>
+  summary: <compact evidence and limitation summary>
 ```
 
-If no analysis output exists, keep `project_summary.analysis_output: non_exist`.
-If no discovery sidecar output exists, keep
-`project_summary.discovery_sidecar_output: non_exist`.
+The controller may add route-specific `design` and `support` fields for
+analysis. Put individual file paths in manifest `files`; put detailed
+diagnostics in output files and route-owned state, not in the artifact record or
+as extra manifest fields.
+
+Do not reserve or submit an artifact for scope preparation, readiness review,
+planning feedback, verbal-only work, or inspection that created no new durable
+output. Historical artifacts reported as unavailable or incomplete are not
+evidence; do not recreate, scan for, or silently substitute them.
+
+Apply the active route's route-specific recording requirements; this policy
+defines only the shared artifact lifecycle. The controller derives aggregate
+output flags from completed artifact records.

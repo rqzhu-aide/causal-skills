@@ -1,13 +1,13 @@
 # Support: policy-making-and-transportability
 
-Context only. Relevant when the target concerns action choice, prioritization, treatment rules, policy value, deployment, external validity, or applying results to a different population, site, time, or setting. The selected design route owns execution, YAML updates, diagnostics, and artifact records.
+Context only. Relevant when the target concerns action choice, prioritization, treatment rules, policy value, deployment, external validity, or applying results to a different population, site, time, or setting. The selected design route owns execution, diagnostics, and the controller submission.
 
 ## Additional Information
 
 - Useful when effect estimates need decision, deployment, or source-target context.
 - Policy-making context adds information about what action could be taken, for whom, and under what constraints.
 - Transportability context adds information about what can be said for a target population, site, time, or setting.
-- Both require the user-facing claim to name decision context, target population, implementation setting, and limits of use.
+- Both require the final claim to name decision context, target population, implementation setting, and limits of use.
 - Useful lanes include existing-rule evaluation, shallow/interpretable treatment rules, policy trees, uplift/ranking, budgeted allocation, trial-to-target generalization, source-to-target transport, dynamic regimes, and applicability memos.
 
 ## Non-Obvious Twists
@@ -51,7 +51,9 @@ Context only. Relevant when the target concerns action choice, prioritization, t
 
 ## Other Considerations
 
-- Have the selected design route flag `statistical-validity` follow-up in its scope or execution notes, especially for policy support, rule stability, source-target overlap, calibration, sensitivity to effect modifiers, DR scores, off-policy evaluation, cross-fitted value estimation, nuisance models, or source-target DR transport.
+- Flag `statistical-validity` follow-up only when unresolved rule stability,
+  source-target support, value estimation, or nuisance-model concerns exceed the
+  selected design's normal diagnostics.
 - Consider `heterogeneous-effects` when policy or transport depends on effect modifiers, subgroup benefit, equity/safety strata, or site/time variation.
 - Consider `non-continuous-outcomes` when the decision depends on risk, rate, survival, RMST, competing events, utility, or categorical outcomes.
 - Consider `dose-response` if the decision is about dose choice, exposure intensity, dose cap, threshold, or feasible shift.

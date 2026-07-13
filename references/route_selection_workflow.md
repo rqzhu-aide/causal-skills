@@ -2,11 +2,12 @@
 
 ## Purpose
 
-Use this compact reference only to build the current-turn `next_step_plan`.
-Route selection is mandatory for every substantive turn. Do not answer, analyze,
-draft, inspect files, or create outputs directly from the user request; first
-write `next_step_plan`, then load and run the planned route reference. Keep
-route selection silent unless there is a blocker.
+Use this compact reference only to choose the current-turn `route`, `support`,
+and compact self-contained `intent_summary` for `statectl begin`. Route
+selection is mandatory for every new operation.
+Do not answer, analyze, draft, inspect project materials, or create outputs
+directly from the user request; first commit the plan, then load the planned
+route reference. Keep route selection silent unless there is a blocker.
 
 The router chooses who works this turn. It does not decide a member's internal
 workflow lane, handoff status, output status, or final answer.
@@ -18,7 +19,7 @@ Read these before planning:
 1. The current user message.
 2. The immediately previous user-facing response, especially `[? Next Steps]`,
    `[+ Consultant Options]`, and `[! Boundary]`.
-3. `project_state.yaml`, initialized through `scripts/init_project_state.py`.
+3. The validated state returned by `statectl open`.
 4. `references/route_index.yaml`.
 
 Do not load `references/method_route_catalog.yaml` from the router. Only
@@ -41,56 +42,47 @@ If neither condition applies, do not load these files.
 
 ## Allowed Plan Shapes
 
-Always write `next_step_plan` as a YAML list before loading any planned route
-reference. The list is current-turn routing only, not a durable queue or deck.
+Always submit the assignment to `statectl begin` before loading any planned
+route reference. The controller constructs and persists `next_step_plan` as
+current-turn routing only, not a durable queue or deck.
+
+The examples below show command-specific fields only; every mutation also uses
+the expected project ID and revision from the latest controller result.
 
 Team-lead-only:
 
-```yaml
-next_step_plan:
-  - id: team_lead
+```json
+{"route":"team_lead","intent_summary":"..."}
 ```
 
 One core route plus team lead:
 
-```yaml
-next_step_plan:
-  - id: data_audit | domain_expert | causal_check | causal_discovery | report_writer
-  - id: team_lead
+```json
+{"route":"data_audit","intent_summary":"..."}
 ```
 
 Analysis execution plus team lead:
 
-```yaml
-next_step_plan:
-  - id: analysis_execution.<design_id>
-    support: optional_support_or_null
-  - id: team_lead
+```json
+{"route":"analysis_execution.<design_id>","support":null,
+ "intent_summary":"..."}
 ```
-
-Strict shape rules:
-
-- `team_lead` is always last.
-- Team-lead-only plans have exactly one entry.
-- Exploration/report plans have at most one core route before `team_lead`.
-- Analysis plans have exactly one `analysis_execution.<design_id>` entry before
-  `team_lead`.
-- Do not mix core routes and `analysis_execution`.
-- `team_lead` and core route entries contain only `id`.
-- `analysis_execution.<design_id>` entries contain only `id` and `support`.
-- `<design_id>` must be a design route id listed in `route_index.yaml`.
-- `support` must be `null` or a support route id listed in `route_index.yaml`.
 
 Core routes are `data_audit`, `domain_expert`, `causal_check`,
 `causal_discovery`, and `report_writer`.
 
-Method routes are loadable analysis references listed under `method_routes` in
-`route_index.yaml`. Design routes are encoded in the route id as
-`analysis_execution.<design_id>`; support routes go in the `support` field.
+The controller appends `team_lead` and rejects mixed or unknown routes. For
+analysis, encode a listed design as `analysis_execution.<design_id>` and use
+`support` only for a listed support route or `null`.
 
-Do not write detailed route payloads, scope cards, approval flags, mode flags,
-or route findings into `next_step_plan`. Route-owned sections and
-`council_chamber` hold the useful details after the route works.
+Include `scope_ref` only when routing approval of an existing ready analysis or
+report scope. A committed non-null `scope_ref` records that approval result for
+resume; the worker does not re-decide it from a later message. Write
+`intent_summary` as a resumable assignment naming the requested action and only
+the essential target, material identifier or path, and output constraint needed
+to restart the route. Do not store transcript, detailed route payloads, scope
+cards, approval prose, mode flags, or route findings there; route-owned state
+holds the detail.
 
 ## Routing Priority
 
@@ -98,24 +90,29 @@ First infer the user's current intention from the current message, the previous
 `[? Next Steps]`, `[+ Consultant Options]`, `[! Boundary]`, and the current YAML
 state. Route from that inferred intention, not from keywords alone.
 
+A numbered reply binds only to that number in one immediately preceding choice
+list. A generic confirmation binds only when that response proposed one action.
+Analysis or report execution also requires one uniquely identified ready scope
+whose identity and revision have not changed since presentation. Otherwise plan
+only `team_lead`.
+
 Apply these rules in order:
 
-1. If `project_state.yaml` cannot be read as YAML, plan only `team_lead`.
-2. If the intention is outside the current project or causal scope, or needs no
+1. If the intention is outside the current project or causal scope, or needs no
    project-state update, plan only `team_lead`.
-3. If the intention is unclear, could refer to multiple prior options, rejects
+2. If the intention is unclear, could refer to multiple prior options, rejects
    the options without giving a new in-scope request, or is only meta, setup,
    boundary, synthesis, or no-action, plan only `team_lead`.
-4. If the intention is to continue or approve a prior active choice, route the
+3. If the intention is to continue or approve a prior active choice, route the
    matching work only when it remains inside the project and causal boundary.
    For analysis or report execution, a matching `current_status: ready` handoff
    must exist.
-5. If the intention is to revise or add work based on the previous user-facing
+4. If the intention is to revise or add work based on the previous user-facing
    headings, route the changed or added work normally inside the current project
    and causal boundary.
-6. If the intention is new project-scope information or a new in-scope request,
+5. If the intention is new project-scope information or a new in-scope request,
    route the relevant member or work path using the selection rules below.
-7. If no route can make a meaningful state update, plan only `team_lead`.
+6. If no route can make a meaningful state update, plan only `team_lead`.
 
 When a message asks for several in-scope things at once, infer the user's
 dominant current intention from the prior headings and current wording, then
@@ -153,18 +150,15 @@ For exploration:
 - After `data_audit` inspects actual data and records concrete facts, prefer
   `causal_check` on the next substantive analysis-planning turn.
 
-Analysis scope routing requires the core review gate: `data_facts.data_checked`,
-`domain_knowledge.domain_checked`, and `causal_facts.causal_checked` are each
-`passing` or `limited`, and `causal_facts.analysis_readiness` is `ready` or
-`limited`. Satisfying this gate only allows analysis scope routing; execution
-still requires a matching `current_status: ready` analysis handoff and user
-approval.
+For analysis scope routing, apply the core review gate and approval rules in
+`analysis_routing_workflow.md`.
 
 ## Do Not Do During Route Selection
 
 - Do not build the final answer.
 - Do not update durable route sections.
-- Do not write detailed report scope, report outlines, analysis plans, analysis
-  payloads, approval state, or route findings into `next_step_plan`.
+- Do not include detailed report scope, report outlines, analysis plans,
+  approval prose, or route findings in `intent_summary`.
 - Do not load the detailed method catalog.
 - Do not exceed the allowed plan shapes.
+- Do not load any planned route unless `statectl begin` succeeds.

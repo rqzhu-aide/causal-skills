@@ -1,26 +1,21 @@
 # Route: data_audit
 
 Use this route to audit whether the project has well-defined, valid data inputs
-for causal framing, analysis planning, or execution. Do not produce a standalone
-user-facing answer; provide internal findings for `team_lead` to synthesize.
+for causal framing, analysis planning, or execution. This worker remains silent
+and submits internal findings for `team_lead` to synthesize.
 
 ## Plan Entry
 
-Read `next_step_plan` before route work.
+Read the validated state before route work. Proceed only at `worker_pending`
+when the committed plan's worker route is exactly `data_audit`.
 
-Expected entry:
-
-```yaml
-next_step_plan:
-  - id: data_audit
-```
-
-If no `next_step_plan` entry has `id: data_audit`, do not proceed with data
-audit work.
-
-Use the current user message, live state, and any inspectable files as the
-assignment. Do not update `next_step_plan` or `project_summary`; `team_lead`
-handles aggregate cleanup after synthesis.
+Use `state_meta.active_operation.intent_summary`, live state, inspectable files,
+and any consistent detail still available from the operation-opening message as
+the assignment. On resume, a new message does not change it. Submit one
+`statectl apply` JSON payload with `actor: data_audit`, `updates` containing only
+`data_facts` and `council_chamber.data_audit`, and optional top-level
+`artifact`. The controller owns timestamps, artifact records, and transition to
+`lead_pending`; never edit the YAML, plan, or project summary directly.
 
 ## Causal Data Audit Scope
 
@@ -48,12 +43,11 @@ support diagnostics, profiling output, or reshape notes in audit artifacts.
 
 ## Data Facts Updates
 
-Write durable data context only to `data_facts`. Keep it compact and
+Submit durable data context only under `updates.data_facts`. Keep it compact and
 causal-analysis oriented; it is live decision memory, not a data dictionary.
 
-Update supported fields:
+Supported fields:
 
-- `last_updated`: local update time in `HH:MM:SS` format.
 - `data_checked`: `passing`, `limited`, `imagined`, or `blocked`; leave
   `not_checked` only if no data audit work occurred.
 - `data_sources`: data files, tables, or user-provided descriptions reviewed.
@@ -79,11 +73,10 @@ leakage, missingness, support, or unavailable files prevent valid execution.
 
 ## Council Chamber Updates
 
-Refresh only `council_chamber.data_audit`.
+Submit chamber feedback only under `updates.council_chamber.data_audit`.
 
 Set:
 
-- `last_updated`: local update time in `HH:MM:SS` format.
 - `current_status`: one short sentence on what the audit could verify.
 - `summary`: compact synthesis of data support, blockers, or usable facts.
 - `questions_for_user`: 0-3 questions or choices that would improve the next
@@ -110,20 +103,13 @@ generated audit reports. `data_facts` should hold only compact interpretation
 and artifact references.
 
 When any script, notebook, table, figure, or exploratory audit output is
-created:
+created, follow `references/artifact_output_policy.md`: reserve first, write and
+validate temporary output, atomically publish it with its completion manifest,
+then include the completed artifact and compact `data_facts` references in
+`statectl apply`.
 
-1. Save the output under one meaningful project subfolder directly under
-   `output/`, such as `output/data_audit_readiness` or
-   `output/missingness_overlap_audit`.
-2. Record a compact run item in `data_facts.exploratory_runs` with the run time,
-   work scope, input sources, diagnostics performed, result summary, and output
-   paths.
-3. Record output paths in `data_facts.artifact_refs`.
-4. Append one `artifact_records` entry with `route: data_audit`, `location`,
-   `created_at`, and a short summary.
-
-Do not create `artifact_records` entries for verbal audits that did not create a
-new output location.
+Do not reserve or submit an artifact for an audit that created no durable
+output.
 
 ## Boundaries
 

@@ -7,6 +7,8 @@ and close out report state.
 
 ## Report Handoff Review
 
+Use the decision gate in `team_lead.md` for any question or options below.
+
 When `next_step_plan` contains a `report_writer` entry, review:
 
 - `report_assembly.planned_structure`
@@ -14,40 +16,45 @@ When `next_step_plan` contains a `report_writer` entry, review:
 - `report_assembly.draft_notes`
 - `report_assembly.wording_constraints`
 - `report_assembly.current_format`
+- `report_assembly.scope_id`
+- `report_assembly.scope_revision`
 - `council_chamber.report_writer.current_status`
 - `council_chamber.report_writer.summary`
 - `council_chamber.report_writer.questions_for_user`
 - `council_chamber.report_writer.feedback_to_route`
-- the newest `report_writer` `artifact_records` created this turn, especially
-  its summary
+- the `report_writer` artifact record whose `operation_id` matches the active
+  operation, especially its summary
 
 If results-focused drafting is requested before
 `project_summary.analysis_output: exist`, explain that only a planning report or
-bounded claim-boundary wording is available until analysis output exists, and ask
-which purpose, audience, or claim boundary should shape that scope.
+bounded claim-boundary wording is available until analysis output exists. If
+the purpose, audience, or claim boundary is unclear, ask which should shape the
+scope.
 
 If `current_status: requested`, the route did not complete its report handoff;
 explain the boundary under the normal headings using only visible state.
 
-If `current_status: ready`, no report output should have been created.
+If `current_status: ready`, no report output should have been created for this
+operation.
 Summarize the proposed report scope and envisioned structure compactly inside
 the normal user-facing headings, using `questions_for_user` for the approval,
 scope, audience, purpose, claim-strength, artifact-emphasis, omission, or
 disclosure choice that matters before output creation.
 
-If `current_status: done`, review the newest report-writer artifact record and
-`council_chamber.report_writer.summary`, then classify the closeout as report
-output, revised report, derivative communication artifact, or blocked/partial
-report handoff. Summarize that inside the normal headings. For derivative
-communication artifacts, say it is based on existing evidence and did not create
-new analysis. Trust `report_writer` to distinguish refinements that were safe to
-incorporate from material redesigns that needed another scope handoff.
+If `current_status: done`, review the operation-matched report-writer artifact
+record and `council_chamber.report_writer.summary`. If the artifact is absent or
+unavailable, treat this as a missing handoff and do not claim report output.
+Otherwise classify it as report output, revised report, or a derivative
+communication artifact and summarize it inside the normal headings. For
+derivative communication artifacts, say it is based on existing evidence and
+did not create new analysis. Trust `report_writer` to distinguish refinements
+that were safe to incorporate from material redesigns that needed another scope
+handoff.
 
 If `current_status: blocked`, explain the blocker under the normal headings and
 ask for the smallest useful clarification, scope revision, missing asset, or
 fallback choice.
 
-After `team_lead` finishes a turn, clear the completed current-turn
-`next_step_plan`. Ready report scope remains available through
-`report_assembly` and `council_chamber.report_writer`, not by preserving a plan
-entry.
+Ready report scope remains available through `report_assembly.scope_id` and
+`report_assembly.scope_revision`; `statectl finish` clears the completed plan
+and operation.

@@ -1,3 +1,11 @@
+state_meta:
+  schema_version: 2
+  project_id: null
+  revision: 0
+  created_at: null
+  updated_at: null
+  active_operation: null
+
 project_summary:
   title: null
   objective: null
@@ -13,8 +21,6 @@ project_summary:
   exploration_summary: null
 
   analysis_output: non_exist
-
-  discovery_sidecar_output: non_exist
 
   report_output: non_exist
 
@@ -112,6 +118,8 @@ discovery_sidecar:
 
 report_assembly:
   last_updated: null
+  scope_id: null
+  scope_revision: 0
   current_format: null
   report_goal: null
   audience: null

@@ -1,0 +1,20 @@
+{
+  "name": "causal-consultant-skill",
+  "version": "5.0.0",
+  "private": true,
+  "description": "Build and test tooling for the causal-consultant skill runtime.",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "node scripts/build-runtime.cjs",
+    "check:bundle": "node scripts/build-runtime.cjs --check",
+    "test": "node --test tests/statectl.test.cjs",
+    "validate": "node scripts/validate-package.cjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1",
+    "yaml": "2.9.0"
+  }
+}

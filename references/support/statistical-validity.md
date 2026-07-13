@@ -1,13 +1,15 @@
 # Support: statistical-validity
 
-Context only. Relevant when the selected design needs additional information about statistical credibility: balance, support, weighting, sensitivity, falsification, uncertainty, nuisance models, AIPW, TMLE, one-step estimators, double/debiased machine learning, orthogonal scores, cross-fitting, or high-dimensional adjustment. The selected design route owns execution, YAML updates, diagnostics, and artifact records.
+Context only. Relevant when the selected design needs additional information about statistical credibility: balance, support, weighting, sensitivity, falsification, uncertainty, nuisance models, AIPW, TMLE, one-step estimators, double/debiased machine learning, orthogonal scores, cross-fitting, or high-dimensional adjustment. The selected design route owns execution, diagnostics, and the controller submission.
 
 ## Additional Information
 
 - Useful after the design, estimand, timing, target population, and comparison are mostly settled.
 - Helps the design notes explain whether implementation looks passing, limited, descriptive-only, or blocked.
 - Covers statistical validity inside the design: support/positivity, balance, robustness, sensitivity, nuisance roles, model stability, fold integrity, uncertainty, and benchmark comparisons.
-- Clarifies that stronger estimation machinery can improve implementation discipline under measured assumptions; it does not create causal identification.
+- Clarifies that stronger estimation machinery can improve implementation
+  discipline under measured assumptions; it does not replace the selected
+  identification design.
 - Useful lanes include measured-covariate balance, matching/weighting, negative-control falsification, empirical calibration, proximal identification, AIPW, TMLE, one-step estimators, longitudinal/sequential DR, DML, orthogonal forests, and post-double-selection.
 
 ## Non-Obvious Twists
@@ -23,6 +25,10 @@ Context only. Relevant when the selected design needs additional information abo
 - Influence-curve tails, probability truncation, rare events, and fold instability can dominate inference even when point estimates look reasonable.
 - Negative controls need a credible null or shared-bias story. A failed negative control is not automatically a calibrated correction.
 - Negative-control work should distinguish falsification, empirical calibration, bias adjustment, and proximal identification.
+- Proximal identification is not routine robustness. Use it only after
+  `causal_check` accepts the treatment/outcome proxy roles, bridge assumptions,
+  and completeness conditions; otherwise keep negative controls in a
+  falsification or sensitivity role.
 - DR/TMLE work should distinguish AIPW, TMLE, one-step, censoring/missingness/sampling-aware DR, and longitudinal/sequential DR.
 - DML work should distinguish PLR, IRM, PLIV/IIVM, R-/DR-learners, orthogonal forests, sparse/post-double-selection, and nuisance-only plugins.
 - Flexible learners should be benchmarked against simpler adjusted, weighted, AIPW/TMLE, post-lasso, or design-specific estimators.
@@ -74,7 +80,8 @@ Select the diagnostics that answer the active design question; do not run every 
 
 ## Other Considerations
 
-- Recommend this support as a companion to most analysis plans, but keep the actual checks tied to the selected design.
+- Use this support only when unresolved validity concerns exceed the selected
+  design's required diagnostics, and keep its checks tied to that design.
 - Consider `heterogeneous-effects` if statistical validity issues are subgroup-specific or if DR scores, causal forests, R-/DR-learners, or orthogonal forests are used for CATE/GATE.
 - Consider `dose-response` if sparse exposure tails, unstable thresholds, continuous-treatment DML, shift estimators, or dose-support problems drive the concern.
 - Consider `non-continuous-outcomes` if rare events, censoring, competing risks, count overdispersion, category sparsity, or outcome-scale sensitivity drive the concern.

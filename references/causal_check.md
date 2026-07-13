@@ -1,27 +1,21 @@
 # Route: causal_check
 
 Use this route to audit whether the causal question, design, method route, or
-conclusion is supported by the current project state. Do not produce a
-standalone user-facing answer; provide internal findings for `team_lead` to
-synthesize.
+conclusion is supported by the current project state. This worker remains silent
+and submits internal findings for `team_lead` to synthesize.
 
 ## Plan Entry
 
-Read `next_step_plan` before route work.
+Read the validated state before route work. Proceed only at `worker_pending`
+when the committed plan's worker route is exactly `causal_check`.
 
-Expected entry:
-
-```yaml
-next_step_plan:
-  - id: causal_check
-```
-
-If no `next_step_plan` entry has `id: causal_check`, do not proceed with causal
-check work.
-
-Use the current user message and live state as the assignment. Do not update
-`next_step_plan`, `project_summary`, or `artifact_records`; `team_lead` handles
-aggregate cleanup after synthesis.
+Use `state_meta.active_operation.intent_summary`, live state, and any consistent
+detail still available from the operation-opening message as the assignment. On
+resume, a new message does not change it. Submit one `statectl apply` JSON
+payload with `actor: causal_check` and `updates` containing only `causal_facts`
+and `council_chamber.causal_check`. The controller owns timestamps and
+transition to `lead_pending`; never edit the YAML, plan, project summary, or
+artifact records directly.
 
 ## Causal Statistical Audit Scope
 
@@ -66,9 +60,14 @@ Use two readiness layers:
 
 Recommend at most one primary `design` route for the next analysis scope. Add
 one `support` route when it materially improves validity, diagnostics, or
-interpretation; use `statistical-validity` as the default support unless another
-support route is more immediately relevant. Do not recommend support-only
-execution.
+interpretation. Use `statistical-validity` only when unresolved concerns exceed
+the selected design's normal diagnostics. Do not recommend support-only
+execution or add support merely by default.
+
+If more than one design remains plausible, leave `recommended_method_routes`
+empty, keep `analysis_readiness: not_ready`, and record the smallest fact or
+decision that would distinguish them. Do not recommend another `causal_check`
+turn without naming that missing discriminator.
 
 Presence in `recommended_method_routes` means the route is worth scope review,
 not that it is already approved or sufficient. Use `route_cautions` for
@@ -99,10 +98,8 @@ leave the list empty and explain the maturity issue in `support_status`,
 
 ## Causal Facts Updates
 
-Update `project_state.yaml` fields under `causal_facts` when supported by the
-request:
+Submit supported `causal_facts` fields when supported by the request:
 
-- `last_updated`: local update time in `HH:MM:SS` format.
 - `causal_checked`: `passing`, `limited`, or `blocked`; leave `not_checked`
   only if no causal check work occurred.
 - `analysis_readiness`: `ready`, `limited`, `not_ready`, or `blocked` when the
@@ -127,11 +124,10 @@ fallback is available.
 
 ## Council Chamber Updates
 
-Refresh only `council_chamber.causal_check`.
+Submit chamber feedback only under `updates.council_chamber.causal_check`.
 
 Set:
 
-- `last_updated`: local update time in `HH:MM:SS` format.
 - `current_status`: one short sentence on claim support or uncertainty.
 - `summary`: compact synthesis of claim support, analysis readiness, or main
   causal boundary.

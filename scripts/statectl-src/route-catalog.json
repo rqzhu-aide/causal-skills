@@ -1,0 +1,29 @@
+{
+  "core": [
+    "team_lead",
+    "data_audit",
+    "domain_expert",
+    "causal_discovery",
+    "causal_check",
+    "report_writer"
+  ],
+  "design": [
+    "randomized_assignment",
+    "single_time_observational",
+    "longitudinal_gmethods",
+    "difference_in_differences",
+    "regression_discontinuity",
+    "instrumental_variables",
+    "synthetic_control_time_series",
+    "interference_spillovers",
+    "descriptive_association"
+  ],
+  "support": [
+    "heterogeneous-effects",
+    "dose-response",
+    "mediation",
+    "policy-making-and-transportability",
+    "non-continuous-outcomes",
+    "statistical-validity"
+  ]
+}

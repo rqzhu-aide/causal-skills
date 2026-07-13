@@ -1,26 +1,22 @@
 # Route: domain_expert
 
 Use this route to build durable domain knowledge and surface domain-driven
-feedback. Do not produce a standalone user-facing answer; provide internal
-findings for `team_lead` to synthesize.
+feedback. This worker remains silent and submits internal findings for
+`team_lead` to synthesize.
 
 ## Plan Entry
 
-Read `next_step_plan` before route work.
+Read the validated state before route work. Proceed only at `worker_pending`
+when the committed plan's worker route is exactly `domain_expert`.
 
-Expected entry:
-
-```yaml
-next_step_plan:
-  - id: domain_expert
-```
-
-If no `next_step_plan` entry has `id: domain_expert`, do not proceed with domain
-expert work.
-
-Use the current user message, live state, and any provided domain materials as
-the assignment. Do not update `next_step_plan`, `project_summary`, or
-`artifact_records`; `team_lead` handles aggregate cleanup after synthesis.
+Use `state_meta.active_operation.intent_summary`, live state, provided domain
+materials, and any consistent detail still available from the operation-opening
+message as the assignment. On resume, a new message does not change it. Submit
+one `statectl apply` JSON payload with `actor: domain_expert` and `updates`
+containing only `domain_knowledge` and
+`council_chamber.domain_expert`. The controller owns timestamps and transition
+to `lead_pending`; never edit the YAML, plan, project summary, or artifact
+records directly.
 
 ## Domain Reasoning Scope
 
@@ -41,13 +37,12 @@ user-provided materials. Do not infer data availability from domain knowledge.
 
 ## Domain Knowledge Updates
 
-Write durable background context only to `domain_knowledge`. Keep it compact,
-factual, and reusable; it should read like working domain memory, not a
+Submit durable background context only under `updates.domain_knowledge`. Keep
+it compact, factual, and reusable; it should read like working domain memory, not a
 literature review or recommendation memo.
 
-Update supported fields:
+Supported fields:
 
-- `last_updated`: local update time in `HH:MM:SS` format.
 - `domain_checked`: `passing`, `limited`, or `blocked`; leave `not_checked`
   only if no domain work occurred.
 - `domain_scope`: compact domain question, setting, population,
@@ -71,11 +66,10 @@ domain interpretation.
 
 ## Council Chamber Updates
 
-Refresh only `council_chamber.domain_expert`.
+Submit chamber feedback only under `updates.council_chamber.domain_expert`.
 
 Set:
 
-- `last_updated`: local update time in `HH:MM:SS` format.
 - `current_status`: one short sentence on what domain review could determine.
 - `summary`: compact synthesis of domain meaning, practice, or uncertainty.
 - `questions_for_user`: 0-3 questions or choices that would improve the next
@@ -103,8 +97,8 @@ measurement meaning, or report wording. Keep each source note one sentence.
 
 When a targeted source check is performed:
 
-1. Record a compact item in `domain_knowledge.practice_searches` with the run
-   time, search or source scope, source status, summary, and limitations.
+1. Record a compact item in `domain_knowledge.practice_searches` with the search
+   or source scope, source status, summary, and limitations.
 2. Record only targeted inspected or user-provided sources in
    `domain_knowledge.references`.
 3. Update `domain_knowledge.domain_practice`, `source_limitations`, and relevant

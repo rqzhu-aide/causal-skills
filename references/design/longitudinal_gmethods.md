@@ -94,27 +94,18 @@ Key literature anchors: Robins g-methods, marginal structural models, sequential
 
 ## Connections With Supports
 
-- Recommend `statistical-validity` for weight tails, positivity over histories, censoring/missingness nuisance roles, cross-fitting, sensitivity, and reproducibility.
+- Use `statistical-validity` only when unresolved weight, history-positivity,
+  censoring, cross-fitting, or reproducibility concerns exceed the longitudinal
+  diagnostics above.
 - Use `dose-response` for cumulative dose, duration, intensity, shifting dose, exposure windows, or modified treatment policies.
 - Use `policy-making-and-transportability` for dynamic regimes, learned policies, sequential decisions, value functions, or deployment.
 - Use `non-continuous-outcomes` for survival, recurrent events, competing risks, censoring-sensitive outcomes, binary risk, or count outcomes.
 - Use `heterogeneous-effects` when strategy effects may differ by baseline history, risk, site, cohort, or time.
 - Use `mediation` only when mediator/confounder ordering is explicit and the pathway target can be written sequentially.
 
-## Artifact Records Write
+## Execution Record
 
-In approved execution, append one compact `artifact_records` entry according to `references/design_execution_contract.md`. Include longitudinal-design specifics in the entry summary or in a note/manifest inside the output location, such as:
-
-- `design_id: longitudinal_gmethods`
-- `fit_status`: `direct`, `adapted`, `planning_only`, `blocked`, or `limited`
-- `data_contract`: time grid, histories, strategy, censoring, eligibility, outcome timing, and inspected-vs-described status
-- `analysis_plan`: long-format data shape, strategy estimand, estimator lane, and diagnostic sequence
-- `estimand_cues`: sustained strategy, dynamic regime, cumulative exposure, LMTP, stochastic shift, censoring-adjusted mean/risk, or descriptive fallback
-- `twists`: data-shape, estimand, diagnostic, implementation, or fallback twists that would make the route honest
-- `diagnostics_needed` and `diagnostics_reviewed`
-- `boundaries`: invalidating traps, sequential assumptions, positivity/censoring limits, and support cautions
-- `packages`: package lanes only if relevant to the next decision
-- `blocker_reason`: why the longitudinal design did not work, if status is `blocked`
-- `recommended_next_step`: one smallest useful data check, diagnostic, support clarification for `causal_check`, report asset, planning memo, or stop/refusal path
-
-Do not update `project_summary` or `next_step_plan`; `team_lead` updates aggregate workflow fields after the route finishes.
+Follow the shared summary and exact-manifest rules in
+`references/design_execution_contract.md`. Emphasize the time grid, treatment
+history and strategy, sequential estimand, positivity/censoring diagnostics,
+and the sequential-assumption boundary.

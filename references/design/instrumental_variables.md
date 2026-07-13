@@ -89,35 +89,30 @@ Choose the estimator lane before choosing software. Package lanes are reference 
 - Fixed effects and clustered IV: R `fixest`; Python `linearmodels`; supplement weak-IV diagnostics.
 - Weak-IV inference: R `ivmodel`, `ivDiag`; Python `ivmodels`; Stata `ivreg2`, `weakiv`, `weakivtest`.
 - High-dimensional IV: R/Python `DoubleML` PLIV/IIVM; Python `EconML` DMLIV, OrthoIV, DRIV; use only with clear IV score and assumptions.
-- Fuzzy RD: RD packages plus local IV/Wald logic; connect to `regression_discontinuity`.
+- Fuzzy RD: RD packages plus local IV/Wald logic; return to `causal_check` for
+  `regression_discontinuity` when the cutoff design is primary.
 - Mendelian randomization: R `TwoSampleMR`, `MendelianRandomization`, `MRPRESSO`, `MVMR`, `CAUSE`, `coloc`; use sensitivity methods as probes, not automatic validation.
 
 Key literature anchors: LATE/CACE, Wald estimands, 2SLS, weak instruments, monotonicity, exclusion restriction, encouragement designs, fuzzy RD, PLIV/IIVM, and Mendelian randomization assumptions including pleiotropy and population stratification.
 
-## Connections With Supports
+## Support And Rerouting Connections
 
-- Recommend `statistical-validity` for first-stage diagnostics, weak-IV inference, IV-DML, fold integrity, sensitivity, MR robustness, and reproducibility.
-- Use `regression_discontinuity` logic when the instrument is a cutoff in a fuzzy RD; this route owns the IV/complier interpretation.
+- Use `statistical-validity` only when unresolved weak-IV inference, fold
+  integrity, sensitivity, MR robustness, or reproducibility concerns exceed the
+  IV diagnostics above.
+- When the candidate instrument is a cutoff, return to `causal_check` for
+  `regression_discontinuity` unless the instrument rather than the cutoff is the
+  primary identification frame.
 - Use `heterogeneous-effects` when IV evidence is about complier heterogeneity, local effect variation, or heterogeneous IV/DRIV.
 - Use `dose-response` when the instrument shifts exposure intensity, dose, duration, or continuous exposure.
 - Use `non-continuous-outcomes` for binary, survival, competing-risk, count, or recurrent-event outcomes where IV scale matters.
 - Use `policy-making-and-transportability` when local/complier evidence is being used for broader policy or target-population decisions.
-- Use `interference_spillovers` when instruments or encouragements may affect peers, providers, markets, or geography.
+- Return to `causal_check` for `interference_spillovers` when peer or market
+  exposure becomes the primary estimand; otherwise retain it as an IV threat.
 
-## Artifact Records Write
+## Execution Record
 
-In approved execution, append one compact `artifact_records` entry according to `references/design_execution_contract.md`. Include IV specifics in the entry summary or in a note/manifest inside the output location, such as:
-
-- `design_id: instrumental_variables`
-- `fit_status`: `direct`, `adapted`, `planning_only`, `blocked`, or `limited`
-- `data_contract`: instrument, treatment/exposure, outcome, covariates, first stage, assumptions, MR harmonization if relevant, and inspected-vs-described status
-- `analysis_plan`: IV estimand, estimator lane, and diagnostic sequence
-- `estimand_cues`: ITT/reduced form, Wald ratio, LATE/CACE, fuzzy-RD local effect, PLIV/IIVM, MR, or diagnostic fallback
-- `twists`: data-shape, estimand, diagnostic, implementation, or fallback twists that would make the route honest
-- `diagnostics_needed` and `diagnostics_reviewed`
-- `boundaries`: invalidating traps, weak-IV limits, local claim limits, exclusion/monotonicity/MR cautions
-- `packages`: package lanes only if relevant to the next decision
-- `blocker_reason`: why the IV design did not work, if status is `blocked`
-- `recommended_next_step`: one smallest useful data check, diagnostic, support clarification for `causal_check`, report asset, planning memo, or stop/refusal path
-
-Do not update `project_summary` or `next_step_plan`; `team_lead` updates aggregate workflow fields after the route finishes.
+Follow the shared summary and exact-manifest rules in
+`references/design_execution_contract.md`. Emphasize the instrument source,
+treatment moved and IV estimand, first-stage and weak-IV diagnostics, exclusion
+and local-effect assumptions, and the resulting claim boundary.

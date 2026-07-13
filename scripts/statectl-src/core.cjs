@@ -1,0 +1,1774 @@
+"use strict";
+
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
+const { isDeepStrictEqual } = require("node:util");
+const YAML = require("yaml");
+const ROUTES = require("./route-catalog.json");
+
+const SCHEMA_VERSION = 2;
+const MANIFEST_VERSION = 1;
+const STATE_FILE = "project_state.yaml";
+const ARCHIVE_DIR = "project_state.archives";
+const MAX_INTENT_LENGTH = 1000;
+const MAX_ARTIFACT_SLUG_LENGTH = 80;
+const DERIVED_SUMMARY_FIELDS = [
+  "data_audit_complete",
+  "domain_knowledge_complete",
+  "causal_check_complete",
+  "exploration_complete",
+  "analysis_output",
+  "report_output",
+];
+
+const REQUIRED_TOP_LEVEL = [
+  "state_meta",
+  "project_summary",
+  "council_chamber",
+  "next_step_plan",
+  "data_facts",
+  "domain_knowledge",
+  "causal_facts",
+  "discovery_sidecar",
+  "report_assembly",
+  "artifact_records",
+];
+
+const LEGACY_TOP_LEVEL = REQUIRED_TOP_LEVEL.filter((key) => key !== "state_meta");
+const CORE_WORKERS = new Set(ROUTES.core.filter((id) => id !== "team_lead"));
+const DESIGN_IDS = new Set(ROUTES.design);
+const SUPPORT_IDS = new Set(ROUTES.support);
+const ARTIFACT_ACTORS = new Set([
+  "data_audit",
+  "causal_discovery",
+  "report_writer",
+]);
+
+const SECTION_KEYS = {
+  project_summary: new Set([
+    "title",
+    "objective",
+    "materials",
+    "last_updated",
+    "phase",
+    "data_audit_complete",
+    "domain_knowledge_complete",
+    "causal_check_complete",
+    "exploration_complete",
+    "exploration_summary",
+    "analysis_output",
+    "report_output",
+  ]),
+  data_facts: new Set([
+    "last_updated",
+    "data_checked",
+    "data_sources",
+    "audit_scope",
+    "unit_of_observation",
+    "variables",
+    "structure_notes",
+    "timing_notes",
+    "dependency_notes",
+    "leakage_risks",
+    "missingness_notes",
+    "support_notes",
+    "validity_questions",
+    "exploratory_runs",
+    "artifact_refs",
+  ]),
+  domain_knowledge: new Set([
+    "last_updated",
+    "domain_checked",
+    "domain_scope",
+    "user_provided",
+    "data_facts",
+    "construct_notes",
+    "measurement_notes",
+    "population_setting_notes",
+    "domain_practice",
+    "source_limitations",
+    "practice_searches",
+    "references",
+  ]),
+  causal_facts: new Set([
+    "last_updated",
+    "causal_checked",
+    "analysis_readiness",
+    "causal_question",
+    "exposure_or_intervention",
+    "outcome",
+    "estimand",
+    "assumptions",
+    "threats",
+    "support_status",
+    "recommended_checks",
+    "recommended_method_routes",
+  ]),
+  discovery_sidecar: new Set([
+    "last_updated",
+    "status",
+    "goal",
+    "scope",
+    "method_summary",
+    "findings",
+    "diagnostics",
+    "limitations",
+    "artifact_refs",
+    "reviewer_requests",
+  ]),
+  report_assembly: new Set([
+    "last_updated",
+    "scope_id",
+    "scope_revision",
+    "current_format",
+    "report_goal",
+    "audience",
+    "target_section",
+    "planned_structure",
+    "key_points",
+    "wording_constraints",
+    "draft_notes",
+  ]),
+};
+
+const CHAMBER_KEYS = new Set([
+  "last_updated",
+  "current_status",
+  "summary",
+  "questions_for_user",
+  "feedback_to_route",
+]);
+const ANALYSIS_CHAMBER_KEYS = new Set([
+  ...CHAMBER_KEYS,
+  "scope_id",
+  "scope_revision",
+  "support",
+]);
+
+class StateError extends Error {
+  constructor(code, message, details = undefined) {
+    super(message);
+    this.name = "StateError";
+    this.code = code;
+    this.details = details;
+  }
+}
+
+function fail(code, message, details) {
+  throw new StateError(code, message, details);
+}
+
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function assertObject(value, label, code = "INVALID_STATE") {
+  if (!isObject(value)) fail(code, `${label} must be a mapping`);
+}
+
+function assertArray(value, label, code = "INVALID_STATE") {
+  if (!Array.isArray(value)) fail(code, `${label} must be a list`);
+}
+
+function assertStringOrNull(value, label) {
+  if (value !== null && typeof value !== "string") {
+    fail("INVALID_STATE", `${label} must be a string or null`);
+  }
+}
+
+function assertStringArray(value, label) {
+  assertArray(value, label);
+  if (value.some((item) => typeof item !== "string")) {
+    fail("INVALID_STATE", `${label} must contain only strings`);
+  }
+}
+
+function assertStringArrayFields(section, fields, label) {
+  for (const field of fields) assertStringArray(section[field], `${label}.${field}`);
+}
+
+function assertStringOrNullFields(section, fields, label) {
+  for (const field of fields) assertStringOrNull(section[field], `${label}.${field}`);
+}
+
+function assertEnum(value, allowed, label, code = "INVALID_STATE") {
+  if (!allowed.includes(value)) {
+    fail(code, `${label} must be one of: ${allowed.map(String).join(", ")}`);
+  }
+}
+
+function assertKnownKeys(value, allowed, label, code = "INVALID_STATE") {
+  if (!isObject(value)) fail(code, `${label} must be a mapping`);
+  const unknown = Object.keys(value).filter((key) => !allowed.has(key));
+  if (unknown.length) {
+    fail(code, `${label} contains unsupported fields: ${unknown.join(", ")}`);
+  }
+}
+
+function assertExactTopLevel(state, expected = REQUIRED_TOP_LEVEL) {
+  assertObject(state, "project state");
+  const missing = expected.filter((key) => !(key in state));
+  if (missing.length) fail("INVALID_STATE", `missing top-level sections: ${missing.join(", ")}`);
+  const extra = Object.keys(state).filter((key) => !expected.includes(key));
+  if (extra.length) fail("INVALID_STATE", `unsupported top-level sections: ${extra.join(", ")}`);
+}
+
+function isUuid(value) {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function isTimestamp(value) {
+  if (typeof value !== "string") return false;
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value) && !Number.isNaN(Date.parse(value));
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function normalizePath(value) {
+  return String(value).replace(/\\/g, "/");
+}
+
+function parseYaml(text, label = STATE_FILE) {
+  let document;
+  try {
+    document = YAML.parseDocument(text, {
+      schema: "core",
+      uniqueKeys: true,
+      maxAliasCount: 50,
+      prettyErrors: true,
+    });
+  } catch (error) {
+    fail("INVALID_YAML", `${label} could not be parsed: ${error.message}`);
+  }
+  if (document.errors.length) {
+    fail("INVALID_YAML", `${label} could not be parsed: ${document.errors.map((error) => error.message).join("; ")}`);
+  }
+  try {
+    return document.toJS({ maxAliasCount: 50 });
+  } catch (error) {
+    fail("INVALID_YAML", `${label} could not be converted safely: ${error.message}`);
+  }
+}
+
+function stringifyYaml(value) {
+  return YAML.stringify(value, {
+    lineWidth: 0,
+    defaultKeyType: "PLAIN",
+    defaultStringType: "QUOTE_DOUBLE",
+  });
+}
+
+function readBytes(filePath) {
+  try {
+    return fs.readFileSync(filePath);
+  } catch (error) {
+    fail("IO_ERROR", `could not read ${filePath}: ${error.message}`);
+  }
+}
+
+function readText(filePath) {
+  return readBytes(filePath).toString("utf8");
+}
+
+function atomicWrite(filePath, text) {
+  const directory = path.dirname(filePath);
+  fs.mkdirSync(directory, { recursive: true });
+  const tempPath = path.join(directory, `.${path.basename(filePath)}.tmp-${process.pid}-${crypto.randomUUID()}`);
+  let handle;
+  try {
+    handle = fs.openSync(tempPath, "wx", 0o600);
+    fs.writeFileSync(handle, text, "utf8");
+    fs.fsyncSync(handle);
+    fs.closeSync(handle);
+    handle = undefined;
+    if (process.env.STATECTL_FAIL_BEFORE_RENAME === "1") {
+      fail("INJECTED_WRITE_FAILURE", "injected failure before atomic replacement");
+    }
+    fs.renameSync(tempPath, filePath);
+  } catch (error) {
+    if (handle !== undefined) {
+      try { fs.closeSync(handle); } catch (_closeError) { /* best effort */ }
+    }
+    try { fs.rmSync(tempPath, { force: true }); } catch (_removeError) { /* best effort */ }
+    if (error instanceof StateError) throw error;
+    fail("IO_ERROR", `could not atomically write ${filePath}: ${error.message}`);
+  }
+}
+
+function archiveBytes(projectRoot, bytes, reason) {
+  const directory = path.join(projectRoot, ARCHIVE_DIR);
+  fs.mkdirSync(directory, { recursive: true });
+  const stamp = nowIso().replace(/[-:.]/g, "");
+  const archivePath = path.join(directory, `${stamp}-${reason}-${crypto.randomUUID().slice(0, 8)}.yaml`);
+  let handle;
+  try {
+    handle = fs.openSync(archivePath, "wx", 0o600);
+    fs.writeFileSync(handle, bytes);
+    fs.fsyncSync(handle);
+    fs.closeSync(handle);
+    return archivePath;
+  } catch (error) {
+    if (handle !== undefined) {
+      try { fs.closeSync(handle); } catch (_closeError) { /* best effort */ }
+    }
+    try { fs.rmSync(archivePath, { force: true }); } catch (_removeError) { /* best effort */ }
+    fail("IO_ERROR", `could not archive existing project state: ${error.message}`);
+  }
+}
+
+function clone(value) {
+  return structuredClone(value);
+}
+
+function deepMerge(target, patch) {
+  if (!isObject(patch)) return clone(patch);
+  const output = isObject(target) ? clone(target) : {};
+  for (const [key, value] of Object.entries(patch)) {
+    output[key] = isObject(value) ? deepMerge(output[key], value) : clone(value);
+  }
+  return output;
+}
+
+function deepEqual(left, right) {
+  return isDeepStrictEqual(left, right);
+}
+
+function validatePlan(plan) {
+  assertArray(plan, "next_step_plan");
+  if (plan.length === 0) return { kind: "idle", actor: null, design: null, support: null };
+  if (plan.length === 1) {
+    assertKnownKeys(plan[0], new Set(["id"]), "next_step_plan[0]");
+    if (plan[0].id !== "team_lead") fail("PLAN_MISMATCH", "a one-entry plan must contain only team_lead");
+    return { kind: "lead", actor: "team_lead", design: null, support: null };
+  }
+  if (plan.length !== 2) fail("PLAN_MISMATCH", "a nonempty plan must contain one or two entries");
+  assertObject(plan[0], "next_step_plan[0]");
+  assertKnownKeys(plan[1], new Set(["id"]), "next_step_plan[1]");
+  if (plan[1].id !== "team_lead") fail("PLAN_MISMATCH", "team_lead must be the final plan entry");
+  const route = plan[0].id;
+  if (CORE_WORKERS.has(route)) {
+    assertKnownKeys(plan[0], new Set(["id"]), "next_step_plan[0]");
+    return { kind: "worker", actor: route, design: null, support: null };
+  }
+  if (typeof route === "string" && route.startsWith("analysis_execution.")) {
+    assertKnownKeys(plan[0], new Set(["id", "support"]), "next_step_plan[0]");
+    const design = route.slice("analysis_execution.".length);
+    if (!DESIGN_IDS.has(design)) fail("PLAN_MISMATCH", `unknown analysis design route: ${design}`);
+    const support = plan[0].support ?? null;
+    if (support !== null && !SUPPORT_IDS.has(support)) fail("PLAN_MISMATCH", `unknown analysis support route: ${support}`);
+    return { kind: "worker", actor: route, design, support };
+  }
+  fail("PLAN_MISMATCH", `unknown planned route: ${route}`);
+}
+
+function validateScopeRef(value, label = "scope_ref", code = "INVALID_STATE") {
+  if (value === null) return;
+  assertKnownKeys(value, new Set(["kind", "id", "revision"]), label, code);
+  assertEnum(value.kind, ["analysis", "report"], `${label}.kind`, code);
+  if (!isUuid(value.id)) fail(code, `${label}.id must be a UUID`);
+  if (!Number.isInteger(value.revision) || value.revision < 1) {
+    fail(code, `${label}.revision must be a positive integer`);
+  }
+}
+
+function validateActiveOperation(meta, planInfo) {
+  const operation = meta.active_operation;
+  if (operation === null) {
+    if (planInfo.kind !== "idle") fail("PLAN_MISMATCH", "a nonempty plan requires state_meta.active_operation");
+    return;
+  }
+  assertKnownKeys(operation, new Set([
+    "id",
+    "stage",
+    "intent_summary",
+    "scope_ref",
+    "artifact_intent",
+    "started_at",
+  ]), "state_meta.active_operation");
+  if (!isUuid(operation.id)) fail("INVALID_STATE", "active_operation.id must be a UUID");
+  assertEnum(operation.stage, ["worker_pending", "lead_pending"], "active_operation.stage");
+  if (typeof operation.intent_summary !== "string" || !operation.intent_summary.trim() || operation.intent_summary.length > MAX_INTENT_LENGTH) {
+    fail("INVALID_STATE", `active_operation.intent_summary must contain 1-${MAX_INTENT_LENGTH} characters`);
+  }
+  validateScopeRef(operation.scope_ref);
+  if (!isTimestamp(operation.started_at)) fail("INVALID_STATE", "active_operation.started_at must be an RFC3339 UTC timestamp");
+  if (operation.artifact_intent !== null) {
+    assertKnownKeys(operation.artifact_intent, new Set(["kind", "location"]), "active_operation.artifact_intent");
+    assertEnum(operation.artifact_intent.kind, ["file", "directory"], "active_operation.artifact_intent.kind");
+    if (typeof operation.artifact_intent.location !== "string" || !operation.artifact_intent.location.startsWith("output/")) {
+      fail("INVALID_STATE", "active_operation.artifact_intent.location must be under output/");
+    }
+  }
+  if (planInfo.kind === "idle") fail("PLAN_MISMATCH", "active_operation requires a nonempty plan");
+  if (planInfo.kind === "lead" && operation.stage !== "lead_pending") {
+    fail("PLAN_MISMATCH", "team-lead-only operations must be lead_pending");
+  }
+}
+
+function validateActiveScopeBinding(state, planInfo) {
+  const operation = state.state_meta.active_operation;
+  if (!operation || operation.scope_ref === null) return;
+  let scope;
+  let status;
+  if (planInfo.actor && planInfo.actor.startsWith("analysis_execution.")) {
+    if (operation.scope_ref.kind !== "analysis") fail("SCOPE_MISMATCH", "active analysis route has a non-analysis scope_ref");
+    const design = planInfo.actor.slice("analysis_execution.".length);
+    scope = state.council_chamber.analysis_execution[design];
+    status = scope && scope.current_status;
+    if (scope && scope.support !== planInfo.support) {
+      fail("SCOPE_MISMATCH", "active analysis scope support does not match the planned support route");
+    }
+  } else if (planInfo.actor === "report_writer") {
+    if (operation.scope_ref.kind !== "report") fail("SCOPE_MISMATCH", "active report route has a non-report scope_ref");
+    scope = state.report_assembly;
+    status = state.council_chamber.report_writer.current_status;
+  } else {
+    fail("SCOPE_MISMATCH", "active scope_ref is not valid for the planned route");
+  }
+  if (!scope || scope.scope_id !== operation.scope_ref.id || scope.scope_revision !== operation.scope_ref.revision) {
+    fail("SCOPE_MISMATCH", "active scope_ref does not match the planned route's live scope");
+  }
+  if (operation.stage === "worker_pending" && status !== "ready") {
+    fail("SCOPE_MISMATCH", "worker_pending approved scope must remain ready");
+  }
+  if (operation.stage === "lead_pending" && !["ready", "blocked", "done"].includes(status)) {
+    fail("SCOPE_MISMATCH", "lead_pending scope must have a completed worker handoff status");
+  }
+}
+
+function validateChamberSlot(slot, label, analysis = false, templateMode = false) {
+  const allowed = analysis ? ANALYSIS_CHAMBER_KEYS : CHAMBER_KEYS;
+  assertKnownKeys(slot, allowed, label);
+  assertStringOrNull(slot.last_updated, `${label}.last_updated`);
+  if (analysis) {
+    assertEnum(slot.current_status, [null, "requested", "ready", "blocked", "done"], `${label}.current_status`);
+    if (slot.support !== null && !SUPPORT_IDS.has(slot.support)) fail("INVALID_STATE", `${label}.support is not a valid support route`);
+    const hasIdentity = isUuid(slot.scope_id) && Number.isInteger(slot.scope_revision) && slot.scope_revision >= 1;
+    const emptyIdentity = slot.scope_id === null && slot.scope_revision === 0;
+    if (!hasIdentity && !emptyIdentity) fail("INVALID_STATE", `${label} has an invalid scope identity`);
+    if (!templateMode && slot.current_status !== null && slot.current_status !== "requested" && !hasIdentity) {
+      fail("INVALID_STATE", `${label} requires scope identity for status ${slot.current_status}`);
+    }
+  } else {
+    assertStringOrNull(slot.current_status, `${label}.current_status`);
+  }
+  assertStringOrNull(slot.summary, `${label}.summary`);
+  assertStringArray(slot.questions_for_user, `${label}.questions_for_user`);
+  assertStringArray(slot.feedback_to_route, `${label}.feedback_to_route`);
+}
+
+function validateArtifactRecord(record, index) {
+  const label = `artifact_records[${index}]`;
+  assertKnownKeys(record, new Set([
+    "artifact_id",
+    "operation_id",
+    "route",
+    "location",
+    "created_at",
+    "summary",
+    "design",
+    "support",
+  ]), label);
+  const required = ["artifact_id", "operation_id", "route", "location", "created_at", "summary"];
+  const missing = required.filter((key) => !(key in record));
+  if (missing.length) fail("INVALID_STATE", `${label} is missing: ${missing.join(", ")}`);
+  const legacy = typeof record.artifact_id === "string" && /^legacy-\d{4}$/.test(record.artifact_id);
+  if (!legacy && !isUuid(record.artifact_id)) fail("INVALID_STATE", `${label}.artifact_id must be a UUID or legacy id`);
+  if (legacy) {
+    if (record.operation_id !== null) fail("INVALID_STATE", `${label}.operation_id must be null for legacy records`);
+  } else if (!isUuid(record.operation_id)) {
+    fail("INVALID_STATE", `${label}.operation_id must be a UUID`);
+  }
+  assertEnum(record.route, ["data_audit", "causal_discovery", "analysis_execution", "report_writer"], `${label}.route`);
+  if (typeof record.location !== "string" || !normalizePath(record.location).startsWith("output/")) {
+    fail("INVALID_STATE", `${label}.location must be under output/`);
+  }
+  if (typeof record.created_at !== "string") fail("INVALID_STATE", `${label}.created_at must be a string`);
+  if (!legacy && !isTimestamp(record.created_at)) fail("INVALID_STATE", `${label}.created_at must be an RFC3339 UTC timestamp`);
+  if (typeof record.summary !== "string" || !record.summary.trim()) fail("INVALID_STATE", `${label}.summary must be nonempty`);
+  if (record.design !== undefined && !DESIGN_IDS.has(record.design)) fail("INVALID_STATE", `${label}.design is invalid`);
+  if (record.support !== undefined && record.support !== null && !SUPPORT_IDS.has(record.support)) fail("INVALID_STATE", `${label}.support is invalid`);
+  if (record.route === "analysis_execution") {
+    if (!DESIGN_IDS.has(record.design)) fail("INVALID_STATE", `${label}.design is required for analysis output`);
+    if (!("support" in record)) fail("INVALID_STATE", `${label}.support is required for analysis output`);
+  } else if (record.design !== undefined || record.support !== undefined) {
+    fail("INVALID_STATE", `${label} may use design/support only for analysis_execution`);
+  }
+}
+
+function validateState(state, options = {}) {
+  const { templateMode = false } = options;
+  assertExactTopLevel(state);
+
+  assertKnownKeys(state.state_meta, new Set([
+    "schema_version",
+    "project_id",
+    "revision",
+    "created_at",
+    "updated_at",
+    "active_operation",
+  ]), "state_meta");
+  if (state.state_meta.schema_version !== SCHEMA_VERSION) {
+    fail("UNSUPPORTED_SCHEMA", `unsupported schema version: ${state.state_meta.schema_version}`);
+  }
+  if (templateMode) {
+    if (state.state_meta.project_id !== null || state.state_meta.created_at !== null || state.state_meta.updated_at !== null) {
+      fail("INVALID_STATE", "the bundled template must leave runtime metadata null");
+    }
+  } else {
+    if (!isUuid(state.state_meta.project_id)) fail("INVALID_STATE", "state_meta.project_id must be a UUID");
+    if (!isTimestamp(state.state_meta.created_at) || !isTimestamp(state.state_meta.updated_at)) {
+      fail("INVALID_STATE", "state_meta timestamps must be RFC3339 UTC values");
+    }
+  }
+  if (!Number.isInteger(state.state_meta.revision) || state.state_meta.revision < 0) {
+    fail("INVALID_STATE", "state_meta.revision must be a nonnegative integer");
+  }
+
+  assertKnownKeys(state.project_summary, SECTION_KEYS.project_summary, "project_summary");
+  assertStringOrNull(state.project_summary.title, "project_summary.title");
+  assertStringOrNull(state.project_summary.objective, "project_summary.objective");
+  assertStringArray(state.project_summary.materials, "project_summary.materials");
+  assertStringOrNull(state.project_summary.last_updated, "project_summary.last_updated");
+  assertEnum(state.project_summary.phase, ["exploration", "analysis", "reporting"], "project_summary.phase");
+  for (const key of ["data_audit_complete", "domain_knowledge_complete", "causal_check_complete", "exploration_complete"]) {
+    if (typeof state.project_summary[key] !== "boolean") fail("INVALID_STATE", `project_summary.${key} must be boolean`);
+  }
+  assertStringOrNull(state.project_summary.exploration_summary, "project_summary.exploration_summary");
+  assertEnum(state.project_summary.analysis_output, ["exist", "non_exist"], "project_summary.analysis_output");
+  assertEnum(state.project_summary.report_output, ["exist", "non_exist"], "project_summary.report_output");
+
+  assertObject(state.council_chamber, "council_chamber");
+  const chamberKeys = new Set(["data_audit", "domain_expert", "causal_check", "causal_discovery", "analysis_execution", "report_writer"]);
+  assertKnownKeys(state.council_chamber, chamberKeys, "council_chamber");
+  for (const route of ["data_audit", "domain_expert", "causal_check", "causal_discovery", "report_writer"]) {
+    validateChamberSlot(state.council_chamber[route], `council_chamber.${route}`, false, templateMode);
+  }
+  assertObject(state.council_chamber.analysis_execution, "council_chamber.analysis_execution");
+  for (const [design, slot] of Object.entries(state.council_chamber.analysis_execution)) {
+    if (!DESIGN_IDS.has(design)) fail("INVALID_STATE", `unknown analysis chamber design: ${design}`);
+    validateChamberSlot(slot, `council_chamber.analysis_execution.${design}`, true, templateMode);
+  }
+
+  const planInfo = validatePlan(state.next_step_plan);
+  validateActiveOperation(state.state_meta, planInfo);
+
+  for (const section of ["data_facts", "domain_knowledge", "causal_facts", "discovery_sidecar", "report_assembly"]) {
+    assertKnownKeys(state[section], SECTION_KEYS[section], section);
+    assertStringOrNull(state[section].last_updated, `${section}.last_updated`);
+  }
+  assertEnum(state.data_facts.data_checked, ["not_checked", "passing", "limited", "imagined", "blocked"], "data_facts.data_checked");
+  assertStringOrNullFields(state.data_facts, ["audit_scope", "unit_of_observation"], "data_facts");
+  assertStringArrayFields(state.data_facts, [
+    "data_sources",
+    "variables",
+    "structure_notes",
+    "timing_notes",
+    "dependency_notes",
+    "leakage_risks",
+    "missingness_notes",
+    "support_notes",
+    "validity_questions",
+    "exploratory_runs",
+    "artifact_refs",
+  ], "data_facts");
+  assertEnum(state.domain_knowledge.domain_checked, ["not_checked", "passing", "limited", "blocked"], "domain_knowledge.domain_checked");
+  assertStringOrNullFields(state.domain_knowledge, ["domain_scope", "user_provided", "data_facts"], "domain_knowledge");
+  assertStringArrayFields(state.domain_knowledge, [
+    "construct_notes",
+    "measurement_notes",
+    "population_setting_notes",
+    "domain_practice",
+    "source_limitations",
+    "practice_searches",
+    "references",
+  ], "domain_knowledge");
+  assertEnum(state.causal_facts.causal_checked, ["not_checked", "passing", "limited", "blocked"], "causal_facts.causal_checked");
+  assertEnum(state.causal_facts.analysis_readiness, ["ready", "limited", "not_ready", "blocked"], "causal_facts.analysis_readiness");
+  assertStringOrNullFields(state.causal_facts, [
+    "causal_question",
+    "exposure_or_intervention",
+    "outcome",
+    "estimand",
+    "support_status",
+  ], "causal_facts");
+  assertStringArrayFields(state.causal_facts, ["assumptions", "threats", "recommended_checks"], "causal_facts");
+  assertArray(state.causal_facts.recommended_method_routes, "causal_facts.recommended_method_routes");
+  state.causal_facts.recommended_method_routes.forEach((route, index) => {
+    const label = `causal_facts.recommended_method_routes[${index}]`;
+    assertKnownKeys(route, new Set(["id", "category", "route_cautions"]), label);
+    assertEnum(route.category, ["design", "support"], `${label}.category`);
+    const expected = route.category === "design" ? DESIGN_IDS : SUPPORT_IDS;
+    if (!expected.has(route.id)) fail("INVALID_STATE", `${label}.id is not a valid ${route.category} route`);
+    assertStringArray(route.route_cautions, `${label}.route_cautions`);
+  });
+  const recommendedIds = state.causal_facts.recommended_method_routes.map((route) => route.id);
+  if (new Set(recommendedIds).size !== recommendedIds.length) {
+    fail("INVALID_STATE", "recommended_method_routes must not contain duplicate route IDs");
+  }
+  const recommendedDesigns = state.causal_facts.recommended_method_routes.filter((route) => route.category === "design");
+  const recommendedSupports = state.causal_facts.recommended_method_routes.filter((route) => route.category === "support");
+  if (recommendedDesigns.length > 1 || recommendedSupports.length > 1) {
+    fail("INVALID_STATE", "recommended_method_routes may contain at most one design and one support route");
+  }
+  if (recommendedSupports.length && !recommendedDesigns.length) {
+    fail("INVALID_STATE", "a recommended support route requires a recommended design route");
+  }
+  assertEnum(state.discovery_sidecar.status, ["not_started", "scoped", "artifact_created", "reviewed", "blocked"], "discovery_sidecar.status");
+  assertStringOrNullFields(state.discovery_sidecar, ["goal", "scope", "method_summary"], "discovery_sidecar");
+  assertStringArrayFields(state.discovery_sidecar, ["findings", "diagnostics", "limitations", "artifact_refs", "reviewer_requests"], "discovery_sidecar");
+  assertEnum(state.report_assembly.current_format, [null, "md", "html"], "report_assembly.current_format");
+  assertStringOrNullFields(state.report_assembly, ["report_goal", "audience", "target_section"], "report_assembly");
+  assertStringArrayFields(state.report_assembly, ["planned_structure", "key_points", "wording_constraints", "draft_notes"], "report_assembly");
+
+  const reportHasIdentity = isUuid(state.report_assembly.scope_id) && Number.isInteger(state.report_assembly.scope_revision) && state.report_assembly.scope_revision >= 1;
+  const reportEmptyIdentity = state.report_assembly.scope_id === null && state.report_assembly.scope_revision === 0;
+  if (!reportHasIdentity && !reportEmptyIdentity) fail("INVALID_STATE", "report_assembly has an invalid scope identity");
+  const reportStatus = state.council_chamber.report_writer.current_status;
+  if (!templateMode && ["ready", "blocked", "done"].includes(reportStatus) && !reportHasIdentity) {
+    fail("INVALID_STATE", `report_assembly requires scope identity for status ${reportStatus}`);
+  }
+  if (reportStatus !== null && !["requested", "ready", "blocked", "done"].includes(reportStatus)) {
+    fail("INVALID_STATE", "council_chamber.report_writer.current_status is invalid");
+  }
+  validateActiveScopeBinding(state, planInfo);
+
+  assertArray(state.artifact_records, "artifact_records");
+  state.artifact_records.forEach(validateArtifactRecord);
+  const ids = state.artifact_records.map((item) => item.artifact_id);
+  if (new Set(ids).size !== ids.length) fail("INVALID_STATE", "artifact_id values must be unique");
+  const operationIds = state.artifact_records.map((item) => item.operation_id).filter(Boolean);
+  if (new Set(operationIds).size !== operationIds.length) fail("INVALID_STATE", "operation_id may appear in only one artifact record");
+
+  const activeOperation = state.state_meta.active_operation;
+  const activeOperationHasArtifact = activeOperation !== null
+    && state.artifact_records.some((record) => record.operation_id === activeOperation.id);
+  const pendingAnalysisCloseout = activeOperation !== null
+    && activeOperation.stage === "lead_pending"
+    && planInfo.actor !== null
+    && planInfo.actor.startsWith("analysis_execution.")
+    && activeOperationHasArtifact;
+  const pendingReportCloseout = activeOperation !== null
+    && activeOperation.stage === "lead_pending"
+    && planInfo.actor === "report_writer"
+    && activeOperationHasArtifact;
+
+  if (state.project_summary.data_audit_complete && !["passing", "limited"].includes(state.data_facts.data_checked)) {
+    fail("INVALID_STATE", "data_audit_complete requires data_checked passing or limited");
+  }
+  if (state.project_summary.domain_knowledge_complete && !["passing", "limited"].includes(state.domain_knowledge.domain_checked)) {
+    fail("INVALID_STATE", "domain_knowledge_complete requires domain_checked passing or limited");
+  }
+  if (state.project_summary.causal_check_complete && !["passing", "limited"].includes(state.causal_facts.causal_checked)) {
+    fail("INVALID_STATE", "causal_check_complete requires causal_checked passing or limited");
+  }
+  if (state.project_summary.exploration_complete && !(
+    state.project_summary.data_audit_complete &&
+    state.project_summary.domain_knowledge_complete &&
+    state.project_summary.causal_check_complete
+  )) {
+    fail("INVALID_STATE", "exploration_complete requires all three core completion flags");
+  }
+  if (state.project_summary.analysis_output === "exist" && !state.artifact_records.some((record) => record.route === "analysis_execution")) {
+    fail("INVALID_STATE", "analysis_output exist requires an analysis_execution artifact record");
+  }
+  if (state.project_summary.analysis_output === "non_exist" && state.artifact_records.some((record) => record.route === "analysis_execution")) {
+    if (!pendingAnalysisCloseout) {
+      fail("INVALID_STATE", "analysis_output non_exist conflicts with a completed analysis artifact");
+    }
+  }
+  if (state.project_summary.report_output === "exist") {
+    if (!state.artifact_records.some((record) => record.route === "report_writer")) {
+      fail("INVALID_STATE", "report_output exist requires a report_writer artifact record");
+    }
+  }
+  if (state.project_summary.report_output === "non_exist" && state.report_assembly.current_format !== null) {
+    if (!pendingReportCloseout) {
+      fail("INVALID_STATE", "report_output non_exist requires null report format outside a pending report closeout");
+    }
+  }
+  if (state.project_summary.report_output === "non_exist" && state.artifact_records.some((record) => record.route === "report_writer")) {
+    if (!pendingReportCloseout) {
+      fail("INVALID_STATE", "report_output non_exist conflicts with a completed report artifact");
+    }
+  }
+
+  return { planInfo };
+}
+
+function instantiateTemplate(template) {
+  const state = clone(template);
+  const timestamp = nowIso();
+  state.state_meta.project_id = crypto.randomUUID();
+  state.state_meta.revision = 0;
+  state.state_meta.created_at = timestamp;
+  state.state_meta.updated_at = timestamp;
+  state.state_meta.active_operation = null;
+  validateState(state);
+  return state;
+}
+
+function isOpinionsEra(state) {
+  if (!isObject(state) || !isObject(state.council_chamber)) return false;
+  if (Object.values(state.council_chamber).some((slot) => isObject(slot) && "opinions" in slot)) return true;
+  const analysis = state.council_chamber.analysis_execution;
+  return isObject(analysis) && "current_status" in analysis;
+}
+
+function validateLegacyShape(state) {
+  assertExactTopLevel(state, LEGACY_TOP_LEVEL);
+  if (isOpinionsEra(state)) fail("UNSUPPORTED_SCHEMA", "opinions-era project state is not supported by the v5 migrator");
+  assertObject(state.project_summary, "project_summary");
+  assertObject(state.council_chamber, "council_chamber");
+  for (const key of ["data_audit", "domain_expert", "causal_check", "causal_discovery", "analysis_execution", "report_writer"]) {
+    if (!(key in state.council_chamber)) fail("UNSUPPORTED_SCHEMA", `legacy council_chamber is missing ${key}`);
+  }
+  assertArray(state.next_step_plan, "next_step_plan");
+  for (const key of ["data_facts", "domain_knowledge", "causal_facts", "discovery_sidecar", "report_assembly"]) {
+    assertObject(state[key], key);
+  }
+  assertArray(state.artifact_records, "artifact_records");
+}
+
+function legacyScopePresent(slot) {
+  if (!isObject(slot)) return false;
+  return Object.values(slot).some((value) => {
+    if (Array.isArray(value)) return value.length > 0;
+    if (isObject(value)) return Object.keys(value).length > 0;
+    return value !== null && value !== undefined;
+  });
+}
+
+function migrateLegacyState(legacy, options = {}) {
+  const { discardPlan = false } = options;
+  validateLegacyShape(legacy);
+  if (legacy.next_step_plan.length && !discardPlan) {
+    fail("LEGACY_ACTIVE_PLAN", "recognized v4.5 state has a nonempty transient plan and cannot be resumed safely");
+  }
+  const state = clone(legacy);
+  if (discardPlan) state.next_step_plan = [];
+  const timestamp = nowIso();
+  state.state_meta = {
+    schema_version: SCHEMA_VERSION,
+    project_id: crypto.randomUUID(),
+    revision: 0,
+    created_at: timestamp,
+    updated_at: timestamp,
+    active_operation: null,
+  };
+  const reordered = { state_meta: state.state_meta };
+  for (const key of LEGACY_TOP_LEVEL) reordered[key] = state[key];
+  if ("discovery_sidecar_output" in reordered.project_summary) {
+    delete reordered.project_summary.discovery_sidecar_output;
+  }
+  for (const [design, slot] of Object.entries(reordered.council_chamber.analysis_execution)) {
+    if (!DESIGN_IDS.has(design) || !isObject(slot)) {
+      fail("UNSUPPORTED_SCHEMA", `legacy analysis slot ${design} is not a supported v4.5 design slot`);
+    }
+    if (legacyScopePresent(slot)) {
+      slot.scope_id = crypto.randomUUID();
+      slot.scope_revision = 1;
+    } else {
+      slot.scope_id = null;
+      slot.scope_revision = 0;
+    }
+  }
+  const reportStatus = reordered.council_chamber.report_writer.current_status;
+  const reportHasContent = reportStatus !== null || legacyScopePresent(reordered.report_assembly);
+  reordered.report_assembly.scope_id = reportHasContent ? crypto.randomUUID() : null;
+  reordered.report_assembly.scope_revision = reportHasContent ? 1 : 0;
+  reordered.artifact_records = reordered.artifact_records.map((record, index) => ({
+    ...record,
+    artifact_id: `legacy-${String(index + 1).padStart(4, "0")}`,
+    operation_id: null,
+  }));
+  validateState(reordered);
+  return reordered;
+}
+
+function artifactWarnings(projectRoot, state) {
+  const warnings = [];
+  state.artifact_records.forEach((record) => {
+    let resolved;
+    try {
+      resolved = resolveOutputPath(projectRoot, record.location);
+    } catch (_error) {
+      warnings.push({
+        code: "INVALID_HISTORICAL_ARTIFACT_PATH",
+        artifact_id: record.artifact_id,
+        location: record.location,
+      });
+      return;
+    }
+    if (!fs.existsSync(resolved)) {
+      warnings.push({
+        code: "MISSING_HISTORICAL_ARTIFACT",
+        artifact_id: record.artifact_id,
+        location: record.location,
+      });
+      return;
+    }
+    if (/^legacy-\d{4}$/.test(record.artifact_id)) return;
+
+    let kind;
+    try {
+      const stat = fs.statSync(resolved);
+      if (stat.isFile()) kind = "file";
+      else if (stat.isDirectory()) kind = "directory";
+      else {
+        warnings.push({
+          code: "INVALID_HISTORICAL_ARTIFACT_TYPE",
+          artifact_id: record.artifact_id,
+          location: record.location,
+        });
+        return;
+      }
+    } catch (_error) {
+      warnings.push({
+        code: "MISSING_HISTORICAL_ARTIFACT",
+        artifact_id: record.artifact_id,
+        location: record.location,
+      });
+      return;
+    }
+
+    const manifestPath = manifestPathFor(resolved, kind);
+    const relativeManifestPath = normalizePath(path.relative(path.resolve(projectRoot), manifestPath));
+    if (!fs.existsSync(manifestPath)) {
+      warnings.push({
+        code: "MISSING_HISTORICAL_ARTIFACT_MANIFEST",
+        artifact_id: record.artifact_id,
+        location: record.location,
+        manifest_path: relativeManifestPath,
+      });
+      return;
+    }
+
+    let manifest;
+    try {
+      manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    } catch (_error) {
+      warnings.push({
+        code: "INVALID_HISTORICAL_ARTIFACT_MANIFEST",
+        artifact_id: record.artifact_id,
+        location: record.location,
+        manifest_path: relativeManifestPath,
+      });
+      return;
+    }
+    const manifestKeys = new Set([
+      "schema_version",
+      "operation_id",
+      "route",
+      "scope_ref",
+      "files",
+      "completed_at",
+      "summary",
+    ]);
+    const expectedScopeKind = record.route === "analysis_execution"
+      ? "analysis"
+      : record.route === "report_writer"
+        ? "report"
+        : null;
+    const scopeRef = manifest && manifest.scope_ref;
+    const scopeRefValid = expectedScopeKind === null
+      ? scopeRef === null
+      : isObject(scopeRef)
+        && Object.keys(scopeRef).length === 3
+        && Object.keys(scopeRef).every((key) => ["kind", "id", "revision"].includes(key))
+        && scopeRef.kind === expectedScopeKind
+        && isUuid(scopeRef.id)
+        && Number.isInteger(scopeRef.revision)
+        && scopeRef.revision >= 1;
+    if (
+      !isObject(manifest)
+      || Object.keys(manifest).length !== manifestKeys.size
+      || Object.keys(manifest).some((key) => !manifestKeys.has(key))
+      || manifest.schema_version !== MANIFEST_VERSION
+      || manifest.operation_id !== record.operation_id
+      || manifest.route !== record.route
+      || !scopeRefValid
+      || !Array.isArray(manifest.files)
+      || !manifest.files.length
+      || manifest.files.some((item) => typeof item !== "string" || !item.trim())
+      || !isTimestamp(manifest.completed_at)
+      || typeof manifest.summary !== "string"
+      || manifest.summary.trim() !== record.summary.trim()
+    ) {
+      warnings.push({
+        code: "INVALID_HISTORICAL_ARTIFACT_MANIFEST",
+        artifact_id: record.artifact_id,
+        location: record.location,
+        manifest_path: relativeManifestPath,
+      });
+      return;
+    }
+    let includesPrimary = false;
+    let includesDeliverable = false;
+    for (const item of manifest.files) {
+      const normalized = normalizePath(item);
+      let listedPath;
+      try {
+        listedPath = resolveOutputPath(projectRoot, normalized);
+      } catch (_error) {
+        warnings.push({
+          code: "INVALID_HISTORICAL_ARTIFACT_FILE_PATH",
+          artifact_id: record.artifact_id,
+          location: record.location,
+          file: normalized,
+        });
+        continue;
+      }
+      if (kind === "directory") {
+        if (!listedPath.startsWith(`${resolved}${path.sep}`)) {
+          warnings.push({
+            code: "INVALID_HISTORICAL_ARTIFACT_FILE_PATH",
+            artifact_id: record.artifact_id,
+            location: record.location,
+            file: normalized,
+          });
+          continue;
+        }
+        if (listedPath !== manifestPath) includesDeliverable = true;
+      } else if (normalized === normalizePath(record.location)) {
+        includesPrimary = true;
+        includesDeliverable = true;
+      }
+      if (!fs.existsSync(listedPath) || !fs.statSync(listedPath).isFile()) {
+        warnings.push({
+          code: "MISSING_HISTORICAL_ARTIFACT_FILE",
+          artifact_id: record.artifact_id,
+          location: record.location,
+          file: normalized,
+        });
+      }
+    }
+    if ((kind === "file" && !includesPrimary) || !includesDeliverable) {
+      warnings.push({
+        code: "INVALID_HISTORICAL_ARTIFACT_MANIFEST",
+        artifact_id: record.artifact_id,
+        location: record.location,
+        manifest_path: relativeManifestPath,
+      });
+    }
+  });
+  return warnings;
+}
+
+function statePathFor(projectRoot) {
+  return path.join(path.resolve(projectRoot), STATE_FILE);
+}
+
+function templatePathFor(skillRoot) {
+  return path.join(path.resolve(skillRoot), "assets", "project_state_template.yaml");
+}
+
+function loadTemplate(skillRoot) {
+  const templatePath = templatePathFor(skillRoot);
+  const template = parseYaml(readText(templatePath), templatePath);
+  validateState(template, { templateMode: true });
+  return template;
+}
+
+function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan = false }) {
+  const root = path.resolve(projectRoot);
+  const statePath = statePathFor(root);
+  const template = loadTemplate(skillRoot);
+  const exists = fs.existsSync(statePath);
+
+  if (fresh && discardLegacyPlan) fail("INVALID_INPUT", "--fresh and --discard-legacy-plan cannot be combined");
+  if (discardLegacyPlan && !exists) fail("INVALID_INPUT", "--discard-legacy-plan requires an existing recognized v4.5 state");
+
+  if (fresh) {
+    const previous = exists ? readBytes(statePath) : null;
+    const archivePath = previous === null ? null : archiveBytes(root, previous, "reset");
+    const state = instantiateTemplate(template);
+    atomicWrite(statePath, stringifyYaml(state));
+    return {
+      ok: true,
+      code: exists ? "RESET" : "CREATED_FRESH",
+      state_path: statePath,
+      archive_path: archivePath,
+      project_id: state.state_meta.project_id,
+      revision: state.state_meta.revision,
+      mode: "idle",
+      warnings: [],
+    };
+  }
+
+  if (!exists) {
+    const state = instantiateTemplate(template);
+    atomicWrite(statePath, stringifyYaml(state));
+    return {
+      ok: true,
+      code: "CREATED",
+      state_path: statePath,
+      project_id: state.state_meta.project_id,
+      revision: state.state_meta.revision,
+      mode: "idle",
+      warnings: [],
+    };
+  }
+
+  const original = readBytes(statePath);
+  const parsed = parseYaml(original.toString("utf8"), statePath);
+  if (!isObject(parsed.state_meta)) {
+    const migrated = migrateLegacyState(parsed, { discardPlan: discardLegacyPlan });
+    const archivePath = archiveBytes(root, original, discardLegacyPlan ? "migration-v45-discarded-plan" : "migration-v45");
+    atomicWrite(statePath, stringifyYaml(migrated));
+    return {
+      ok: true,
+      code: discardLegacyPlan ? "MIGRATED_LEGACY_PLAN_DISCARDED" : "MIGRATED",
+      state_path: statePath,
+      archive_path: archivePath,
+      project_id: migrated.state_meta.project_id,
+      revision: migrated.state_meta.revision,
+      mode: "idle",
+      warnings: artifactWarnings(root, migrated),
+    };
+  }
+
+  if (discardLegacyPlan) {
+    fail("INVALID_INPUT", "--discard-legacy-plan applies only to a recognized unversioned v4.5 state");
+  }
+
+  const { planInfo } = validateState(parsed);
+  const operation = parsed.state_meta.active_operation;
+  let mode = "idle";
+  let code = "OPENED";
+  if (operation) {
+    mode = operation.stage === "worker_pending" ? "resume_worker" : "resume_lead";
+    code = operation.stage === "worker_pending" ? "RESUME_WORKER" : "RESUME_LEAD";
+  }
+  return {
+    ok: true,
+    code,
+    state_path: statePath,
+    project_id: parsed.state_meta.project_id,
+    revision: parsed.state_meta.revision,
+    mode,
+    plan: parsed.next_step_plan,
+    plan_actor: planInfo.actor,
+    active_operation: operation,
+    artifact_status: operation && operation.artifact_intent
+      ? inspectReservedArtifact(root, operation, planInfo.actor)
+      : null,
+    warnings: artifactWarnings(root, parsed),
+  };
+}
+
+function loadCurrentState(projectRoot) {
+  const statePath = statePathFor(projectRoot);
+  if (!fs.existsSync(statePath)) fail("MISSING_STATE", `${statePath} does not exist`);
+  const text = readText(statePath);
+  const state = parseYaml(text, statePath);
+  validateState(state);
+  return { statePath, state };
+}
+
+function assertExpected(state, payload) {
+  if (!isObject(payload)) fail("INVALID_INPUT", "command input must be a JSON object");
+  if (payload.expected_project_id !== state.state_meta.project_id) {
+    fail("STALE_PROJECT", "expected_project_id does not match the active project");
+  }
+  if (!Number.isInteger(payload.expected_revision)) fail("INVALID_INPUT", "expected_revision must be an integer");
+  if (payload.expected_revision !== state.state_meta.revision) {
+    fail("STALE_REVISION", `expected revision ${payload.expected_revision}, found ${state.state_meta.revision}`, {
+      current_revision: state.state_meta.revision,
+    });
+  }
+}
+
+function commitMutation(statePath, state) {
+  state.state_meta.revision += 1;
+  state.state_meta.updated_at = nowIso();
+  validateState(state);
+  atomicWrite(statePath, stringifyYaml(state));
+  return state.state_meta.revision;
+}
+
+function resolveScopeReference(state, route, scopeRef, support = null) {
+  validateScopeRef(scopeRef, "scope_ref", "INVALID_INPUT");
+  if (scopeRef === null) return;
+  let current;
+  let status;
+  if (route.startsWith("analysis_execution.")) {
+    if (scopeRef.kind !== "analysis") fail("SCOPE_MISMATCH", "analysis route requires an analysis scope reference");
+    const design = route.slice("analysis_execution.".length);
+    current = state.council_chamber.analysis_execution[design];
+    status = current && current.current_status;
+    if (current && current.support !== support) {
+      fail("SCOPE_MISMATCH", "analysis support route does not match the ready scope");
+    }
+  } else if (route === "report_writer") {
+    if (scopeRef.kind !== "report") fail("SCOPE_MISMATCH", "report_writer requires a report scope reference");
+    current = state.report_assembly;
+    status = state.council_chamber.report_writer.current_status;
+  } else {
+    fail("SCOPE_MISMATCH", `${route} cannot use a scope reference`);
+  }
+  if (!current || current.scope_id !== scopeRef.id || current.scope_revision !== scopeRef.revision) {
+    fail("SCOPE_MISMATCH", "the requested scope reference is not current");
+  }
+  if (status !== "ready") {
+    fail("SCOPE_MISMATCH", `scope status ${status} cannot be approved or revised`);
+  }
+}
+
+function beginOperation({ projectRoot, payload }) {
+  const { statePath, state } = loadCurrentState(projectRoot);
+  assertExpected(state, payload);
+  if (state.state_meta.active_operation !== null || state.next_step_plan.length) {
+    fail("ACTIVE_OPERATION", "finish or cancel the active operation before beginning another");
+  }
+  const allowedInput = new Set(["expected_project_id", "expected_revision", "route", "support", "intent_summary", "scope_ref"]);
+  assertKnownKeys(payload, allowedInput, "begin input", "INVALID_INPUT");
+  const route = payload.route;
+  const support = payload.support ?? null;
+  const scopeRef = payload.scope_ref ?? null;
+  if (typeof payload.intent_summary !== "string" || !payload.intent_summary.trim() || payload.intent_summary.length > MAX_INTENT_LENGTH) {
+    fail("INVALID_INPUT", `intent_summary must contain 1-${MAX_INTENT_LENGTH} characters`);
+  }
+
+  let plan;
+  let stage;
+  if (route === "team_lead") {
+    if (support !== null || scopeRef !== null) fail("INVALID_INPUT", "team_lead cannot use support or scope_ref");
+    plan = [{ id: "team_lead" }];
+    stage = "lead_pending";
+  } else if (CORE_WORKERS.has(route)) {
+    if (support !== null) fail("INVALID_INPUT", "core routes cannot use support");
+    if (scopeRef !== null && route !== "report_writer") fail("SCOPE_MISMATCH", `${route} cannot use scope_ref`);
+    resolveScopeReference(state, route, scopeRef, support);
+    plan = [{ id: route }, { id: "team_lead" }];
+    stage = "worker_pending";
+  } else if (typeof route === "string" && route.startsWith("analysis_execution.")) {
+    const design = route.slice("analysis_execution.".length);
+    if (!DESIGN_IDS.has(design)) fail("PLAN_MISMATCH", `unknown analysis design route: ${design}`);
+    if (support !== null && !SUPPORT_IDS.has(support)) fail("PLAN_MISMATCH", `unknown support route: ${support}`);
+    resolveScopeReference(state, route, scopeRef, support);
+    plan = [{ id: route, support }, { id: "team_lead" }];
+    stage = "worker_pending";
+  } else {
+    fail("PLAN_MISMATCH", `unknown route: ${route}`);
+  }
+
+  const operation = {
+    id: crypto.randomUUID(),
+    stage,
+    intent_summary: payload.intent_summary.trim(),
+    scope_ref: scopeRef,
+    artifact_intent: null,
+    started_at: nowIso(),
+  };
+  state.next_step_plan = plan;
+  state.state_meta.active_operation = operation;
+  const revision = commitMutation(statePath, state);
+  return {
+    ok: true,
+    code: stage === "lead_pending" ? "BEGAN_LEAD" : "BEGAN_WORKER",
+    project_id: state.state_meta.project_id,
+    revision,
+    operation_id: operation.id,
+    stage,
+    plan,
+  };
+}
+
+function assertOperation(state, payload, requiredStage = null) {
+  const operation = state.state_meta.active_operation;
+  if (!operation) fail("NO_ACTIVE_OPERATION", "no active operation exists");
+  if (payload.operation_id !== operation.id) fail("STALE_OPERATION", "operation_id does not match the active operation");
+  if (requiredStage && operation.stage !== requiredStage) {
+    fail("INVALID_STAGE", `operation stage must be ${requiredStage}, found ${operation.stage}`);
+  }
+  return operation;
+}
+
+function normalizeExtension(value) {
+  if (value === undefined || value === null || value === "") return "";
+  const extension = value.startsWith(".") ? value : `.${value}`;
+  if (!/^\.[a-z0-9]{1,10}$/i.test(extension)) fail("INVALID_INPUT", "extension must be a simple file extension");
+  return extension.toLowerCase();
+}
+
+function resolveOutputPath(projectRoot, relativeLocation) {
+  const normalized = normalizePath(relativeLocation);
+  if (!normalized.startsWith("output/") || normalized.includes("\0")) {
+    fail("INVALID_ARTIFACT_PATH", "artifact location must be a relative path under output/");
+  }
+  const root = path.resolve(projectRoot);
+  const outputRoot = path.resolve(root, "output");
+  const resolved = path.resolve(root, ...normalized.split("/"));
+  if (resolved !== outputRoot && !resolved.startsWith(`${outputRoot}${path.sep}`)) {
+    fail("INVALID_ARTIFACT_PATH", "artifact location escapes the project output directory");
+  }
+  return resolved;
+}
+
+function reserveArtifact({ projectRoot, payload }) {
+  const { statePath, state } = loadCurrentState(projectRoot);
+  assertExpected(state, payload);
+  const allowedInput = new Set(["expected_project_id", "expected_revision", "operation_id", "kind", "slug", "extension"]);
+  assertKnownKeys(payload, allowedInput, "reserve-artifact input", "INVALID_INPUT");
+  const operation = assertOperation(state, payload, "worker_pending");
+  const planInfo = validatePlan(state.next_step_plan);
+  const actor = planInfo.actor;
+  if (!(ARTIFACT_ACTORS.has(actor) || actor.startsWith("analysis_execution."))) {
+    fail("OWNERSHIP_VIOLATION", `${actor} cannot create durable artifacts`);
+  }
+  if ((actor === "report_writer" || actor.startsWith("analysis_execution.")) && operation.scope_ref === null) {
+    fail("SCOPE_MISMATCH", `${actor} must begin with an exact ready scope_ref before reserving output`);
+  }
+  if (operation.artifact_intent !== null) fail("ARTIFACT_ALREADY_RESERVED", "this operation already has an artifact reservation");
+  assertEnum(payload.kind, ["file", "directory"], "kind", "INVALID_INPUT");
+  if (
+    typeof payload.slug !== "string"
+    || payload.slug.length > MAX_ARTIFACT_SLUG_LENGTH
+    || !/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(payload.slug)
+  ) {
+    fail("INVALID_INPUT", `slug must contain at most ${MAX_ARTIFACT_SLUG_LENGTH} lowercase letters, digits, hyphens, or underscores`);
+  }
+  const extension = payload.kind === "file" ? normalizeExtension(payload.extension) : "";
+  if (payload.kind === "file" && !extension) fail("INVALID_INPUT", "file artifacts require an extension");
+  if (payload.kind === "directory" && payload.extension !== undefined) fail("INVALID_INPUT", "directory artifacts do not use extensions");
+  const location = `output/${payload.slug}-${operation.id.slice(0, 8)}${extension}`;
+  const target = resolveOutputPath(projectRoot, location);
+  const manifest = manifestPathFor(target, payload.kind);
+  if (fs.existsSync(target) || fs.existsSync(manifest)) fail("ARTIFACT_COLLISION", `reserved location already exists: ${location}`);
+  operation.artifact_intent = { kind: payload.kind, location };
+  const revision = commitMutation(statePath, state);
+  return {
+    ok: true,
+    code: "ARTIFACT_RESERVED",
+    project_id: state.state_meta.project_id,
+    revision,
+    operation_id: operation.id,
+    artifact_intent: operation.artifact_intent,
+    temporary_path: temporaryArtifactLocation(operation.artifact_intent, operation.id),
+    manifest_path: normalizePath(path.relative(path.resolve(projectRoot), manifest)),
+  };
+}
+
+function temporaryArtifactLocation(intent, operationId) {
+  const normalized = normalizePath(intent.location);
+  const directory = path.posix.dirname(normalized);
+  const name = path.posix.basename(normalized);
+  return `${directory}/.${name}.tmp-${operationId.slice(0, 8)}`;
+}
+
+function manifestPathFor(target, kind) {
+  return kind === "directory"
+    ? path.join(target, "artifact-manifest.json")
+    : `${target}.manifest.json`;
+}
+
+function expectedArtifactRoute(actor) {
+  return actor.startsWith("analysis_execution.") ? "analysis_execution" : actor;
+}
+
+function validateManifest(projectRoot, operation, actor) {
+  const intent = operation.artifact_intent;
+  if (!intent) fail("MISSING_ARTIFACT", "no artifact is reserved for this operation");
+  const target = resolveOutputPath(projectRoot, intent.location);
+  if (!fs.existsSync(target)) fail("MISSING_ARTIFACT", `reserved artifact does not exist: ${intent.location}`);
+  const stat = fs.statSync(target);
+  if (intent.kind === "file") {
+    if (!stat.isFile() || stat.size === 0) fail("MISSING_ARTIFACT", "reserved file artifact is empty or not a file");
+  } else if (!stat.isDirectory()) {
+    fail("MISSING_ARTIFACT", "reserved directory artifact is not a directory");
+  }
+  const manifestPath = manifestPathFor(target, intent.kind);
+  if (!fs.existsSync(manifestPath)) fail("MISSING_ARTIFACT", `completion manifest does not exist: ${manifestPath}`);
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  } catch (error) {
+    fail("INVALID_ARTIFACT_MANIFEST", `completion manifest is invalid JSON: ${error.message}`);
+  }
+  assertKnownKeys(manifest, new Set([
+    "schema_version",
+    "operation_id",
+    "route",
+    "scope_ref",
+    "files",
+    "completed_at",
+    "summary",
+  ]), "artifact manifest", "INVALID_ARTIFACT_MANIFEST");
+  if (manifest.schema_version !== MANIFEST_VERSION) fail("INVALID_ARTIFACT_MANIFEST", "unsupported manifest schema version");
+  if (manifest.operation_id !== operation.id) fail("INVALID_ARTIFACT_MANIFEST", "manifest operation_id does not match");
+  if (manifest.route !== expectedArtifactRoute(actor)) fail("INVALID_ARTIFACT_MANIFEST", "manifest route does not match the active worker");
+  if (!deepEqual(manifest.scope_ref ?? null, operation.scope_ref ?? null)) fail("INVALID_ARTIFACT_MANIFEST", "manifest scope_ref does not match");
+  if (!isTimestamp(manifest.completed_at)) fail("INVALID_ARTIFACT_MANIFEST", "manifest completed_at must be RFC3339 UTC");
+  if (typeof manifest.summary !== "string" || !manifest.summary.trim()) fail("INVALID_ARTIFACT_MANIFEST", "manifest summary must be nonempty");
+  assertArray(manifest.files, "artifact manifest.files", "INVALID_ARTIFACT_MANIFEST");
+  if (!manifest.files.length || manifest.files.some((item) => typeof item !== "string" || !item.trim())) {
+    fail("INVALID_ARTIFACT_MANIFEST", "manifest files must contain at least one project-relative path");
+  }
+  const normalizedLocation = normalizePath(intent.location);
+  let includesPrimary = false;
+  let includesDeliverable = false;
+  for (const item of manifest.files) {
+    const normalized = normalizePath(item);
+    const resolved = resolveOutputPath(projectRoot, normalized);
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+      fail("MISSING_ARTIFACT", `manifest file does not exist: ${normalized}`);
+    }
+    if (intent.kind === "directory") {
+      if (!resolved.startsWith(`${target}${path.sep}`)) {
+        fail("INVALID_ARTIFACT_MANIFEST", `manifest file is outside the reserved directory: ${normalized}`);
+      }
+      if (resolved !== manifestPath) includesDeliverable = true;
+    } else if (normalized === normalizedLocation) {
+      includesPrimary = true;
+      includesDeliverable = true;
+    }
+  }
+  if (intent.kind === "file" && !includesPrimary) {
+    fail("INVALID_ARTIFACT_MANIFEST", "file manifest must list the reserved primary file");
+  }
+  if (!includesDeliverable) {
+    fail("INVALID_ARTIFACT_MANIFEST", "manifest must list at least one deliverable file, not only its own manifest");
+  }
+  return { target, manifestPath, manifest };
+}
+
+function inspectReservedArtifact(projectRoot, operation, actor) {
+  try {
+    const checked = validateManifest(projectRoot, operation, actor);
+    return {
+      status: "complete",
+      location: operation.artifact_intent.location,
+      temporary_path: temporaryArtifactLocation(operation.artifact_intent, operation.id),
+      manifest_path: normalizePath(path.relative(path.resolve(projectRoot), checked.manifestPath)),
+    };
+  } catch (error) {
+    if (error instanceof StateError && ["MISSING_ARTIFACT", "INVALID_ARTIFACT_MANIFEST"].includes(error.code)) {
+      return {
+        status: "incomplete",
+        location: operation.artifact_intent.location,
+        temporary_path: temporaryArtifactLocation(operation.artifact_intent, operation.id),
+        reason_code: error.code,
+      };
+    }
+    throw error;
+  }
+}
+
+function rejectControllerFields(patch, label, fields = ["last_updated"]) {
+  for (const field of fields) {
+    if (Object.prototype.hasOwnProperty.call(patch, field)) {
+      fail("OWNERSHIP_VIOLATION", `${label}.${field} is controller-owned`);
+    }
+  }
+}
+
+function validatePatchKeys(patch, section) {
+  assertKnownKeys(patch, SECTION_KEYS[section], `updates.${section}`, "OWNERSHIP_VIOLATION");
+  rejectControllerFields(patch, `updates.${section}`);
+  if (section === "report_assembly") {
+    rejectControllerFields(patch, "updates.report_assembly", ["scope_id", "scope_revision"]);
+  }
+}
+
+function validateChamberPatch(patch, route, analysis = false) {
+  const allowed = analysis ? ANALYSIS_CHAMBER_KEYS : CHAMBER_KEYS;
+  assertKnownKeys(patch, allowed, `updates.council_chamber.${route}`, "OWNERSHIP_VIOLATION");
+  rejectControllerFields(patch, `updates.council_chamber.${route}`);
+  if (analysis) rejectControllerFields(patch, `updates.council_chamber.${route}`, ["scope_id", "scope_revision"]);
+}
+
+function validateOwnedUpdates(actor, updates) {
+  assertObject(updates, "updates", "INVALID_INPUT");
+  const keys = new Set(Object.keys(updates));
+  const allowedRoots = new Set();
+  let chamberRoute = actor;
+  let analysisDesign = null;
+  if (actor === "data_audit") allowedRoots.add("data_facts");
+  else if (actor === "domain_expert") allowedRoots.add("domain_knowledge");
+  else if (actor === "causal_check") allowedRoots.add("causal_facts");
+  else if (actor === "causal_discovery") allowedRoots.add("discovery_sidecar");
+  else if (actor === "report_writer") allowedRoots.add("report_assembly");
+  else if (actor.startsWith("analysis_execution.")) {
+    analysisDesign = actor.slice("analysis_execution.".length);
+    chamberRoute = "analysis_execution";
+  } else {
+    fail("OWNERSHIP_VIOLATION", `unknown worker actor: ${actor}`);
+  }
+  allowedRoots.add("council_chamber");
+  const disallowed = [...keys].filter((key) => !allowedRoots.has(key));
+  if (disallowed.length) fail("OWNERSHIP_VIOLATION", `${actor} cannot update: ${disallowed.join(", ")}`);
+  for (const section of [...allowedRoots].filter((key) => key !== "council_chamber")) {
+    if (updates[section] !== undefined) validatePatchKeys(updates[section], section);
+  }
+  if (updates.council_chamber !== undefined) {
+    assertObject(updates.council_chamber, "updates.council_chamber", "INVALID_INPUT");
+    if (analysisDesign) {
+      assertKnownKeys(updates.council_chamber, new Set(["analysis_execution"]), "updates.council_chamber", "OWNERSHIP_VIOLATION");
+      assertObject(updates.council_chamber.analysis_execution, "updates.council_chamber.analysis_execution", "INVALID_INPUT");
+      assertKnownKeys(updates.council_chamber.analysis_execution, new Set([analysisDesign]), "updates.council_chamber.analysis_execution", "OWNERSHIP_VIOLATION");
+      validateChamberPatch(updates.council_chamber.analysis_execution[analysisDesign], analysisDesign, true);
+    } else {
+      assertKnownKeys(updates.council_chamber, new Set([chamberRoute]), "updates.council_chamber", "OWNERSHIP_VIOLATION");
+      validateChamberPatch(updates.council_chamber[chamberRoute], chamberRoute, false);
+    }
+  }
+}
+
+function applyScopeTransition(state, operation, actor, updates, transition, hasArtifact) {
+  const isAnalysis = actor.startsWith("analysis_execution.");
+  const isReport = actor === "report_writer";
+  if (!isAnalysis && !isReport) {
+    if (transition !== undefined && transition !== null) fail("INVALID_INPUT", `${actor} cannot use scope_transition`);
+    return;
+  }
+  if (!["new", "revise", "preserve"].includes(transition)) {
+    fail("INVALID_INPUT", `${actor} apply requires scope_transition: new, revise, or preserve`);
+  }
+  let current;
+  let patch;
+  if (isAnalysis) {
+    const design = actor.slice("analysis_execution.".length);
+    current = state.council_chamber.analysis_execution[design] || {
+      scope_id: null,
+      scope_revision: 0,
+    };
+    patch = updates.council_chamber && updates.council_chamber.analysis_execution
+      ? updates.council_chamber.analysis_execution[design]
+      : null;
+    if (!patch) fail("INVALID_INPUT", "analysis scope transition requires a matching chamber patch");
+  } else {
+    current = state.report_assembly;
+    patch = updates.report_assembly;
+    if (!patch) fail("INVALID_INPUT", "report scope transition requires a report_assembly patch");
+  }
+  if (operation.scope_ref !== null) {
+    if (current.scope_id !== operation.scope_ref.id || current.scope_revision !== operation.scope_ref.revision) {
+      fail("SCOPE_MISMATCH", "the approved scope changed before worker apply");
+    }
+    if (transition !== "preserve") {
+      const nextStatus = isAnalysis
+        ? patch.current_status
+        : updates.council_chamber && updates.council_chamber.report_writer
+          ? updates.council_chamber.report_writer.current_status
+          : undefined;
+      if (hasArtifact || nextStatus === "done") {
+        fail("SCOPE_MISMATCH", "output creation must preserve the exact approved scope");
+      }
+      if (!["ready", "blocked"].includes(nextStatus)) {
+        fail("SCOPE_MISMATCH", "a material scope change must return a ready or blocked handoff without output");
+      }
+    }
+  }
+  if (transition === "new") {
+    patch.scope_id = crypto.randomUUID();
+    patch.scope_revision = 1;
+  } else {
+    if (!isUuid(current.scope_id) || !Number.isInteger(current.scope_revision) || current.scope_revision < 1) {
+      fail("SCOPE_MISMATCH", `cannot ${transition} a scope that has no current identity`);
+    }
+    patch.scope_id = current.scope_id;
+    patch.scope_revision = current.scope_revision + (transition === "revise" ? 1 : 0);
+  }
+  operation.scope_ref = {
+    kind: isAnalysis ? "analysis" : "report",
+    id: patch.scope_id,
+    revision: patch.scope_revision,
+  };
+}
+
+function emptyChamberSlot() {
+  return {
+    last_updated: null,
+    current_status: null,
+    summary: null,
+    questions_for_user: [],
+    feedback_to_route: [],
+  };
+}
+
+function emptyAnalysisSlot() {
+  return {
+    ...emptyChamberSlot(),
+    scope_id: null,
+    scope_revision: 0,
+    support: null,
+  };
+}
+
+function emptyReportAssembly() {
+  return {
+    last_updated: null,
+    scope_id: null,
+    scope_revision: 0,
+    current_format: null,
+    report_goal: null,
+    audience: null,
+    target_section: null,
+    planned_structure: [],
+    key_points: [],
+    wording_constraints: [],
+    draft_notes: [],
+  };
+}
+
+function resetNewScopeState(state, actor, transition) {
+  if (transition !== "new") return;
+  if (actor.startsWith("analysis_execution.")) {
+    const design = actor.slice("analysis_execution.".length);
+    state.council_chamber.analysis_execution[design] = emptyAnalysisSlot();
+  } else if (actor === "report_writer") {
+    state.report_assembly = emptyReportAssembly();
+    state.council_chamber.report_writer = emptyChamberSlot();
+  }
+}
+
+function validateScopeCompletion(state, actor, updates, hasArtifact) {
+  const isAnalysis = actor.startsWith("analysis_execution.");
+  const isReport = actor === "report_writer";
+  if (!isAnalysis && !isReport) return;
+  const status = isAnalysis
+    ? state.council_chamber.analysis_execution[actor.slice("analysis_execution.".length)].current_status
+    : state.council_chamber.report_writer.current_status;
+  if ((status === "done") !== hasArtifact) {
+    fail("SCOPE_MISMATCH", hasArtifact
+      ? `${actor} artifact completion requires current_status done`
+      : `${actor} current_status done requires a completed artifact`);
+  }
+  if (isReport && hasArtifact) {
+    const chamberPatch = updates.council_chamber && updates.council_chamber.report_writer;
+    if (!chamberPatch || chamberPatch.current_status !== "done") {
+      fail("SCOPE_MISMATCH", "report output requires an explicit report_writer transition to done");
+    }
+    if (state.report_assembly.current_format !== "html") {
+      fail("SCOPE_MISMATCH", "report output requires report_assembly.current_format html");
+    }
+  }
+}
+
+function stampWorkerUpdates(updates, actor, timestamp) {
+  const roots = Object.keys(updates).filter((key) => key !== "council_chamber");
+  for (const root of roots) updates[root].last_updated = timestamp;
+  if (updates.council_chamber) {
+    if (actor.startsWith("analysis_execution.")) {
+      const design = actor.slice("analysis_execution.".length);
+      updates.council_chamber.analysis_execution[design].last_updated = timestamp;
+    } else {
+      updates.council_chamber[actor].last_updated = timestamp;
+    }
+  }
+}
+
+function appendArtifactRecord(state, projectRoot, operation, actor, artifactInput) {
+  if (!isObject(artifactInput) || Object.keys(artifactInput).some((key) => key !== "summary")) {
+    fail("INVALID_INPUT", "artifact input must contain only summary");
+  }
+  if (typeof artifactInput.summary !== "string" || !artifactInput.summary.trim()) {
+    fail("INVALID_INPUT", "artifact summary must be nonempty");
+  }
+  const { manifest } = validateManifest(projectRoot, operation, actor);
+  if ((actor === "report_writer" || actor.startsWith("analysis_execution.")) && operation.scope_ref === null) {
+    fail("SCOPE_MISMATCH", `${actor} output requires an exact approved scope_ref`);
+  }
+  if (artifactInput.summary.trim() !== manifest.summary.trim()) {
+    fail("INVALID_ARTIFACT_MANIFEST", "artifact summary must match the completion manifest summary");
+  }
+  if (state.artifact_records.some((record) => record.operation_id === operation.id)) {
+    fail("DUPLICATE_ARTIFACT", "this operation already has an artifact record");
+  }
+  const planInfo = validatePlan(state.next_step_plan);
+  const record = {
+    artifact_id: crypto.randomUUID(),
+    operation_id: operation.id,
+    route: expectedArtifactRoute(actor),
+    location: operation.artifact_intent.location,
+    created_at: nowIso(),
+    summary: artifactInput.summary.trim(),
+  };
+  if (actor.startsWith("analysis_execution.")) {
+    record.design = planInfo.design;
+    record.support = planInfo.support;
+  }
+  state.artifact_records.push(record);
+  return record;
+}
+
+function applyWorker({ projectRoot, payload }) {
+  const { statePath, state } = loadCurrentState(projectRoot);
+  assertExpected(state, payload);
+  const allowedInput = new Set([
+    "expected_project_id",
+    "expected_revision",
+    "operation_id",
+    "actor",
+    "updates",
+    "scope_transition",
+    "artifact",
+  ]);
+  assertKnownKeys(payload, allowedInput, "apply input", "INVALID_INPUT");
+  const operation = assertOperation(state, payload, "worker_pending");
+  const planInfo = validatePlan(state.next_step_plan);
+  if (payload.actor !== planInfo.actor) fail("PLAN_MISMATCH", `apply actor must be ${planInfo.actor}`);
+  validateOwnedUpdates(payload.actor, payload.updates);
+  const updates = clone(payload.updates);
+  const hadApprovedScope = operation.scope_ref !== null;
+  if (
+    payload.artifact !== undefined
+    && payload.artifact !== null
+    && (payload.actor === "report_writer" || payload.actor.startsWith("analysis_execution."))
+    && !hadApprovedScope
+  ) {
+    fail("SCOPE_MISMATCH", `${payload.actor} cannot publish output without the scope_ref bound by begin`);
+  }
+  if (payload.actor.startsWith("analysis_execution.")) {
+    const design = payload.actor.slice("analysis_execution.".length);
+    const chamberPatch = updates.council_chamber
+      && updates.council_chamber.analysis_execution
+      && updates.council_chamber.analysis_execution[design];
+    if (!chamberPatch) fail("INVALID_INPUT", "analysis apply requires its matching chamber handoff");
+    if (chamberPatch.support !== undefined && chamberPatch.support !== planInfo.support) {
+      fail("SCOPE_MISMATCH", "analysis chamber support must match the planned support route");
+    }
+    chamberPatch.support = planInfo.support;
+  } else if (payload.actor === "report_writer") {
+    const chamberPatch = updates.council_chamber && updates.council_chamber.report_writer;
+    if (!chamberPatch) fail("INVALID_INPUT", "report apply requires its matching chamber handoff");
+  }
+  applyScopeTransition(
+    state,
+    operation,
+    payload.actor,
+    updates,
+    payload.scope_transition,
+    payload.artifact !== undefined && payload.artifact !== null,
+  );
+  resetNewScopeState(state, payload.actor, payload.scope_transition);
+  stampWorkerUpdates(updates, payload.actor, nowIso());
+
+  let artifactRecord = null;
+  if (payload.artifact !== undefined && payload.artifact !== null) {
+    if (!operation.artifact_intent) fail("MISSING_ARTIFACT", "artifact output was not reserved");
+    artifactRecord = appendArtifactRecord(state, projectRoot, operation, payload.actor, payload.artifact);
+  } else if (operation.artifact_intent) {
+    const artifactStatus = inspectReservedArtifact(projectRoot, operation, payload.actor);
+    if (artifactStatus.status === "complete") {
+      fail("MISSING_ARTIFACT_RECORD", "a completed reserved artifact must be recorded by apply");
+    }
+  }
+
+  const merged = deepMerge(state, updates);
+  const hasArtifact = payload.artifact !== undefined && payload.artifact !== null;
+  validateScopeCompletion(merged, payload.actor, updates, hasArtifact);
+  if (deriveSummaryAggregates(merged)) merged.project_summary.last_updated = nowIso();
+  merged.state_meta.active_operation.stage = "lead_pending";
+  const revision = commitMutation(statePath, merged);
+  return {
+    ok: true,
+    code: "WORKER_APPLIED",
+    project_id: merged.state_meta.project_id,
+    revision,
+    operation_id: operation.id,
+    stage: "lead_pending",
+    artifact_record: artifactRecord,
+  };
+}
+
+function deriveSummaryAggregates(state) {
+  const hasArtifact = (route) => state.artifact_records.some((record) => record.route === route);
+  const coreComplete = {
+    data_audit_complete: ["passing", "limited"].includes(state.data_facts.data_checked),
+    domain_knowledge_complete: ["passing", "limited"].includes(state.domain_knowledge.domain_checked),
+    causal_check_complete: ["passing", "limited"].includes(state.causal_facts.causal_checked),
+  };
+  const derived = {
+    ...coreComplete,
+    exploration_complete: Object.values(coreComplete).every(Boolean),
+    analysis_output: hasArtifact("analysis_execution") ? "exist" : "non_exist",
+    report_output: hasArtifact("report_writer") ? "exist" : "non_exist",
+  };
+  const changed = Object.entries(derived).some(([field, value]) => state.project_summary[field] !== value);
+  Object.assign(state.project_summary, derived);
+  return changed;
+}
+
+function finishOperation({ projectRoot, payload, cancel = false }) {
+  const { statePath, state } = loadCurrentState(projectRoot);
+  assertExpected(state, payload);
+  const allowedInput = new Set(["expected_project_id", "expected_revision", "operation_id", "updates"]);
+  assertKnownKeys(payload, allowedInput, "finish input", "INVALID_INPUT");
+  const operation = assertOperation(state, payload, cancel ? null : "lead_pending");
+  const updates = payload.updates ?? {};
+  assertObject(updates, "updates", "INVALID_INPUT");
+  if (cancel && Object.keys(updates).length > 0) {
+    fail("OWNERSHIP_VIOLATION", "finish --cancel preserves durable state and does not accept updates");
+  }
+  assertKnownKeys(updates, new Set(["project_summary"]), "finish updates", "OWNERSHIP_VIOLATION");
+  if (updates.project_summary !== undefined) {
+    assertKnownKeys(
+      updates.project_summary,
+      SECTION_KEYS.project_summary,
+      "updates.project_summary",
+      "OWNERSHIP_VIOLATION",
+    );
+    rejectControllerFields(
+      updates.project_summary,
+      "updates.project_summary",
+      ["last_updated", ...DERIVED_SUMMARY_FIELDS],
+    );
+  }
+  const previousSummary = clone(state.project_summary);
+  const merged = deepMerge(state, updates);
+  deriveSummaryAggregates(merged);
+  if (!deepEqual(previousSummary, merged.project_summary)) merged.project_summary.last_updated = nowIso();
+  merged.next_step_plan = [];
+  merged.state_meta.active_operation = null;
+  const revision = commitMutation(statePath, merged);
+  return {
+    ok: true,
+    code: cancel ? "OPERATION_CANCELLED" : "OPERATION_FINISHED",
+    project_id: merged.state_meta.project_id,
+    revision,
+    operation_id: operation.id,
+    mode: "idle",
+  };
+}
+
+function validateProject({ projectRoot }) {
+  const root = path.resolve(projectRoot);
+  const statePath = statePathFor(root);
+  if (!fs.existsSync(statePath)) {
+    return { ok: false, code: "MISSING_STATE", state_path: statePath, warnings: [] };
+  }
+  const state = parseYaml(readText(statePath), statePath);
+  const { planInfo } = validateState(state);
+  return {
+    ok: true,
+    code: "VALID",
+    state_path: statePath,
+    project_id: state.state_meta.project_id,
+    revision: state.state_meta.revision,
+    active_operation: state.state_meta.active_operation,
+    plan: state.next_step_plan,
+    plan_actor: planInfo.actor,
+    warnings: artifactWarnings(root, state),
+  };
+}
+
+function validateTemplate({ skillRoot }) {
+  loadTemplate(skillRoot);
+  return { ok: true, code: "VALID_TEMPLATE", schema_version: SCHEMA_VERSION };
+}
+
+module.exports = {
+  StateError,
+  applyWorker,
+  beginOperation,
+  finishOperation,
+  openProject,
+  reserveArtifact,
+  validateProject,
+  validateTemplate,
+};

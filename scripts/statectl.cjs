@@ -8278,7 +8278,7 @@ var require_core = __commonJS({
       validateState(template, { templateMode: true });
       return template;
     }
-    function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan = false }) {
+    function openProject2({ projectRoot, skillRoot, fresh = false, discardLegacyPlan = false }) {
       const root = path2.resolve(projectRoot);
       const statePath = statePathFor(root);
       const template = loadTemplate(skillRoot);
@@ -8410,7 +8410,7 @@ var require_core = __commonJS({
         fail("SCOPE_MISMATCH", `scope status ${status} cannot be approved or revised`);
       }
     }
-    function beginOperation({ projectRoot, payload }) {
+    function beginOperation2({ projectRoot, payload }) {
       const { statePath, state } = loadCurrentState(projectRoot);
       assertExpected(state, payload);
       if (state.state_meta.active_operation !== null || state.next_step_plan.length) {
@@ -8495,7 +8495,7 @@ var require_core = __commonJS({
       }
       return resolved;
     }
-    function reserveArtifact({ projectRoot, payload }) {
+    function reserveArtifact2({ projectRoot, payload }) {
       const { statePath, state } = loadCurrentState(projectRoot);
       assertExpected(state, payload);
       const allowedInput = /* @__PURE__ */ new Set(["expected_project_id", "expected_revision", "operation_id", "kind", "slug", "extension"]);
@@ -8848,7 +8848,7 @@ var require_core = __commonJS({
       state.artifact_records.push(record);
       return record;
     }
-    function applyWorker({ projectRoot, payload }) {
+    function applyWorker2({ projectRoot, payload }) {
       const { statePath, state } = loadCurrentState(projectRoot);
       assertExpected(state, payload);
       const allowedInput = /* @__PURE__ */ new Set([
@@ -8935,7 +8935,7 @@ var require_core = __commonJS({
       Object.assign(state.project_summary, derived);
       return changed;
     }
-    function finishOperation({ projectRoot, payload, cancel = false }) {
+    function finishOperation2({ projectRoot, payload, cancel = false }) {
       const { statePath, state } = loadCurrentState(projectRoot);
       assertExpected(state, payload);
       const allowedInput = /* @__PURE__ */ new Set(["expected_project_id", "expected_revision", "operation_id", "updates"]);
@@ -8996,91 +8996,151 @@ var require_core = __commonJS({
         warnings: artifactWarnings(root, state)
       };
     }
-    function validateTemplate({ skillRoot }) {
+    function validateTemplate2({ skillRoot }) {
       loadTemplate(skillRoot);
       return { ok: true, code: "VALID_TEMPLATE", schema_version: SCHEMA_VERSION };
     }
     module2.exports = {
       StateError: StateError2,
-      applyWorker,
-      beginOperation,
-      finishOperation,
-      openProject,
-      reserveArtifact,
+      applyWorker: applyWorker2,
+      beginOperation: beginOperation2,
+      finishOperation: finishOperation2,
+      openProject: openProject2,
+      reserveArtifact: reserveArtifact2,
       validateProject: validateProject2,
-      validateTemplate
+      validateTemplate: validateTemplate2
     };
   }
 });
 
-// scripts/statectl-src/hook.cjs
-var path = require("node:path");
+// scripts/statectl-src/cli.cjs
 var fs = require("node:fs");
-var { StateError, validateProject } = require_core();
+var path = require("node:path");
+var {
+  StateError,
+  applyWorker,
+  beginOperation,
+  finishOperation,
+  openProject,
+  reserveArtifact,
+  validateProject,
+  validateTemplate
+} = require_core();
 function emit(value) {
   process.stdout.write(`${JSON.stringify(value)}
 `);
 }
-function readInput() {
+function parseArguments(argv) {
+  const [command, ...rest] = argv;
+  const options = {};
+  for (let index = 0; index < rest.length; index += 1) {
+    const token = rest[index];
+    if (!token.startsWith("--")) throw new StateError("INVALID_INPUT", `unexpected argument: ${token}`);
+    const name = token.slice(2);
+    if (["fresh", "cancel", "template", "discard-legacy-plan"].includes(name)) {
+      options[name] = true;
+      continue;
+    }
+    const value = rest[index + 1];
+    if (value === void 0 || value.startsWith("--")) {
+      throw new StateError("INVALID_INPUT", `missing value for --${name}`);
+    }
+    options[name] = value;
+    index += 1;
+  }
+  return { command, options };
+}
+function readPayload(inputPath) {
+  if (!inputPath) throw new StateError("INVALID_INPUT", "--input <json-file|-> is required");
+  let text;
   try {
-    const text = fs.readFileSync(0, "utf8").trim();
-    return text ? JSON.parse(text) : {};
-  } catch (_error) {
-    return {};
+    text = inputPath === "-" ? fs.readFileSync(0, "utf8") : fs.readFileSync(path.resolve(inputPath), "utf8");
+  } catch (error) {
+    throw new StateError("INVALID_INPUT", `could not read JSON input: ${error.message}`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new StateError("INVALID_INPUT", `input is not valid JSON: ${error.message}`);
   }
 }
-function firstPath(values) {
-  const value = values.find((item) => typeof item === "string" && item.trim());
-  return value ? value.trim() : null;
+function requireProjectRoot(options) {
+  if (!options["project-root"]) throw new StateError("INVALID_INPUT", "--project-root is required");
+  return path.resolve(options["project-root"]);
 }
-function nearestStateRoot(start) {
-  let current = path.resolve(start);
-  while (true) {
-    if (fs.existsSync(path.join(current, "project_state.yaml"))) return current;
-    const parent = path.dirname(current);
-    if (parent === current) return null;
-    current = parent;
+function assertOptionNames(options, allowed) {
+  const unknown = Object.keys(options).filter((name) => !allowed.includes(name));
+  if (unknown.length) throw new StateError("INVALID_INPUT", `unsupported option(s): ${unknown.map((name) => `--${name}`).join(", ")}`);
+}
+function inferSkillRoot() {
+  return process.env.STATECTL_SKILL_ROOT ? path.resolve(process.env.STATECTL_SKILL_ROOT) : path.resolve(__dirname, "..");
+}
+function main() {
+  const { command, options } = parseArguments(process.argv.slice(2));
+  const skillRoot = inferSkillRoot();
+  let result;
+  switch (command) {
+    case "open":
+      assertOptionNames(options, ["project-root", "fresh", "discard-legacy-plan"]);
+      result = openProject({
+        projectRoot: requireProjectRoot(options),
+        skillRoot,
+        fresh: Boolean(options.fresh),
+        discardLegacyPlan: Boolean(options["discard-legacy-plan"])
+      });
+      break;
+    case "begin":
+      assertOptionNames(options, ["project-root", "input"]);
+      result = beginOperation({
+        projectRoot: requireProjectRoot(options),
+        payload: readPayload(options.input)
+      });
+      break;
+    case "reserve-artifact":
+      assertOptionNames(options, ["project-root", "input"]);
+      result = reserveArtifact({
+        projectRoot: requireProjectRoot(options),
+        payload: readPayload(options.input)
+      });
+      break;
+    case "apply":
+      assertOptionNames(options, ["project-root", "input"]);
+      result = applyWorker({
+        projectRoot: requireProjectRoot(options),
+        payload: readPayload(options.input)
+      });
+      break;
+    case "finish":
+      assertOptionNames(options, ["project-root", "input", "cancel"]);
+      result = finishOperation({
+        projectRoot: requireProjectRoot(options),
+        payload: readPayload(options.input),
+        cancel: Boolean(options.cancel)
+      });
+      break;
+    case "validate":
+      assertOptionNames(options, ["project-root", "template"]);
+      if (options.template && options["project-root"]) throw new StateError("INVALID_INPUT", "validate accepts either --template or --project-root, not both");
+      result = options.template ? validateTemplate({ skillRoot }) : validateProject({ projectRoot: requireProjectRoot(options) });
+      if (!result.ok) process.exitCode = 1;
+      break;
+    default:
+      throw new StateError(
+        "INVALID_INPUT",
+        "command must be one of: open, begin, reserve-artifact, apply, finish, validate"
+      );
   }
-}
-function projectRootFrom(input) {
-  const explicit = firstPath([
-    input && typeof input.projectRoot === "string" ? input.projectRoot : null,
-    process.env.CLAUDE_PROJECT_DIR,
-    process.env.CODEX_PROJECT_DIR
-  ]);
-  if (explicit) return path.resolve(explicit);
-  const cwd = firstPath([
-    input && typeof input.cwd === "string" ? input.cwd : null,
-    process.env.PWD,
-    process.cwd()
-  ]) || process.cwd();
-  return nearestStateRoot(cwd) || path.resolve(cwd);
+  emit(result);
 }
 try {
-  const result = validateProject({ projectRoot: projectRootFrom(readInput()) });
-  if (!result.ok && result.code === "MISSING_STATE") {
-    emit({
-      systemMessage: "project_state.yaml does not exist; causal-consultant persistence is not active.",
-      suppressOutput: true
-    });
-  } else if (result.active_operation !== null || result.plan.length > 0) {
-    emit({
-      decision: "block",
-      reason: "causal-consultant operation is still active; resume it and finish or cancel before stopping.",
-      systemMessage: "project_state.yaml contains an unfinished v5 operation."
-    });
-  } else if (result.warnings.length) {
-    emit({
-      systemMessage: `project_state.yaml is valid, with ${result.warnings.length} unavailable or incomplete artifact reference(s).`,
-      suppressOutput: true
-    });
-  } else {
-    emit({ suppressOutput: true });
-  }
+  main();
 } catch (error) {
+  const known = error instanceof StateError;
   emit({
-    decision: "block",
-    reason: `project_state.yaml validation failed: ${error && error.message ? error.message : String(error)}`,
-    systemMessage: error instanceof StateError ? `project_state.yaml failed strict validation (${error.code}).` : "project_state.yaml validation failed unexpectedly."
+    ok: false,
+    code: known ? error.code : "INTERNAL_ERROR",
+    message: error && error.message ? error.message : String(error),
+    ...known && error.details !== void 0 ? { details: error.details } : {}
   });
+  process.exitCode = 1;
 }

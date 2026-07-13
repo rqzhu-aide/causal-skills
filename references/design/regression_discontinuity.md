@@ -93,29 +93,23 @@ Choose the estimator lane before choosing software. Package lanes are reference 
 
 Key literature anchors: continuity-based RD, local polynomial RD, robust bias correction, McCrary/density testing, local randomization, fuzzy RD as local IV, regression kink, geographic RD, and local external validity.
 
-## Connections With Supports
+## Support And Rerouting Connections
 
-- Recommend `statistical-validity` for bandwidth/donut/placebo sensitivity, local support, cluster/robust inference, discrete running variables, and reproducibility.
-- Use `instrumental_variables` logic when the RD is fuzzy and the cutoff acts as a local instrument; this design still owns the cutoff diagnostics.
+- Use `statistical-validity` only when unresolved bandwidth, local-support,
+  discrete-score, inference, or reproducibility concerns exceed the RD
+  diagnostics above.
+- Keep fuzzy local-IV assumptions inside this RD scope. Return to `causal_check`
+  for `instrumental_variables` only when the instrument rather than the cutoff
+  becomes the primary identification frame.
 - Use `heterogeneous-effects` when the user wants local subgroup or cutoff-specific variation.
 - Use `non-continuous-outcomes` for binary risk, survival, count, recurrent-event, or competing-risk outcomes near the cutoff.
 - Use `policy-making-and-transportability` when the local cutoff result is being generalized, deployed, or used for a decision outside the threshold region.
-- Use `interference_spillovers` for geographic/border RD or thresholds where spillovers contaminate nearby units.
+- Return to `causal_check` for `interference_spillovers` when spillovers become
+  the primary estimand; otherwise retain them as RD contamination diagnostics.
 
-## Artifact Records Write
+## Execution Record
 
-In approved execution, append one compact `artifact_records` entry according to `references/design_execution_contract.md`. Include RD specifics in the entry summary or in a note/manifest inside the output location, such as:
-
-- `design_id: regression_discontinuity`
-- `fit_status`: `direct`, `adapted`, `planning_only`, `blocked`, or `limited`
-- `data_contract`: running variable, cutoff, treatment jump, local support, outcome, manipulation risk, inference route, and inspected-vs-described status
-- `analysis_plan`: RD lane, local estimand, estimator settings, and diagnostic sequence
-- `estimand_cues`: sharp RD, fuzzy local Wald, kink, local randomization, border RD, multiple cutoff, or descriptive discontinuity fallback
-- `twists`: data-shape, estimand, diagnostic, implementation, or fallback twists that would make the route honest
-- `diagnostics_needed` and `diagnostics_reviewed`
-- `boundaries`: invalidating traps, local claim limits, manipulation/support issues, and external-validity cautions
-- `packages`: package lanes only if relevant to the next decision
-- `blocker_reason`: why the RD design did not work, if status is `blocked`
-- `recommended_next_step`: one smallest useful data check, diagnostic, support clarification for `causal_check`, report asset, planning memo, or stop/refusal path
-
-Do not update `project_summary` or `next_step_plan`; `team_lead` updates aggregate workflow fields after the route finishes.
+Follow the shared summary and exact-manifest rules in
+`references/design_execution_contract.md`. Emphasize the cutoff and running
+variable, treatment jump, local estimand, manipulation/support and bandwidth
+diagnostics, and the local claim boundary.

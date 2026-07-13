@@ -86,35 +86,29 @@ Choose the estimator lane before choosing software. Package lanes are reference 
 - Classic SCM: R `Synth`, `tidysynth`; Stata `synth_runner`; Python `pysyncon`.
 - Augmented SCM: R `augsynth`; useful when donor structure is credible but pre-fit is imperfect.
 - Generalized SCM/matrix completion: R `gsynth`, `fect`; useful for multiple treated units/time periods with latent-factor assumptions.
-- Synthetic DiD: R `synthdid`; Stata `SDID`; connect to DiD when treatment timing and panel support matter.
+- Synthetic DiD: R `synthdid`; Stata `SDID`; return to `causal_check` for
+  `difference_in_differences` when group-time identification is primary.
 - BSTS/CausalImpact/comparative ITS: R `CausalImpact`, `bsts`; Python CausalImpact-style ports; Python `statsmodels` for segmented regression/SARIMAX/autocorrelation diagnostics.
 - Time-series benchmarks: R `forecast`, `bsts`, `strucchange`; Python `statsmodels`; use as diagnostics or forecast support, not automatic causal identification.
 
 Key literature anchors: synthetic control, augmented SCM, generalized SCM, synthetic DiD, interrupted time series, comparative ITS, Bayesian structural time series, placebo/permutation inference, conformal inference, and matrix completion for counterfactual panels.
 
-## Connections With Supports
+## Support And Rerouting Connections
 
-- Recommend `statistical-validity` for pre-fit diagnostics, placebo/sensitivity, time-series residuals, uncertainty route, reproducibility, and model-dependence checks.
-- Use `difference_in_differences` when many treated cohorts, staggered adoption, group-time ATT, or DiD comparisons are central.
-- Use `interference_spillovers` when donor/control units may be contaminated by spillovers, markets, geography, or displacement.
+- Use `statistical-validity` only when unresolved pre-fit, placebo/sensitivity,
+  uncertainty, reproducibility, or model-dependence concerns exceed the
+  synthetic/time-series diagnostics above.
+- Return to `causal_check` for `difference_in_differences` when group-time or
+  multi-cohort identification becomes primary.
+- Return to `causal_check` for `interference_spillovers` when spillovers become
+  the primary estimand; otherwise retain donor contamination as a design threat.
 - Use `non-continuous-outcomes` when the outcome is a rate, count, event, survival, competing-risk, categorical, or denominator-sensitive measure.
 - Use `policy-making-and-transportability` when aggregate results are being generalized, deployed, or applied to another target population/site/time.
 - Use `heterogeneous-effects` when several treated units or sites allow credible effect variation analysis.
 
-## Artifact Records Write
+## Execution Record
 
-In approved execution, append one compact `artifact_records` entry according to `references/design_execution_contract.md`. Include synthetic/time-series specifics in the entry summary or in a note/manifest inside the output location, such as:
-
-- `design_id: synthetic_control_time_series`
-- `fit_status`: `direct`, `adapted`, `planning_only`, `blocked`, or `limited`
-- `data_contract`: treated unit(s), time index, intervention date, donor/control pool, outcome scale, pre-period, inference route, and inspected-vs-described status
-- `analysis_plan`: counterfactual lane, estimand, diagnostic sequence, and sensitivity plan
-- `estimand_cues`: treated-unit gap, cumulative gap, synthetic DiD ATT, ITS level/slope change, comparative ITS, forecast gap, or descriptive fallback
-- `twists`: data-shape, estimand, diagnostic, implementation, or fallback twists that would make the route honest
-- `diagnostics_needed` and `diagnostics_reviewed`
-- `boundaries`: invalidating traps, donor/pre-fit limits, concurrent shocks, aggregate scope, and transport cautions
-- `packages`: package lanes only if relevant to the next decision
-- `blocker_reason`: why the synthetic/time-series design did not work, if status is `blocked`
-- `recommended_next_step`: one smallest useful data check, diagnostic, support clarification for `causal_check`, report asset, planning memo, or stop/refusal path
-
-Do not update `project_summary` or `next_step_plan`; `team_lead` updates aggregate workflow fields after the route finishes.
+Follow the shared summary and exact-manifest rules in
+`references/design_execution_contract.md`. Emphasize treated and donor units,
+intervention timing and estimand, pre-fit/placebo and time-series diagnostics,
+concurrent shocks, and the aggregate claim boundary.

@@ -5,3 +5,9 @@ project_state_stop_check_hook_run.txt
 # Python bytecode.
 __pycache__/
 *.py[cod]
+
+# Node development dependencies. Runtime bundles are committed.
+node_modules/
+
+# Controller patch payloads and interrupted test files.
+.statectl-tmp/

@@ -1,6 +1,6 @@
 # Support: non-continuous-outcomes
 
-Context only. Relevant when the outcome is binary, ordinal, categorical, count, zero-inflated, time-to-event, recurrent event, competing risk, bounded, or otherwise not well represented by a simple continuous mean. The selected design route owns execution, YAML updates, diagnostics, and artifact records.
+Context only. Relevant when the outcome is binary, ordinal, categorical, count, zero-inflated, time-to-event, recurrent event, competing risk, bounded, or otherwise not well represented by a simple continuous mean. The selected design route owns execution, diagnostics, and the controller submission.
 
 ## Additional Information
 
@@ -46,7 +46,9 @@ Context only. Relevant when the outcome is binary, ordinal, categorical, count, 
 
 ## Other Considerations
 
-- Have the selected design route flag `statistical-validity` follow-up in its scope or execution notes, especially for event counts, denominators, censoring, overdispersion, rare outcomes, category sparsity, scale sensitivity, missingness, survival nuisance, binary risk, or AIPW/TMLE/DML-style estimation.
+- Flag `statistical-validity` follow-up only when unresolved event-support,
+  censoring, scale-sensitivity, or nuisance-model concerns exceed the selected
+  design's normal diagnostics.
 - Consider grouping, collapsing, thresholding, or transforming outcomes only when the new scale matches the decision or domain meaning, not merely to simplify modeling.
 - Consider `heterogeneous-effects` if outcome-scale conclusions differ across subgroups, sites, cohorts, risk levels, or event-count strata.
 - Consider `dose-response` if the outcome is non-continuous and the exposure has intensity, duration, cumulative dose, or threshold structure.

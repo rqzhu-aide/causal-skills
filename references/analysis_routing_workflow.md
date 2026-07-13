@@ -18,8 +18,9 @@ Do not put scope status, mode, task text, or approval state in
 ## Existing Analysis Feedback
 
 Read `council_chamber.analysis_execution` as a mapping of design ids to current
-analysis handoffs. For each relevant design slot, review `current_status`,
-`support`, `summary`, `questions_for_user`, and `feedback_to_route`.
+analysis handoffs. For each relevant design slot, review `scope_id`,
+`scope_revision`, `current_status`, `support`, `summary`,
+`questions_for_user`, and `feedback_to_route`.
 
 Status meanings: `requested` means scope review is unfinished or the slot is
 missing; `ready` means reviewed and waiting for user approval; `blocked` means
@@ -28,12 +29,16 @@ created.
 
 Decision rules:
 
-- If the user continues or approves the most recent relevant `ready` slot,
-  route `analysis_execution.<design_id>` with that slot's `support` if valid.
-- If multiple `ready` slots exist, prefer the most recent relevant slot unless
-  the user points to another one.
-- If the user changes the causal model, contrast, data source, output, or claim
-  boundary, do not approve the old scope; route the new work normally.
+- If the user clearly approves one relevant `ready` slot identified by the
+  current message and its preceding team-lead context, route
+  `analysis_execution.<design_id>` with that slot's valid `support` and pass its
+  exact `{kind: analysis, id: scope_id, revision: scope_revision}` as the
+  `begin` `scope_ref`.
+- If multiple `ready` slots remain plausible, plan only `team_lead`. Recency may
+  order their presentation but never selects one for execution.
+- If the user changes the causal target, contrast, data source, model family,
+  main output, or claim boundary, do not reference or approve the old scope;
+  route the new work normally so the design route can revise it.
 - If the relevant slot is missing, unknown, invalid, or method fit changed
   without a clear design/support route, route `causal_check` or `team_lead`
   instead of guessing.
@@ -71,16 +76,8 @@ Decision rules:
 - If the recommendation is not loadable, plan only `team_lead` for boundary
   synthesis.
 
-## Plan Entry
-
-Use this shape:
-
-```yaml
-next_step_plan:
-  - id: analysis_execution.<design_id>
-    support: optional_support_or_null
-  - id: team_lead
-```
-
-The selected design route reads the current user message and live state to
-decide whether to prepare/revise scope feedback or execute approved work.
+Use the analysis `begin` contract in `route_selection_workflow.md`. A persisted
+non-null `scope_ref` is the recorded approval result; on resume, do not
+reinterpret it from a later message. Before execution, the worker still
+rechecks the exact scope/support and live data, domain, and causal gates. If any
+gate changed, return a ready or blocked handoff without output.

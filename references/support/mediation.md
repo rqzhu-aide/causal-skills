@@ -1,6 +1,6 @@
 # Support: mediation
 
-Context only. Relevant when the causal target asks how an effect works, whether a mediator explains the effect, whether to adjust for an intermediate variable, or how to describe pathways. The selected design route owns execution, YAML updates, diagnostics, and artifact records.
+Context only. Relevant when the causal target asks how an effect works, whether a mediator explains the effect, whether to adjust for an intermediate variable, or how to describe pathways. The selected design route owns execution, diagnostics, and the controller submission.
 
 ## Additional Information
 
@@ -45,7 +45,9 @@ Context only. Relevant when the causal target asks how an effect works, whether 
 
 ## Other Considerations
 
-- Have the selected design route flag `statistical-validity` follow-up in its scope or execution notes, especially for mediator timing, mediator-outcome confounding, sensitivity, post-treatment adjustment risks, flexible nuisance models, interventional-effect g-computation, TMLE/DML-style estimation, or high-dimensional mediator/outcome models.
+- Flag `statistical-validity` follow-up only when unresolved mediation
+  sensitivity or nuisance-model concerns exceed the selected design's normal
+  diagnostics; timing and mediator-outcome confounding remain design issues.
 - Consider `non-continuous-outcomes` if the mediator or outcome is binary, ordinal, count, survival, recurrent-event, or competing-risk.
 - Consider `dose-response` if the exposure or mediator has intensity, duration, cumulative exposure, or threshold structure.
 - Consider `heterogeneous-effects` if pathway evidence may differ by subgroup, site, cohort, baseline risk, or exposure level.

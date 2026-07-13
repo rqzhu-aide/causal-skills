@@ -92,27 +92,18 @@ Key literature anchors: target-trial emulation, Rubin/Holland potential outcomes
 
 ## Connections With Supports
 
-- Recommend `statistical-validity` for most serious observational plans: support, balance, weights, sensitivity, DR/TMLE/DML, negative controls, and richer diagnostics often decide whether execution is ready.
+- Use `statistical-validity` only when unresolved support, balance, weighting,
+  sensitivity, or nuisance-model concerns exceed the observational diagnostics
+  above.
 - Use `heterogeneous-effects` when the question is about subgroup, CATE, site/time, equity, safety, or effect-modifier variation.
 - Use `dose-response` when exposure is continuous, ordinal, cumulative, duration-based, threshold-based, or shift-like.
 - Use `mediation` when the user wants pathway interpretation or asks whether to adjust for an intermediate variable.
 - Use `non-continuous-outcomes` for binary, count, ordinal, survival, recurrent-event, competing-risk, or censoring-sensitive outcomes.
 - Use `policy-making-and-transportability` when the estimate will guide action, targeting, deployment, or movement to another population.
 
-## Artifact Records Write
+## Execution Record
 
-In approved execution, append one compact `artifact_records` entry according to `references/design_execution_contract.md`. Include observational-design specifics in the entry summary or in a note/manifest inside the output location, such as:
-
-- `design_id: single_time_observational`
-- `fit_status`: `direct`, `adapted`, `planning_only`, `blocked`, or `limited`
-- `data_contract`: target trial slots, time zero, exposure/comparator, outcome window, adjustment set, support, and inspected-vs-described status
-- `analysis_plan`: target population, estimand, estimator lane, and diagnostic sequence
-- `estimand_cues`: ATE, ATT, overlap, active-comparator, restricted-support, descriptive fallback, or sensitivity-only
-- `twists`: data-shape, estimand, diagnostic, implementation, or fallback twists that would make the route honest
-- `diagnostics_needed` and `diagnostics_reviewed`
-- `boundaries`: invalidating traps, claim limits, measured-only assumptions, and support/selection cautions
-- `packages`: package lanes only if relevant to the next decision
-- `blocker_reason`: why the observational design did not work, if status is `blocked`
-- `recommended_next_step`: one smallest useful data check, diagnostic, support clarification for `causal_check`, report asset, planning memo, or stop/refusal path
-
-Do not update `project_summary` or `next_step_plan`; `team_lead` updates aggregate workflow fields after the route finishes.
+Follow the shared summary and exact-manifest rules in
+`references/design_execution_contract.md`. Emphasize the target-trial slots,
+time zero, estimand and target population, support and adjustment diagnostics,
+and the measured-confounding claim boundary.

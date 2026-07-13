@@ -1,6 +1,9 @@
 # Design Frame: descriptive_association
 
-Use this file only for approved non-causal descriptive or association analysis. This is not a causal design. It is an absolute fallback when causal identification is not supportable, or when the user explicitly wants association-only results.
+Use this file to plan or execute non-causal descriptive or association analysis;
+execute only through an approved ready scope. This is not a causal design. It
+is the fallback when causal identification is not supportable, or when the user
+explicitly wants association-only results.
 
 Do not use this route to strengthen causal wording, choose adjustment sets for causal interpretation, or imply that observed associations estimate effects.
 
@@ -77,18 +80,12 @@ Use package choice after the data shape and approved lane are clear.
 - R: `stats`, `rstatix`, `coin`, `exact2x2`, `WRS2`, `broom`, `effectsize`, `emmeans`, `multcomp`, `qvalue`, `Hmisc`, `psych`, `mgcv`, `lme4`, `glmmTMB`, `survival`.
 - Python: `pandas`, `scipy.stats`, `statsmodels`, `pingouin`, `scikit-posthocs`, `sklearn`, `lifelines`, `seaborn`, `matplotlib`, `numpy`.
 
-## State Write
+## Execution Record
 
-In approved execution, append one compact `artifact_records` entry according to `references/design_execution_contract.md`. Include descriptive-association specifics in the entry summary or in a note/manifest inside the output location, such as:
-
-- variables and outcomes summarized
-- association lane and multiplicity control
-- key patterns, null findings, and unstable findings
-- missingness, support, dependence, and model limits
-- explicit statement that results are non-causal
-- recommended next step for causal_check, data_audit, domain_expert, or report_writer
-
-Do not update `project_summary` or `next_step_plan`; `team_lead` handles aggregate state after the route finishes.
+Follow the shared summary and exact-manifest rules in
+`references/design_execution_contract.md`. Emphasize variables, analysis lane,
+multiplicity, key/null/unstable patterns, material limits, and the explicit
+non-causal boundary.
 
 ## Boundary
 

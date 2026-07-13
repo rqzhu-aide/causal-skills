@@ -1,7 +1,7 @@
 # Interactive Causal Consultant
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-4.5.3-blue.svg)]()
+[![Version](https://img.shields.io/badge/version-5.0.0-blue.svg)]()
 [![Status](https://img.shields.io/badge/status-active%20development-orange.svg)]()
 
 An interactive causal inference consultant skill for moving from a rough causal
@@ -17,9 +17,12 @@ pair to a model.
 
 ## How It Works
 
-`causal-consultant` is a routed skill. The top-level `SKILL.md` initializes
-`project_state.yaml`, writes a compact current-turn `next_step_plan`, loads the
-planned route reference, and then loads `team_lead` as the final manager.
+`causal-consultant` is a routed skill. The top-level `SKILL.md` opens a
+versioned `project_state.yaml` through the bundled state controller, selects one
+bounded route, and then loads `team_lead` as the final manager. The controller
+constructs the current-turn plan, enforces route ownership, records artifacts,
+and closes each operation atomically; the route files retain all causal and
+scientific judgment.
 
 The internal team is:
 
@@ -43,16 +46,19 @@ The internal team is:
   response, mediation, transportability, non-continuous outcomes, and
   statistical validity.
 
-Version 4.2.10 uses a compact route-reference architecture: one state file at
-`project_state.yaml`, one current-turn route before `team_lead`, chamber
-feedback for report and analysis scope handoff, compact route-owned YAML
-sections for durable findings and created outputs, and conditional
-report/analysis references that load only when needed.
+Version 5.0.0 keeps the compact route-reference architecture while adding a
+deterministic state protocol: strict YAML validation, schema migration from the
+recognized v4.5 state, revision-checked owner-scoped updates, exact analysis and
+report scope identities, verified artifact manifests, and automatic recovery
+at worker/lead boundaries. Runtime use requires Node.js 18 or newer, but the
+committed bundle needs no `npm install` or global packages.
 
 ```text
 User <-> causal-consultant router
+          -> statectl open/begin
           -> selected route reference
-          -> team_lead
+          -> statectl apply
+          -> team_lead -> statectl finish
 ```
 
 ## What It Helps With
@@ -81,7 +87,8 @@ The skill is intentionally interactive. It usually shows framing, consultant
 options, boundaries, and a scoped next step before analysis expands. Broad
 requests like "do your best" or "give me a report" are treated as invitations to
 recommend the safest next move, not permission to skip the causal consulting
-process.
+process. If a prior operation was interrupted, the next explicit invocation on
+the same project resumes its worker or team-lead boundary before new routing.
 
 ## Activation
 
@@ -98,8 +105,20 @@ me think through this causal question.` Or use the direct command:
 
 ## Install
 
-Install by copying this GitHub repository folder into your personal or
-project-local skill folder.
+Install the runtime subset into your personal or project-local skill folder:
+
+```text
+SKILL.md
+LICENSE
+assets/
+references/
+scripts/statectl.cjs
+scripts/vendor-licenses/
+README.md  (optional)
+```
+
+The repository's `project-hooks/`, package/build source, and tests are not part
+of the personal skill runtime.
 
 Codex personal install:
 
@@ -127,9 +146,10 @@ Copy the folder from https://github.com/rqzhu-aide/causal-consultant into `.agen
 
 ### Optional Project Hooks
 
-Project-level hooks are optional stability checks. They are not part of the
-personal skill install. If you want them, copy the hook files into each local
-project where you want the checks to run.
+Project-level hooks are optional stability checks. They are standalone bundles
+generated from the same strict parser and validator as `statectl`; they do not
+fall back to text-shape checking or require global YAML packages. If you want
+them, copy the hook files separately into each project where they should run.
 
 Codex project hook, PowerShell. Navigate to your project working directory, then
 run:

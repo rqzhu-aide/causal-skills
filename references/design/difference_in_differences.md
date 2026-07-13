@@ -85,35 +85,29 @@ Choose the estimator lane before choosing software. Package lanes are reference 
 - Two-group/two-period or conditional DiD: R `DRDID`, `did`; Python `moderndid`, `diff-diff`, custom `statsmodels`/`linearmodels` benchmarks.
 - Event-study and FE benchmarks: R `fixest`, `lfe`; Python `statsmodels`, `linearmodels`; keep TWFE labeled when not primary.
 - Sensitivity to parallel-trend violations: R/Stata `HonestDiD`; custom sensitivity after event-study estimates.
-- Synthetic DiD or weak comparison group: R `synthdid`, `augsynth`; connect to `synthetic_control_time_series`.
+- Synthetic DiD or weak comparison group: R `synthdid`, `augsynth`; return to
+  `causal_check` for `synthetic_control_time_series` if donor-weighted
+  identification becomes primary.
 - DML/orthogonal DiD: R/Python `DoubleML`; use only when conditional parallel trends and nuisance roles are explicit.
 - TWFE diagnostics: R `bacondecomp`, decomposition helpers, or manual comparison/weight diagnostics.
 
 Key literature anchors: canonical DiD, parallel trends, Callaway-Sant'Anna group-time ATT, Sun-Abraham interaction-weighted event studies, Borusyak-Jaravel-Spiess imputation, Gardner did2s, de Chaisemartin-D'Haultfoeuille estimators, DR-DiD, synthetic DiD, and HonestDiD sensitivity.
 
-## Connections With Supports
+## Support And Rerouting Connections
 
-- Recommend `statistical-validity` for richer diagnostics, DR-DiD, nuisance adjustment, cluster/serial inference, sensitivity, and reproducibility.
+- Use `statistical-validity` only when unresolved nuisance adjustment,
+  cluster/serial inference, sensitivity, or reproducibility concerns exceed the
+  DiD diagnostics above.
 - Use `non-continuous-outcomes` for fixed-horizon risk, event counts, survival, competing risks, rates, or categorical outcomes in DiD.
 - Use `heterogeneous-effects` when dynamic, cohort-specific, subgroup, site, or effect-modifier variation is central.
 - Use `dose-response` when treatment intensity, exposure level, duration, or continuous dose replaces binary adoption.
 - Use `policy-making-and-transportability` when the result is meant to guide policy choice, target a population, or generalize beyond treated settings.
-- Use `interference_spillovers` if comparison units may be indirectly treated or spillovers contaminate controls.
+- Return to `causal_check` for `interference_spillovers` when spillovers become
+  the primary estimand; otherwise record control contamination as a DiD threat.
 
-## Artifact Records Write
+## Execution Record
 
-In approved execution, append one compact `artifact_records` entry according to `references/design_execution_contract.md`. Include DiD specifics in the entry summary or in a note/manifest inside the output location, such as:
-
-- `design_id: difference_in_differences`
-- `fit_status`: `direct`, `adapted`, `planning_only`, `blocked`, or `limited`
-- `data_contract`: unit-time data, treatment cohorts, comparison group, pre-period, outcome, composition, inference level, and inspected-vs-described status
-- `analysis_plan`: DiD/event-study estimand, estimator lane, and diagnostic sequence
-- `estimand_cues`: two-period ATT, group-time ATT, event-time effect, aggregate ATT, repeated-cross-section ATT, synthetic DiD, or descriptive trend fallback
-- `twists`: data-shape, estimand, diagnostic, implementation, or fallback twists that would make the route honest
-- `diagnostics_needed` and `diagnostics_reviewed`
-- `boundaries`: invalidating traps, comparison limits, parallel-trend assumptions, contamination, and inference cautions
-- `packages`: package lanes only if relevant to the next decision
-- `blocker_reason`: why the DiD design did not work, if status is `blocked`
-- `recommended_next_step`: one smallest useful data check, diagnostic, support clarification for `causal_check`, report asset, planning memo, or stop/refusal path
-
-Do not update `project_summary` or `next_step_plan`; `team_lead` updates aggregate workflow fields after the route finishes.
+Follow the shared summary and exact-manifest rules in
+`references/design_execution_contract.md`. Emphasize treatment cohorts and
+comparison units, the DiD/event-time estimand, pre-period and timing diagnostics,
+inference level, and the parallel-trends claim boundary.

@@ -91,30 +91,22 @@ Choose the estimator lane before choosing software. Package lanes are reference 
 
 Key literature anchors: Neyman randomization, Fisher randomization tests, Rubin/Holland potential outcomes, CONSORT flow/reporting, ICH E9(R1) estimands, Lin covariate adjustment, CUPED for online experiments, trustworthy online controlled experiments, and LATE/CACE for encouragement/noncompliance.
 
-## Connections With Supports
+## Support And Rerouting Connections
 
-- Recommend `statistical-validity` for richer diagnostics, precision adjustment, randomization/permutation inference, multiplicity, missingness/censoring, fold integrity, and reproducibility.
+- Use `statistical-validity` only when unresolved inference, multiplicity,
+  missingness/censoring, fold-integrity, or reproducibility concerns exceed the
+  randomized design diagnostics above.
 - Use `heterogeneous-effects` for prespecified subgroup effects, exploratory CATE, site/time variation, equity/safety strata, or modifier-specific experiment results.
 - Use `dose-response` when assignment changes dose, intensity, duration, encouragement strength, or exposure level rather than simple treatment/control status.
 - Use `non-continuous-outcomes` for binary, ordinal, count, survival, recurrent-event, competing-risk, or censoring-sensitive outcomes.
 - Use `policy-making-and-transportability` when experiment results are being used for targeting, rollout, deployment, external validity, policy value, or decision rules.
 - Use `mediation` only when mediator timing and post-assignment pathway assumptions are explicit.
-- Use `interference_spillovers` when contamination, peer effects, markets, clusters, or treatment saturation threaten the no-interference interpretation.
+- Return to `causal_check` for `interference_spillovers` when spillovers become
+  the primary identification problem; it is another design, not a support.
 
-## Artifact Records Write
+## Execution Record
 
-In approved execution, append one compact `artifact_records` entry according to `references/design_execution_contract.md`. Include randomized-assignment specifics in the entry summary or in a note/manifest inside the output location, such as:
-
-- `design_id: randomized_assignment`
-- `fit_status`: `direct`, `adapted`, `planning_only`, `blocked`, or `limited`
-- `data_contract`: assignment mechanism, unit, arms/probabilities, time zero, population, outcome window, analysis set, compliance, cluster/block structure, and inspected-vs-described status
-- `analysis_plan`: analysis-ready data shape, assignment-based estimand, estimator lane, and diagnostic sequence
-- `estimand_cues`: ITT, CACE/LATE, cluster-level assignment effect, receipt/per-protocol warning, triggered-subset warning, or descriptive fallback
-- `twists`: data-shape, estimand, diagnostic, implementation, or fallback twists that would make the route honest
-- `diagnostics_needed` and `diagnostics_reviewed`
-- `boundaries`: invalidating traps, claim limits, and uncertainty/multiplicity cautions
-- `packages`: package lanes only if relevant to the next decision
-- `blocker_reason`: why the randomized design did not work, if status is `blocked`
-- `recommended_next_step`: one smallest useful data check, diagnostic, design/support clarification for `causal_check`, report asset, planning memo, or stop/refusal path
-
-Do not update `project_summary` or `next_step_plan`; `team_lead` updates aggregate workflow fields after the route finishes.
+Follow the shared summary and exact-manifest rules in
+`references/design_execution_contract.md`. Emphasize the assignment mechanism,
+assignment-based estimand, integrity and inference diagnostics, compliance when
+relevant, and the resulting claim boundary.

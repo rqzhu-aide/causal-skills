@@ -86,37 +86,32 @@ Choose the estimator lane before choosing software. Package lanes are reference 
 - Partial interference and clustered spillovers: R `inferference`, `interferenceCI`, `clusteredinterference`.
 - Network or spatial exposure construction: R `igraph`, `tidygraph`, `sf`; Python `networkx`, `geopandas`, `shapely`.
 - Spatial/spatiotemporal causal support: R/GitHub `SpatialEffect`, R `geocausal`; use only when assumptions match the data.
-- IV/noncompliance plus spillovers: R `latenetwork`; connect to `instrumental_variables`.
+- IV/noncompliance plus spillovers: R `latenetwork`; return to `causal_check`
+  for `instrumental_variables` when the instrument is primary.
 - Dependence-aware inference: Python `networkinference`, network HAC/spatial HAC/custom resampling; R custom randomization/permutation or spatial robust workflows.
 - Flexible nuisance after exposure map is fixed: R `grf`, `SuperLearner`, `xgboost`; Python `DoubleML`, `EconML`, sklearn/xgboost; do not let ML define the estimand.
 - Regression analogs and diagnostics: R `fixest`, `lme4`, `mgcv`; Python `statsmodels`; useful only after exposure map and confounding story are explicit.
 
 Key literature anchors: SUTVA/no-interference violations, partial interference, two-stage randomized designs, exposure mapping, direct/indirect/total/overall effects, network interference, spatial spillovers, spillover-robust experimental design, and peer-effect homophily cautions.
 
-## Connections With Supports
+## Support And Rerouting Connections
 
-- Recommend `statistical-validity` for exposure-map support, balance/overlap, dependence-aware inference, sensitivity to maps, and reproducibility.
+- Use `statistical-validity` only when unresolved exposure-map support,
+  dependence-aware inference, map sensitivity, or reproducibility concerns
+  exceed the interference diagnostics above.
 - Use `policy-making-and-transportability` when treatment saturation, allocation, spillover policy value, market decisions, or deployment constraints matter.
 - Use `dose-response` when spillover exposure is a treated-neighbor share, radius-weighted dose, saturation level, intensity, or exposure-response curve.
 - Use `heterogeneous-effects` when spillovers vary by subgroup, network position, geography, site, cohort, or baseline risk.
-- Use `instrumental_variables` logic when assignment/encouragement shifts own or peer exposure with noncompliance.
-- Use `difference_in_differences`, `regression_discontinuity`, or `synthetic_control_time_series` when spillovers mainly threaten those comparison designs; this route should write the contamination/exposure-map implication.
+- Return to `causal_check` for `instrumental_variables` when an instrument and
+  noncompliance become the primary identification frame.
+- Return to `causal_check` for `difference_in_differences`,
+  `regression_discontinuity`, or `synthetic_control_time_series` when
+  interference is only a threat to that primary comparison design.
 - Use `non-continuous-outcomes` for contagion, infection, event, count, survival, recurrent-event, or competing-risk spillover outcomes.
 
-## Artifact Records Write
+## Execution Record
 
-In approved execution, append one compact `artifact_records` entry according to `references/design_execution_contract.md`. Include interference specifics in the entry summary or in a note/manifest inside the output location, such as:
-
-- `design_id: interference_spillovers`
-- `fit_status`: `direct`, `adapted`, `planning_only`, `blocked`, or `limited`
-- `data_contract`: units, mechanism, exposure map, timing, support, design source, dependence, and inspected-vs-described status
-- `analysis_plan`: direct/spillover estimand, estimator lane, and diagnostic sequence
-- `estimand_cues`: direct, indirect, total, overall, saturation, exposure-response, contamination audit, or descriptive fallback
-- `twists`: data-shape, estimand, diagnostic, implementation, or fallback twists that would make the route honest
-- `diagnostics_needed` and `diagnostics_reviewed`
-- `boundaries`: invalidating traps, no-interference limits, exposure-map uncertainty, confounding/homophily, and dependence cautions
-- `packages`: package lanes only if relevant to the next decision
-- `blocker_reason`: why the interference design did not work, if status is `blocked`
-- `recommended_next_step`: one smallest useful data check, diagnostic, support clarification for `causal_check`, report asset, planning memo, or stop/refusal path
-
-Do not update `project_summary` or `next_step_plan`; `team_lead` updates aggregate workflow fields after the route finishes.
+Follow the shared summary and exact-manifest rules in
+`references/design_execution_contract.md`. Emphasize units and exposure mapping,
+the direct/spillover estimand, support and dependence diagnostics,
+confounding/homophily limits, and the interference claim boundary.
