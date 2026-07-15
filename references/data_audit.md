@@ -77,7 +77,7 @@ Submit chamber feedback only under `updates.council_chamber.data_audit`.
 
 Set:
 
-- `current_status`: one short sentence on what the audit could verify.
+- `current_status`: one short handoff disposition.
 - `summary`: compact synthesis of data support, blockers, or usable facts.
 - `questions_for_user`: 0-3 questions or choices that would improve the next
   decision.

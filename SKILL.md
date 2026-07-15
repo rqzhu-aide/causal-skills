@@ -39,12 +39,14 @@ manager synthesis and the only user-facing response belong to
      operation.
    - idle, created, migrated, or reset: continue to route selection.
    A materially new message does not replace or queue an active operation.
-   Finish the persisted operation first; team lead acknowledges the new request
-   as the next operation. During resume, the persisted self-contained
+   Finish the persisted operation first and treat new work as outside its
+   committed assignment. During resume, the persisted self-contained
    `intent_summary`, route, and `scope_ref` are authoritative; do not expand
-   them from the new message. A non-null `scope_ref` records the approval result
-   selected at `begin`; the worker does not reinterpret approval, but still
-   rechecks the live gates relevant to its route.
+   them from the new message. At `worker_pending`, only a non-null `scope_ref`
+   supplied to `begin` records exact scope approval. At `lead_pending`, a
+   `scope_ref` identifies the resulting scope handoff and is not approval
+   evidence by itself; use the planned route's authoritative handoff status and
+   required evidence for closeout.
 5. For a new operation, read `references/route_index.yaml` and
    `references/route_selection_workflow.md`. Infer one dominant intention and
    prepare exactly one allowed assignment. Call `statectl begin` with a JSON
@@ -64,8 +66,9 @@ manager synthesis and the only user-facing response belong to
    through `statectl finish`; normal finish derives aggregate flags.
 9. Produce the normal user-facing answer only after `finish` succeeds. The sole
    exception is a read-only preflight-failure response when no operation can be
-   opened. A rejected mutation leaves the operation resumable; reload state,
-   correct the payload, and retry instead of claiming completion.
+   opened. A rejected `begin` may be corrected or rerouted. A rejected
+   `reserve-artifact`, `apply`, or `finish` remains at its persisted stage;
+   correct and retry it, or cancel only after an explicit user request.
 
 ## Controller Inputs
 

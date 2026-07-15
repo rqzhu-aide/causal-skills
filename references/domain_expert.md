@@ -70,7 +70,7 @@ Submit chamber feedback only under `updates.council_chamber.domain_expert`.
 
 Set:
 
-- `current_status`: one short sentence on what domain review could determine.
+- `current_status`: one short handoff disposition.
 - `summary`: compact synthesis of domain meaning, practice, or uncertainty.
 - `questions_for_user`: 0-3 questions or choices that would improve the next
   decision.

@@ -77,17 +77,18 @@ Handle the end-of-round situation:
   next user decision.
 - `analysis_execution.<design_id>` route: use `team_lead_analysis_flow.md`.
 - `report_writer` route: use `team_lead_report_flow.md`.
-- Created output: summarize only the available artifact record whose
-  `operation_id` matches the active operation, and give its user-useful
-  location. Do not substitute a historical or merely nearby artifact.
+- Created output: claim new output only from an available artifact record whose
+  `operation_id` matches the active operation. In a lead-only question, discuss
+  only unambiguously identified existing scopes or available historical
+  artifacts, and label them as prior work.
 - Missing handoff: if a planned route appears to have run but its expected
   chamber, route-owned state, or artifact handoff is absent, summarize only
   visible state and ask for the smallest repair or clarification.
 - Blocked, data-mismatch, no-work, or outside-scope turn: still answer in the
   normal heading shell; do not switch to essay mode.
-- Persisted-operation resume after a materially new message: close the persisted
-  work first, state plainly that the new request was not run in this operation,
-  and make it the next requested step. Do not imply that it was queued in state.
+- Any current-message work outside the committed assignment was not run. Do not
+  store it in `project_summary`; name at most one in-scope remainder as an
+  unqueued next step.
 
 ## Chamber Reading
 
@@ -97,8 +98,9 @@ or the transcript.
 
 Use these chamber fields compactly:
 
-- `current_status`: route status such as `requested`, `ready`, `blocked`, `done`,
-  or another route-specific short status.
+- `current_status`: for analysis and report routes, the scope lifecycle
+  (`requested`, `ready`, `blocked`, or `done`); for core routes, only a short
+  handoff disposition. The route-owned structured status remains authoritative.
 - `summary`: one compact finding for team lead to synthesize.
 - `questions_for_user`: questions or choices that would most improve the next
   step.
@@ -109,6 +111,15 @@ For analysis, read per-design handoffs at
 `council_chamber.analysis_execution.<design_id>`. For reports, read
 `report_writer` chamber feedback together with `report_assembly`.
 
+Interpret each status only in its owning field: operation stage controls
+resume; `data_checked`, `domain_checked`, and `causal_checked` describe core
+review; `analysis_readiness` informs analysis eligibility; analysis/report
+`current_status` is scope lifecycle; and `discovery_sidecar.status` is discovery
+lifecycle. Keep status, eligibility, authorization, and completion evidence
+separate. Completion requires committed route-owned state and any required
+available operation-matched artifact; chamber prose and project-summary flags
+cannot upgrade another layer.
+
 ## Decision Gate
 
 Ask only when the answer could materially change the next route, approved
@@ -116,16 +127,15 @@ scope, evidence basis, causal claim boundary, output creation, or explicit
 authorization. Ask one dominant question. Build it from chamber feedback first,
 translated into plain user choices when useful.
 
-Use approval/run/execute/output language only when that is the real decision
-now. For analysis, use that language only when the relevant
-`council_chamber.analysis_execution.<design_id>.current_status` is `ready`;
-otherwise describe the move as preparing, scoping, or revising the analysis.
+Use approval/run/execute/output language only when that is the real decision.
+Present a ready analysis or report scope for approval only when it remains
+semantically current against durable state; otherwise require revision or treat
+it as blocked. Analysis also requires current analysis-begin eligibility.
+`ready` is a scope status, not approval or output evidence.
 When analysis is blocked by missing core review, identify the data, domain, or
 claim-boundary uncertainty and ask only when user input is needed to resolve it.
-For reports, use write/finalize/output language only when
-`council_chamber.report_writer.current_status` is `ready`, or when revising a
-`done` report; otherwise describe the move as preparing or revising report
-scope.
+An existing `done` report may be described as being revised, but new output
+still requires a revised ready scope and its approval.
 Show 2-4 options only for genuinely distinct actions. Give each a short
 consultant read and tradeoff, allow a free-form alternative, and avoid bare
 route labels. If there is one necessary clarification, ask it directly without
@@ -150,8 +160,10 @@ variable inventories, report-like narratives, or transcript text.
 
 Update only `title`, `objective`, `materials`, `phase`, and
 `exploration_summary` when supported by current evidence. Normal finish derives
-the four completion flags and two output flags from route-owned state and
-artifact records. Use `phase` only as `exploration`, `analysis`, or `reporting`.
+the four completion flags and two historical-existence output flags from
+route-owned state and artifact records; the output flags do not establish
+current relevance or availability. Use `phase` only as `exploration`,
+`analysis`, or `reporting`.
 Exploration completion does not authorize execution; the current approval logic
 still applies.
 
@@ -160,7 +172,8 @@ successful controller result. If it fails, reload the state and correct the
 closeout; do not clear state manually or present the operation as completed.
 For explicit cancellation, call `finish --cancel` without updates. Preserve
 durable state, reserved output, and unrecorded files; do not
-delete or adopt them automatically.
+delete or adopt them automatically. At `lead_pending`, cancellation does not
+undo committed worker state or output.
 
 ## User-Facing Output
 

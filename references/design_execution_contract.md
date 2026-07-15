@@ -23,8 +23,9 @@ reported by the controller.
 
 ## Scope Decision
 
-The design route decides whether the persisted assignment prepares scope,
-revises scope, blocks, or executes. The controller verifies identity but never
+A successful `begin` committed the persisted design assignment and verified any
+supplied scope identity. The design route decides whether the assignment
+prepares scope, revises scope, blocks, or executes; the controller never
 interprets approval.
 
 - Execute only when `state_meta.active_operation.scope_ref` is present and
@@ -56,10 +57,10 @@ change to the existing scope, or `preserve` when its identity and revision stay
 valid. The controller assigns `scope_id`, initializes or increments
 `scope_revision`, and sets timestamps. Never invent IDs or revision numbers.
 
-Use these handoff fields:
+Use these analysis scope handoff fields:
 
-- `current_status`: `ready`, `blocked`, or `done`; use `requested` only for an
-  unfinished handoff.
+- `current_status`: a normal worker handoff is `ready`, `blocked`, or `done`.
+  Null or `requested` is a pre-work or legacy marker, not a completed handoff.
 - `support`: selected support route ID or `null`.
 - `summary`: compact scope, blocker, or completed-output description.
 - `questions_for_user`: 0-3 choices or approval points for team lead; use none
@@ -78,13 +79,14 @@ identification frame should become primary.
 
 ## Approved Execution
 
-Before execution, recheck that `data_facts.data_checked`,
-`domain_knowledge.domain_checked`, and `causal_facts.causal_checked` are each
-`passing` or `limited`, and `causal_facts.analysis_readiness` is `ready` or
-`limited`. If the gate no longer holds, submit blocked or revised scope feedback
-without running analysis.
+Before reserving output, confirm that the bound scope still fits the live inputs
+and current durable evidence. If a mismatch requires a different support route,
+preserve the bound scope and return `blocked` without output; a later operation
+must revise and reroute it. Other material changes may return a revised `ready`
+or `blocked` handoff without output while retaining the planned support. This is
+a scope-consistency check, not a repeat of the full begin gate.
 
-When execution remains inside the approved scope:
+When the approved scope remains current:
 
 1. Call `statectl reserve-artifact` for one meaningful directory directly under
    `output/`.
@@ -102,10 +104,6 @@ compact prose record in its `summary`: design, support when used, target or
 estimand, main result, diagnostics completed or missing, claim boundary, and
 material limitations. Put detailed data contracts, settings, package versions,
 tables, and diagnostic inventories in the output files or chamber summary.
-
-If execution reveals a required material change, do not publish changed output.
-Submit a materially revised `ready` or `blocked` scope explaining what changed,
-why it matters, and what approval or clarification is needed.
 
 `statectl apply` owns timestamps, IDs, artifact append, revision checks, route
 ownership validation, and transition to `lead_pending`. It rejects changes to

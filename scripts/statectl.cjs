@@ -8410,6 +8410,49 @@ var require_core = __commonJS({
         fail("SCOPE_MISMATCH", `scope status ${status} cannot be approved or revised`);
       }
     }
+    function assertAnalysisBeginAllowed(state, design, support) {
+      const reviewed = ["passing", "limited"];
+      const actionable = ["ready", "limited"];
+      const failures = [];
+      const requireOneOf = (field, actual, allowed) => {
+        if (!allowed.includes(actual)) failures.push({ field, actual, allowed });
+      };
+      requireOneOf("data_facts.data_checked", state.data_facts.data_checked, reviewed);
+      requireOneOf("domain_knowledge.domain_checked", state.domain_knowledge.domain_checked, reviewed);
+      requireOneOf("causal_facts.causal_checked", state.causal_facts.causal_checked, reviewed);
+      requireOneOf("causal_facts.analysis_readiness", state.causal_facts.analysis_readiness, actionable);
+      const designRecommendation = state.causal_facts.recommended_method_routes.find((route) => route.category === "design");
+      if (!designRecommendation || designRecommendation.id !== design) {
+        failures.push({
+          field: "causal_facts.recommended_method_routes.design",
+          actual: designRecommendation ? designRecommendation.id : null,
+          allowed: [design]
+        });
+      }
+      if (support !== null) {
+        const supportRecommendation = state.causal_facts.recommended_method_routes.find((route) => route.category === "support");
+        if (!supportRecommendation || supportRecommendation.id !== support) {
+          failures.push({
+            field: "causal_facts.recommended_method_routes.support",
+            actual: supportRecommendation ? supportRecommendation.id : null,
+            allowed: [support]
+          });
+        }
+      }
+      if (design === "descriptive_association" && state.causal_facts.analysis_readiness === "ready") {
+        failures.push({
+          field: "causal_facts.analysis_readiness",
+          actual: state.causal_facts.analysis_readiness,
+          allowed: ["limited"]
+        });
+      }
+      if (failures.length) {
+        fail("ANALYSIS_GATE_FAILED", "analysis route entry requirements are not satisfied", {
+          route: `analysis_execution.${design}`,
+          failures
+        });
+      }
+    }
     function beginOperation2({ projectRoot, payload }) {
       const { statePath, state } = loadCurrentState(projectRoot);
       assertExpected(state, payload);
@@ -8441,6 +8484,7 @@ var require_core = __commonJS({
         if (!DESIGN_IDS.has(design)) fail("PLAN_MISMATCH", `unknown analysis design route: ${design}`);
         if (support !== null && !SUPPORT_IDS.has(support)) fail("PLAN_MISMATCH", `unknown support route: ${support}`);
         resolveScopeReference(state, route, scopeRef, support);
+        assertAnalysisBeginAllowed(state, design, support);
         plan = [{ id: route, support }, { id: "team_lead" }];
         stage = "worker_pending";
       } else {
@@ -8612,13 +8656,16 @@ var require_core = __commonJS({
       return { target, manifestPath, manifest };
     }
     function inspectReservedArtifact(projectRoot, operation, actor) {
+      const target = resolveOutputPath(projectRoot, operation.artifact_intent.location);
+      const manifestPath = manifestPathFor(target, operation.artifact_intent.kind);
+      const relativeManifestPath = normalizePath(path2.relative(path2.resolve(projectRoot), manifestPath));
       try {
-        const checked = validateManifest(projectRoot, operation, actor);
+        validateManifest(projectRoot, operation, actor);
         return {
           status: "complete",
           location: operation.artifact_intent.location,
           temporary_path: temporaryArtifactLocation(operation.artifact_intent, operation.id),
-          manifest_path: normalizePath(path2.relative(path2.resolve(projectRoot), checked.manifestPath))
+          manifest_path: relativeManifestPath
         };
       } catch (error) {
         if (error instanceof StateError2 && ["MISSING_ARTIFACT", "INVALID_ARTIFACT_MANIFEST"].includes(error.code)) {
@@ -8626,6 +8673,7 @@ var require_core = __commonJS({
             status: "incomplete",
             location: operation.artifact_intent.location,
             temporary_path: temporaryArtifactLocation(operation.artifact_intent, operation.id),
+            manifest_path: relativeManifestPath,
             reason_code: error.code
           };
         }
@@ -8651,6 +8699,14 @@ var require_core = __commonJS({
       assertKnownKeys(patch, allowed, `updates.council_chamber.${route}`, "OWNERSHIP_VIOLATION");
       rejectControllerFields(patch, `updates.council_chamber.${route}`);
       if (analysis) rejectControllerFields(patch, `updates.council_chamber.${route}`, ["scope_id", "scope_revision"]);
+    }
+    function assertScopeHandoffStatus(patch, label) {
+      assertEnum(patch.current_status, ["ready", "blocked", "done"], `${label}.current_status`, "INVALID_INPUT");
+    }
+    function assertCoreHandoffStatus(patch, label) {
+      if (typeof patch.current_status !== "string" || !patch.current_status.trim()) {
+        fail("INVALID_INPUT", `${label}.current_status must be a nonempty string`);
+      }
     }
     function validateOwnedUpdates(actor, updates) {
       assertObject(updates, "updates", "INVALID_INPUT");
@@ -8712,6 +8768,10 @@ var require_core = __commonJS({
         current = state.report_assembly;
         patch = updates.report_assembly;
         if (!patch) fail("INVALID_INPUT", "report scope transition requires a report_assembly patch");
+      }
+      const hasCurrentIdentity = isUuid(current.scope_id) && Number.isInteger(current.scope_revision) && current.scope_revision >= 1;
+      if (isAnalysis && hasCurrentIdentity && transition === "preserve" && current.support !== patch.support) {
+        fail("SCOPE_MISMATCH", "changing analysis support requires scope_transition new or revise");
       }
       if (operation.scope_ref !== null) {
         if (current.scope_id !== operation.scope_ref.id || current.scope_revision !== operation.scope_ref.revision) {
@@ -8874,6 +8934,7 @@ var require_core = __commonJS({
         const design = payload.actor.slice("analysis_execution.".length);
         const chamberPatch = updates.council_chamber && updates.council_chamber.analysis_execution && updates.council_chamber.analysis_execution[design];
         if (!chamberPatch) fail("INVALID_INPUT", "analysis apply requires its matching chamber handoff");
+        assertScopeHandoffStatus(chamberPatch, `updates.council_chamber.analysis_execution.${design}`);
         if (chamberPatch.support !== void 0 && chamberPatch.support !== planInfo.support) {
           fail("SCOPE_MISMATCH", "analysis chamber support must match the planned support route");
         }
@@ -8881,6 +8942,11 @@ var require_core = __commonJS({
       } else if (payload.actor === "report_writer") {
         const chamberPatch = updates.council_chamber && updates.council_chamber.report_writer;
         if (!chamberPatch) fail("INVALID_INPUT", "report apply requires its matching chamber handoff");
+        assertScopeHandoffStatus(chamberPatch, "updates.council_chamber.report_writer");
+      } else {
+        const chamberPatch = updates.council_chamber && updates.council_chamber[payload.actor];
+        if (!chamberPatch) fail("INVALID_INPUT", `${payload.actor} apply requires its matching chamber handoff`);
+        assertCoreHandoffStatus(chamberPatch, `updates.council_chamber.${payload.actor}`);
       }
       applyScopeTransition(
         state,

@@ -22,10 +22,10 @@ analysis handoffs. For each relevant design slot, review `scope_id`,
 `scope_revision`, `current_status`, `support`, `summary`,
 `questions_for_user`, and `feedback_to_route`.
 
-Status meanings: `requested` means scope review is unfinished or the slot is
-missing; `ready` means reviewed and waiting for user approval; `blocked` means
-clarification, repair, or fallback is needed; `done` means analysis output was
-created.
+Scope status meanings: `requested` means scope review is unfinished or the slot
+is missing; `ready` means reviewed and waiting for user approval; `blocked`
+means clarification, repair, or fallback is needed; `done` means analysis
+output was created.
 
 Decision rules:
 
@@ -45,39 +45,26 @@ Decision rules:
 - If no current analysis route can reasonably match the user's intent, plan
   only `team_lead`.
 
-## Route Recommendation Rules
+## Analysis Begin Eligibility
 
-- Core review gate: create `analysis_execution.<design_id>` only when
-  `data_facts.data_checked`, `domain_knowledge.domain_checked`, and
+Call `statectl begin` for `analysis_execution.<design_id>` only when:
+
+- `data_facts.data_checked`, `domain_knowledge.domain_checked`, and
   `causal_facts.causal_checked` are each `passing` or `limited`, and
-  `causal_facts.analysis_readiness` is `ready` or `limited`.
-- If the gate fails, route the missing or stale reviewer instead of analysis:
-  `data_audit` for missing, blocked, imagined, or changed data facts;
-  `domain_expert` for missing, blocked, or changed construct/domain facts; and
-  `causal_check` for missing, blocked, not-ready, or changed causal readiness.
-  If the missing ingredient is user information rather than route work, plan
-  only `team_lead`.
-- If `causal_facts.analysis_readiness` is missing, `not_ready`, or `blocked`,
-  plan `causal_check` unless visible state says the blocker is missing user
-  information; then plan only `team_lead`.
-- For causal design routes, create `analysis_execution.<design_id>` only when
-  `recommended_method_routes` includes one loadable item with that design id and
-  `category: design`.
-- If `support` is non-null, create `analysis_execution.<design_id>` only when
-  `recommended_method_routes` includes a loadable item with that support ID and
-  `category: support`.
-- Treat null IDs, non-loadable IDs, missing category, support-only
-  recommendations, or multiple competing design recommendations as malformed;
-  plan `causal_check` or `team_lead`.
-- If the recommendation has `id: descriptive_association`, create
-  `analysis_execution.descriptive_association` only when
-  `causal_facts.analysis_readiness: limited` and route cautions or
-  `support_status` explicitly say causal claims are not supported.
-- If the recommendation is not loadable, plan only `team_lead` for boundary
-  synthesis.
+  `causal_facts.analysis_readiness` is `ready` or `limited`;
+- the current design recommendation matches `<design_id>`; and
+- any non-null selected support matches the current support recommendation.
 
-Use the analysis `begin` contract in `route_selection_workflow.md`. A persisted
-non-null `scope_ref` is the recorded approval result; on resume, do not
-reinterpret it from a later message. Before execution, the worker still
-rechecks the exact scope/support and live data, domain, and causal gates. If any
-gate changed, return a ready or blocked handoff without output.
+The controller enforces these structured requirements. The router uses
+`descriptive_association` only with `analysis_readiness: limited` and an explicit
+no-causal-claim boundary; the controller enforces the readiness value but does
+not interpret prose.
+
+If eligibility fails, route the owner of the missing or stale state:
+`data_audit`, `domain_expert`, or `causal_check`. Use only `team_lead` when the
+missing input must come from the user or no valid route can be selected.
+
+A non-null `scope_ref` supplied to `begin` records approval and remains
+authoritative during worker resume; `begin` verifies it against the current
+ready scope. After `begin` succeeds, the design route follows
+`design_execution_contract.md` and does not repeat the entry gate.

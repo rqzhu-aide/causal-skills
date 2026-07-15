@@ -6,11 +6,12 @@ reviewer-facing, or decision-facing reports.
 This worker remains silent and submits internal findings or revised text for
 `team_lead` to synthesize.
 
-For reports that describe analysis results, proceed only when
-`project_summary.analysis_output: exist`. If
-`project_summary.analysis_output: non_exist`, use this route only for
-planning report scope or claim-boundary language; do not draft results, invent
-results, or describe completed methods.
+`project_summary.analysis_output` and `project_summary.report_output` indicate
+only that a historical artifact record exists. Results-focused report work also
+requires relevant, available analysis artifacts that match the current report
+scope. Without them, use this route only for planning report scope or
+claim-boundary language; do not draft results, invent results, or describe
+completed methods.
 
 Approved report output is HTML by default. Requests for PPT, DOCX, PDF, slides,
 email, letter, memo, Markdown, or another form become scope, structure,
@@ -23,7 +24,7 @@ Use this vocabulary consistently:
 - `analysis report`: report grounded in completed causal-consultant analysis
   output.
 - `planning report`: report for framing, scope, missing evidence, and next
-  decisions before analysis output exists.
+  decisions when the current scope lacks relevant analysis evidence.
 - `report scope`: the proposed report structure, evidence use, audience, and
   limitations that `team_lead` can synthesize for approval or revision.
 - `report output`: created or revised HTML report.
@@ -50,7 +51,7 @@ artifact availability. Submit one `statectl apply` JSON payload with
 controller owns timestamps, scope identity, artifact append, and transition to
 `lead_pending`; never edit state directly.
 
-Classify the task into one of four content states:
+Classify the task into one of four report scope states:
 
 - **No ready scope yet**: null, missing, or `current_status: requested`
   prepares report scope feedback and creates no files. Set `ready` when a
@@ -96,10 +97,10 @@ Record blocked or completed work in `report_assembly`,
 Use the bundled templates when preparing a report scope or carrying out an
 approved report output:
 
-- `assets/report_template_planning.md` as structural guidance for
-  planning reports when `project_summary.analysis_output: non_exist`.
-- `assets/report_template_analysis.md` as structural guidance when
-  `project_summary.analysis_output: exist`.
+- `assets/report_template_planning.md` as structural guidance when the current
+  report scope lacks relevant, available analysis artifacts.
+- `assets/report_template_analysis.md` as structural guidance when the current
+  report scope is grounded in relevant, available analysis artifacts.
 - `assets/report_html_layout_template.html` as the required final HTML shell for
   approved report output.
 
@@ -160,10 +161,9 @@ When scope feedback is needed:
 - Do not draft final report text, completed results prose, or finalized wording.
 - Do not reserve an output location or submit an artifact.
 - Prepare an approval-ready report scope for `team_lead`.
-- Use `assets/report_template_planning.md` when
-  `project_summary.analysis_output: non_exist`; use
-  `assets/report_template_analysis.md` when
-  `project_summary.analysis_output: exist`.
+- Use `assets/report_template_planning.md` when the current scope lacks
+  relevant, available analysis artifacts; otherwise use
+  `assets/report_template_analysis.md`.
 - Inspect `artifact_records`, `project_summary`, `report_assembly`,
   `discovery_sidecar`, `council_chamber.causal_discovery`, route-owned
   summaries, and existing report-relevant output files before proposing the
@@ -185,8 +185,9 @@ When scope feedback is needed:
 
 Submit supported fields under `report_assembly`:
 
-- `current_format`: set to `html` when report output exists, or keep `null`
-  when no report output exists.
+- `current_format`: set to `html` when this operation completes the current
+  report scope; set to `null` for a `ready` or `blocked` handoff. Historical
+  report records remain in `artifact_records` and the derived output flag.
 - `report_goal`
 - `target_section`
 - `audience`
@@ -204,7 +205,7 @@ Submit chamber feedback only under `updates.council_chamber.report_writer`.
 
 Set:
 
-- `current_status`: report handoff status only.
+- `current_status`: report scope status only.
 - `summary`: one compact description of the report scope, produced output, or
   blocker.
 - `questions_for_user`: 0-3 questions, choices, or approval points for
@@ -212,8 +213,10 @@ Set:
 - `feedback_to_route`: 0-2 handoffs when another member should review something
   before report output.
 
-Use only the content-state meanings defined above: null or `requested`,
-`ready`, `blocked`, or `done`. Put any blocker reason in `summary`.
+Normal worker handoffs use `ready`, `blocked`, or `done`. Null or `requested`
+is a pre-work or legacy marker; when observed, prepare and submit a completed
+scope handoff rather than passing that marker to team lead. Put any blocker
+reason in `summary`.
 
 Report writer is a handoff route, not a consulting-opinion route.
 

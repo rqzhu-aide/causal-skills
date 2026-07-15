@@ -61,7 +61,7 @@ One core route plus team lead:
 {"route":"data_audit","intent_summary":"..."}
 ```
 
-Analysis execution plus team lead:
+Analysis route plus team lead:
 
 ```json
 {"route":"analysis_execution.<design_id>","support":null,
@@ -76,8 +76,8 @@ analysis, encode a listed design as `analysis_execution.<design_id>` and use
 `support` only for a listed support route or `null`.
 
 Include `scope_ref` only when routing approval of an existing ready analysis or
-report scope. A committed non-null `scope_ref` records that approval result for
-resume; the worker does not re-decide it from a later message. Write
+report scope. A non-null `scope_ref` accepted by `begin` records that approval
+for worker resume; the worker does not re-decide it from a later message. Write
 `intent_summary` as a resumable assignment naming the requested action and only
 the essential target, material identifier or path, and output constraint needed
 to restart the route. Do not store transcript, detailed route payloads, scope
@@ -150,7 +150,7 @@ For exploration:
 - After `data_audit` inspects actual data and records concrete facts, prefer
   `causal_check` on the next substantive analysis-planning turn.
 
-For analysis scope routing, apply the core review gate and approval rules in
+For analysis begin eligibility and approval binding, use
 `analysis_routing_workflow.md`.
 
 ## Do Not Do During Route Selection

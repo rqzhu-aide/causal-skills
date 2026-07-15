@@ -119,8 +119,31 @@ function analysisSlot(status, summary, support = null) {
   };
 }
 
+function seedAnalysisEligibility(projectRoot, options = {}) {
+  const {
+    design = "single_time_observational",
+    support = null,
+    readiness = "ready",
+  } = options;
+  const state = readState(projectRoot);
+  state.data_facts.data_checked = "passing";
+  state.domain_knowledge.domain_checked = "passing";
+  state.causal_facts.causal_checked = "passing";
+  state.causal_facts.analysis_readiness = readiness;
+  state.causal_facts.recommended_method_routes = [
+    { id: design, category: "design", route_cautions: [] },
+    ...(support === null ? [] : [{ id: support, category: "support", route_cautions: [] }]),
+  ];
+  writeState(projectRoot, state);
+}
+
 function prepareAnalysisScope(projectRoot, design = "single_time_observational", support = null) {
   const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  seedAnalysisEligibility(projectRoot, {
+    design,
+    support,
+    readiness: design === "descriptive_association" ? "limited" : "ready",
+  });
   const started = expectSuccess(begin(projectRoot, opened, `analysis_execution.${design}`, { support }), "BEGAN_WORKER");
   const applied = expectSuccess(execute(projectRoot, "apply", {
     payload: {
@@ -380,6 +403,145 @@ test("method recommendations require one unique design with at most one support"
   }
 });
 
+test("analysis begin rejects an unmet route-entry gate without mutating state", async (t) => {
+  const cases = [
+    {
+      name: "imagined data",
+      field: "data_facts.data_checked",
+      mutate: (state) => { state.data_facts.data_checked = "imagined"; },
+    },
+    {
+      name: "unchecked domain",
+      field: "domain_knowledge.domain_checked",
+      mutate: (state) => { state.domain_knowledge.domain_checked = "not_checked"; },
+    },
+    {
+      name: "blocked causal review",
+      field: "causal_facts.causal_checked",
+      mutate: (state) => { state.causal_facts.causal_checked = "blocked"; },
+    },
+    {
+      name: "analysis not ready",
+      field: "causal_facts.analysis_readiness",
+      mutate: (state) => { state.causal_facts.analysis_readiness = "not_ready"; },
+    },
+    {
+      name: "missing design recommendation",
+      field: "causal_facts.recommended_method_routes.design",
+      mutate: (state) => { state.causal_facts.recommended_method_routes = []; },
+    },
+    {
+      name: "wrong design recommendation",
+      field: "causal_facts.recommended_method_routes.design",
+      mutate: (state) => {
+        state.causal_facts.recommended_method_routes[0].id = "difference_in_differences";
+      },
+    },
+    {
+      name: "unrecommended support",
+      field: "causal_facts.recommended_method_routes.support",
+      extras: { support: "statistical-validity" },
+      mutate: () => {},
+    },
+    {
+      name: "causal-ready descriptive fallback",
+      design: "descriptive_association",
+      field: "causal_facts.analysis_readiness",
+      mutate: () => {},
+    },
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, () => {
+      const projectRoot = temporaryProject(t);
+      const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+      const design = scenario.design || "single_time_observational";
+      seedAnalysisEligibility(projectRoot, { design });
+      const state = readState(projectRoot);
+      scenario.mutate(state);
+      writeState(projectRoot, state);
+      const before = fs.readFileSync(statePath(projectRoot), "utf8");
+
+      const failure = expectFailure(begin(
+        projectRoot,
+        opened,
+        `analysis_execution.${design}`,
+        scenario.extras,
+      ), "ANALYSIS_GATE_FAILED");
+      assert.equal(failure.details.route, `analysis_execution.${design}`);
+      assert.ok(failure.details.failures.some((item) => item.field === scenario.field));
+      assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+
+      const unchanged = readState(projectRoot);
+      assert.equal(unchanged.state_meta.revision, opened.revision);
+      assert.equal(unchanged.state_meta.active_operation, null);
+      assert.deepEqual(unchanged.next_step_plan, []);
+    });
+  }
+});
+
+test("analysis begin accepts the supported route-entry boundaries", async (t) => {
+  const cases = [
+    {
+      name: "limited core reviews",
+      setup: (state) => {
+        state.data_facts.data_checked = "limited";
+        state.domain_knowledge.domain_checked = "limited";
+        state.causal_facts.causal_checked = "limited";
+        state.causal_facts.analysis_readiness = "limited";
+      },
+    },
+    {
+      name: "descriptive fallback",
+      design: "descriptive_association",
+      readiness: "limited",
+      setup: () => {},
+    },
+    {
+      name: "omitted optional support",
+      recommendedSupport: "statistical-validity",
+      setup: () => {},
+    },
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, () => {
+      const projectRoot = temporaryProject(t);
+      const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+      const design = scenario.design || "single_time_observational";
+      seedAnalysisEligibility(projectRoot, {
+        design,
+        support: scenario.recommendedSupport || null,
+        readiness: scenario.readiness || "ready",
+      });
+      const state = readState(projectRoot);
+      scenario.setup(state);
+      writeState(projectRoot, state);
+
+      const started = expectSuccess(begin(projectRoot, opened, `analysis_execution.${design}`), "BEGAN_WORKER");
+      assert.equal(started.plan[0].support, null);
+      expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+    });
+  }
+});
+
+test("analysis begin applies the same gate to an exact ready scope", (t) => {
+  const projectRoot = temporaryProject(t);
+  const prepared = prepareAnalysisScope(projectRoot);
+  const state = readState(projectRoot);
+  state.domain_knowledge.domain_checked = "not_checked";
+  state.project_summary.domain_knowledge_complete = false;
+  state.project_summary.exploration_complete = false;
+  writeState(projectRoot, state);
+  const before = fs.readFileSync(statePath(projectRoot), "utf8");
+
+  const failure = expectFailure(begin(projectRoot, prepared, `analysis_execution.${prepared.design}`, {
+    scope_ref: prepared.scope_ref,
+  }), "ANALYSIS_GATE_FAILED");
+  assert.ok(failure.details.failures.some((item) => item.field === "domain_knowledge.domain_checked"));
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+});
+
 test("begin emits exactly the three supported plan shapes and rejects unknown routes", async (t) => {
   const cases = [
     {
@@ -410,6 +572,12 @@ test("begin emits exactly the three supported plan shapes and rejects unknown ro
     await t.test(scenario.route, () => {
       const projectRoot = temporaryProject(t);
       const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+      if (scenario.route.startsWith("analysis_execution.")) {
+        seedAnalysisEligibility(projectRoot, {
+          design: scenario.route.slice("analysis_execution.".length),
+          support: scenario.extras.support,
+        });
+      }
       const started = expectSuccess(begin(projectRoot, opened, scenario.route, scenario.extras), scenario.code);
       assert.equal(started.stage, scenario.stage);
       assert.deepEqual(started.plan, scenario.plan);
@@ -670,6 +838,11 @@ test("every worker rejects writes outside its owned state", async (t) => {
     await t.test(actor, () => {
       const projectRoot = temporaryProject(t);
       const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+      if (actor.startsWith("analysis_execution.")) {
+        seedAnalysisEligibility(projectRoot, {
+          design: actor.slice("analysis_execution.".length),
+        });
+      }
       const started = expectSuccess(begin(projectRoot, opened, actor), "BEGAN_WORKER");
       const original = fs.readFileSync(statePath(projectRoot), "utf8");
       expectFailure(execute(projectRoot, "apply", {
@@ -681,6 +854,40 @@ test("every worker rejects writes outside its owned state", async (t) => {
         },
       }), "OWNERSHIP_VIOLATION");
       assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), original);
+      expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+    });
+  }
+});
+
+test("every core worker apply requires a matching chamber handoff with status", async (t) => {
+  for (const actor of ["data_audit", "domain_expert", "causal_check", "causal_discovery"]) {
+    await t.test(actor, () => {
+      const projectRoot = temporaryProject(t);
+      const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+      const started = expectSuccess(begin(projectRoot, opened, actor), "BEGAN_WORKER");
+      const before = fs.readFileSync(statePath(projectRoot), "utf8");
+
+      const failure = expectFailure(execute(projectRoot, "apply", {
+        payload: {
+          ...expected(started),
+          operation_id: started.operation_id,
+          actor,
+          updates: {},
+        },
+      }), "INVALID_INPUT");
+      assert.match(failure.message, /matching chamber handoff/);
+      assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+
+      const emptyStatus = expectFailure(execute(projectRoot, "apply", {
+        payload: {
+          ...expected(started),
+          operation_id: started.operation_id,
+          actor,
+          updates: { council_chamber: { [actor]: {} } },
+        },
+      }), "INVALID_INPUT");
+      assert.match(emptyStatus.message, /current_status must be a nonempty string/);
+      assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
       expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
     });
   }
@@ -729,6 +936,64 @@ test("domain, causal-check, and discovery workers can update only their owned se
       }), "WORKER_APPLIED");
       assert.deepEqual(Object.entries(scenario.patch).map(([key, value]) => readState(projectRoot)[scenario.root][key]), Object.values(scenario.patch));
       expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+    });
+  }
+});
+
+test("analysis and report workers require an explicit completed scope handoff status", async (t) => {
+  const invalidStatuses = [
+    { name: "omitted" },
+    { name: "null", value: null },
+    { name: "requested", value: "requested" },
+  ];
+  const workers = [
+    {
+      name: "analysis",
+      route: "analysis_execution.single_time_observational",
+      setup: (projectRoot) => seedAnalysisEligibility(projectRoot),
+      updates: (handoff) => ({
+        council_chamber: {
+          analysis_execution: { single_time_observational: handoff },
+        },
+      }),
+    },
+    {
+      name: "report",
+      route: "report_writer",
+      setup: () => {},
+      updates: (handoff) => ({
+        report_assembly: { report_goal: "Prepare a bounded report" },
+        council_chamber: { report_writer: handoff },
+      }),
+    },
+  ];
+
+  for (const worker of workers) {
+    await t.test(worker.name, async (t) => {
+      for (const invalid of invalidStatuses) {
+        await t.test(invalid.name, () => {
+          const projectRoot = temporaryProject(t);
+          const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+          worker.setup(projectRoot);
+          const started = expectSuccess(begin(projectRoot, opened, worker.route), "BEGAN_WORKER");
+          const handoff = { summary: "This handoff must not commit." };
+          if (Object.prototype.hasOwnProperty.call(invalid, "value")) handoff.current_status = invalid.value;
+          const before = fs.readFileSync(statePath(projectRoot), "utf8");
+
+          const failure = expectFailure(execute(projectRoot, "apply", {
+            payload: {
+              ...expected(started),
+              operation_id: started.operation_id,
+              actor: worker.route,
+              scope_transition: "new",
+              updates: worker.updates(handoff),
+            },
+          }), "INVALID_INPUT");
+          assert.match(failure.message, /current_status/);
+          assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+          expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+        });
+      }
     });
   }
 });
@@ -885,6 +1150,7 @@ test("artifact reservation, manifest verification, resume, and recording are one
     status: "incomplete",
     location: reserved.artifact_intent.location,
     temporary_path: reserved.temporary_path,
+    manifest_path: reserved.manifest_path,
     reason_code: "MISSING_ARTIFACT",
   });
 
@@ -1061,11 +1327,12 @@ test("bundled stop hook validates strictly without external YAML modules", async
     assert.match(result.reason, /still active/);
   });
 
-  await t.test("duplicate YAML keys block with strict parser code", () => {
+  await t.test("strict validation errors warn without blocking preflight recovery", () => {
     const projectRoot = temporaryProject(t);
     fs.writeFileSync(statePath(projectRoot), "state_meta: {}\nstate_meta: {}\n", "utf8");
     const result = runHook(projectRoot);
-    assert.equal(result.decision, "block");
+    assert.equal(result.decision, undefined);
+    assert.equal(result.suppressOutput, true);
     assert.match(result.systemMessage, /INVALID_YAML/);
   });
 
@@ -1608,7 +1875,7 @@ test("ready analysis and report scopes cannot reserve output without an exact sc
   }
 });
 
-test("an exact analysis scope binds its support route at begin and apply", (t) => {
+test("an exact analysis scope binds its support route and can block for rerouting", (t) => {
   const projectRoot = temporaryProject(t);
   const support = "statistical-validity";
   const prepared = prepareAnalysisScope(projectRoot, "single_time_observational", support);
@@ -1635,7 +1902,7 @@ test("an exact analysis scope binds its support route at begin and apply", (t) =
         council_chamber: {
           analysis_execution: {
             [prepared.design]: analysisSlot(
-              "done",
+              "ready",
               "This handoff supplies the wrong support route.",
               "heterogeneous-effects",
             ),
@@ -1656,8 +1923,8 @@ test("an exact analysis scope binds its support route at begin and apply", (t) =
         council_chamber: {
           analysis_execution: {
             [prepared.design]: {
-              current_status: "ready",
-              summary: "The controller stamps the planned support route.",
+              current_status: "blocked",
+              summary: "A different support route requires later rerouting.",
               questions_for_user: [],
               feedback_to_route: [],
             },
@@ -1670,6 +1937,55 @@ test("an exact analysis scope binds its support route at begin and apply", (t) =
   assert.equal(state.council_chamber.analysis_execution[prepared.design].support, support);
   assert.equal(state.next_step_plan[0].support, support);
   assert.deepEqual(state.state_meta.active_operation.scope_ref, prepared.scope_ref);
+  expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+});
+
+test("changing analysis support requires a new or revised scope identity", (t) => {
+  const projectRoot = temporaryProject(t);
+  const design = "single_time_observational";
+  const prepared = prepareAnalysisScope(projectRoot, design, "statistical-validity");
+  seedAnalysisEligibility(projectRoot, { design, support: "heterogeneous-effects" });
+  const started = expectSuccess(begin(projectRoot, prepared, `analysis_execution.${design}`, {
+    support: "heterogeneous-effects",
+  }), "BEGAN_WORKER");
+  const updates = {
+    council_chamber: {
+      analysis_execution: {
+        [design]: {
+          current_status: "ready",
+          summary: "The selected support route changed.",
+          questions_for_user: [],
+          feedback_to_route: [],
+        },
+      },
+    },
+  };
+  const before = fs.readFileSync(statePath(projectRoot), "utf8");
+
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: `analysis_execution.${design}`,
+      scope_transition: "preserve",
+      updates,
+    },
+  }), "SCOPE_MISMATCH");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: `analysis_execution.${design}`,
+      scope_transition: "revise",
+      updates,
+    },
+  }), "WORKER_APPLIED");
+  const slot = readState(projectRoot).council_chamber.analysis_execution[design];
+  assert.equal(slot.scope_id, prepared.scope_ref.id);
+  assert.equal(slot.scope_revision, prepared.scope_ref.revision + 1);
+  assert.equal(slot.support, "heterogeneous-effects");
   expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
 });
 

@@ -72,10 +72,9 @@ try {
   }
 } catch (error) {
   emit({
-    decision: "block",
-    reason: `project_state.yaml validation failed: ${error && error.message ? error.message : String(error)}`,
     systemMessage: error instanceof StateError
-      ? `project_state.yaml failed strict validation (${error.code}).`
-      : "project_state.yaml validation failed unexpectedly.",
+      ? `project_state.yaml failed strict validation (${error.code}); run causal-consultant preflight and report its recovery boundary.`
+      : "project_state.yaml validation failed unexpectedly; run causal-consultant preflight before normal work.",
+    suppressOutput: true,
   });
 }

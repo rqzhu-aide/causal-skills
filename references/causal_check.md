@@ -55,7 +55,7 @@ Use two readiness layers:
 
 - `causal_checked`: core causal-review status, `passing`, `limited`, or
   `blocked`.
-- `analysis_readiness`: execution-readiness status, `ready`, `limited`,
+- `analysis_readiness`: analysis-route readiness status, `ready`, `limited`,
   `not_ready`, or `blocked`.
 
 Recommend at most one primary `design` route for the next analysis scope. Add
@@ -76,10 +76,10 @@ or require special handling.
 
 Set `analysis_readiness: ready` or `limited`, and write mature
 `recommended_method_routes`, only when `data_facts.data_checked` and
-`domain_knowledge.domain_checked` are both `passing` or `limited`. If data or
-domain review is missing, imagined, blocked, or stale for the current request,
-record likely concerns and needed checks, but keep analysis readiness
-`not_ready` or `blocked` and avoid mature method-route recommendations.
+`domain_knowledge.domain_checked` and the resulting `causal_checked` status are
+each `passing` or `limited`. If a review is missing, blocked, or stale, or the
+data are imagined, record likely concerns and needed checks, but keep analysis
+readiness `not_ready` or `blocked` and avoid mature method-route recommendations.
 
 Use `analysis_readiness: ready` only when a loadable causal design route is
 recommended. Use `limited` when a bounded causal route or explicit non-causal
@@ -128,7 +128,7 @@ Submit chamber feedback only under `updates.council_chamber.causal_check`.
 
 Set:
 
-- `current_status`: one short sentence on claim support or uncertainty.
+- `current_status`: one short handoff disposition.
 - `summary`: compact synthesis of claim support, analysis readiness, or main
   causal boundary.
 - `questions_for_user`: 0-3 questions or choices that would improve the next

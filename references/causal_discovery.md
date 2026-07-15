@@ -133,8 +133,7 @@ Submit chamber feedback only under
 
 Set:
 
-- `current_status`: one short sentence on what discovery could scope, review,
-  create, or why it was blocked.
+- `current_status`: one short handoff disposition.
 - `summary`: compact synthesis of what was scoped, reviewed, created, or
   blocked.
 - `questions_for_user`: 0-3 questions or choices that would improve the next
