@@ -14,9 +14,16 @@ Use exactly one reserved artifact per output-producing operation:
    `temporary_path`, and `manifest_path`.
 2. Write only to `temporary_path`. Do not write into an unrelated output folder
    or adopt an unreserved path.
-3. Validate the output in proportion to its type: files open or parse, required
-   tables/figures exist, code or notebooks are runnable when required, and
-   reports render with their required content and boundary language.
+3. Validate the output against the persisted assignment and approved scope
+   before publication. Files must open or parse, required tables, figures, and
+   diagnostics must exist, and required code or notebooks must run. Reports
+   must render with their required content and boundary language; HTML reports
+   must also have valid fragment targets and resolvable project-local links.
+   If validation fails, correct the temporary output and revalidate within the
+   same operation when possible. Do not publish, create the completion manifest,
+   submit the artifact, or mark the route done unless validation passes. If
+   validation cannot be completed, return the route's normal incomplete or
+   blocked handoff.
 4. Prepare the completion manifest using the exact shape below. `route` is
    `analysis_execution` for every design route; `files` contains
    project-relative final-output paths. Do not add design-specific fields or

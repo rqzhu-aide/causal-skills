@@ -40,10 +40,10 @@ exists; explain the boundary using only visible state.
 
 If the report scope status is `ready`, no report output should have been created
 for this operation.
-Summarize the proposed report scope and envisioned structure compactly inside
-the normal user-facing headings, using `questions_for_user` for the approval,
-scope, audience, purpose, claim-strength, artifact-emphasis, omission, or
-disclosure choice that matters before output creation.
+Summarize the proposed report scope inside the normal user-facing headings with
+only its purpose, audience, evidence basis, format, main structure, and claim
+boundary. Use `questions_for_user` to ask one approval or revision question
+before output creation.
 
 If the report scope status is `done`, review the operation-matched report-writer
 artifact record and `council_chamber.report_writer.summary`. If the artifact is

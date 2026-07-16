@@ -44,8 +44,7 @@ Use the self-contained `state_meta.active_operation.intent_summary`, its
 `scope_ref`, `report_assembly`, `artifact_records`, and live state as the
 assignment. On resume, a new message does not change it. A non-null `scope_ref`
 is the approval result recorded at `begin`; do not reinterpret approval from a
-later message. Before output, recheck the exact scope and live evidence and
-artifact availability. Submit one `statectl apply` JSON payload with
+later message. Submit one `statectl apply` JSON payload with
 `actor: report_writer`, `updates` containing only `report_assembly` and
 `council_chamber.report_writer`, and optional top-level `artifact`. The
 controller owns timestamps, scope identity, artifact append, and transition to
@@ -61,8 +60,10 @@ Classify the task into one of four report scope states:
 - **Ready scope**:
   - A non-null active `scope_ref` that exactly matches the ready
     `report_assembly.scope_id` and `scope_revision` records approval. Recheck
-    the live evidence gates, incorporate only minor refinements preserved in
-    `intent_summary`, create the report, and set status to `done`.
+    the live evidence gates and artifact availability. If either no longer
+    supports the bound scope, return `blocked` without output. Otherwise
+    incorporate only minor refinements preserved in `intent_summary`, create
+    the report, and set status to `done`.
   - With no `scope_ref`, treat the assignment as clarification or revision.
     Material redesign revises `report_assembly`; otherwise keep it `ready` or
     set `blocked`. Create no files.

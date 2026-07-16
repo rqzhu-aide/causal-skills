@@ -34,10 +34,12 @@ this operation. Before offering approval, check the current Analysis Begin
 Eligibility in `analysis_routing_workflow.md`. If it fails, state that the
 analysis is not currently runnable, name the failed prerequisite, and do not
 revise the scope automatically. Otherwise summarize the proposed scope inside
-the normal headings, using the design id and chamber `support` in plain language
-when helpful, then use the decision gate in `team_lead.md` for the one approval,
-revision, or clarification that matters. If the handoff or chamber slot is
-missing, do not imply hidden scope was shown; use only the visible plan entry.
+the normal headings with only the target or estimand, design and support,
+required inputs, estimation strategy or model family, main diagnostics, main
+output, and claim boundary. Translate chamber `support` into plain language
+when helpful, then use the decision gate in `team_lead.md` to ask one approval
+or revision question. If the handoff or chamber slot is missing, do not imply
+hidden scope was shown; use only the visible plan entry.
 
 If the analysis scope status is `blocked`, explain the blocker under the normal
 headings and ask for the smallest useful clarification, data detail, design

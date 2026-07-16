@@ -69,7 +69,8 @@ Use these analysis scope handoff fields:
 
 An approval-ready handoff covers only what is needed to approve execution:
 design fit, support role, required inputs, target estimand or contrast,
-diagnostics, main output, and claim boundary. Do not store analysis scope in
+estimation strategy or model family, diagnostics, main output, and claim
+boundary. Do not store analysis scope in
 `discovery_sidecar`, `report_assembly`, pending artifact records, output
 folders, or `project_summary`.
 

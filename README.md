@@ -1,7 +1,7 @@
 # Interactive Causal Consultant
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-5.1.0-blue.svg)]()
+[![Version](https://img.shields.io/badge/version-5.1.2-blue.svg)]()
 [![Status](https://img.shields.io/badge/status-active%20development-orange.svg)]()
 
 An interactive causal inference consultant skill for moving from a rough causal
@@ -46,7 +46,7 @@ The internal team is:
   response, mediation, transportability, non-continuous outcomes, and
   statistical validity.
 
-Version 5.1.0 keeps the compact route-reference architecture and deterministic
+Version 5.1.2 keeps the compact route-reference architecture and deterministic
 v5 state protocol: strict YAML validation, schema migration from the recognized
 v4.5 state, revision-checked owner-scoped updates, exact analysis and report
 scope identities, verified artifact manifests, and automatic recovery at

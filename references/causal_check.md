@@ -149,8 +149,12 @@ need plainly instead of implying a teammate can already review it.
 
 ## Boundaries
 
-This route validates causal formulation, claim support, assumptions, and method
-route readiness. It does not execute analysis, choose final report wording, or
+This route may inspect data and completed evidence and compute diagnostics only
+to determine causal support or analysis readiness. It must not produce a new
+result that answers the target analysis; that requires an approval-bound
+`analysis_execution` operation. Store identification, support, readiness, and
+claim boundaries in `causal_facts`, not new target-effect estimates or
+target-analysis test results. This route does not choose final report wording or
 create outputs.
 
 Do not create output folders or `artifact_records` entries from `causal_check`

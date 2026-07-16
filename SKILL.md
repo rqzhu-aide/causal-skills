@@ -64,11 +64,19 @@ manager synthesis and the only user-facing response belong to
 8. Load `references/team_lead.md` exactly once after the operation reaches
    `lead_pending`. Team lead submits only its semantic `project_summary` update
    through `statectl finish`; normal finish derives aggregate flags.
-9. Produce the normal user-facing answer only after `finish` succeeds. The sole
-   exception is a read-only preflight-failure response when no operation can be
-   opened. A rejected `begin` may be corrected or rerouted. A rejected
-   `reserve-artifact`, `apply`, or `finish` remains at its persisted stage;
-   correct and retry it, or cancel only after an explicit user request.
+9. Each assistant turn handles at most one operation, whether newly begun or
+   resumed. After `finish` succeeds, produce the normal team-lead user-facing
+   response and stop; do not run `open` or `begin` again until a new user
+   message. The sole exception is a read-only preflight-failure response when no
+   operation can be opened. A rejected `begin` may be corrected or rerouted. A
+   rejected `reserve-artifact`, `apply`, or `finish` remains at its persisted
+   stage; correct and retry it, or cancel only after an explicit user request.
+   If a revision-controlled mutation returns missing or unusable JSON, run
+   `open` once. Continue from the committed stage when the same project is at
+   the next revision; retry the same mutation only when project, revision, and
+   stage are unchanged. If this follows `finish` and the project is now idle at
+   the next revision, treat `finish` as committed, produce the team-lead
+   response, and stop.
 
 ## Controller Inputs
 
