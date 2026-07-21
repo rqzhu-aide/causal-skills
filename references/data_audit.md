@@ -103,19 +103,17 @@ generated audit reports. `data_facts` should hold only compact interpretation
 and artifact references.
 
 When any script, notebook, table, figure, or exploratory audit output is
-created, follow `references/artifact_output_policy.md`: reserve first, write and
-validate temporary output, atomically publish it with its completion manifest,
-then include the completed artifact and compact `data_facts` references in
-`statectl apply`.
+created, follow `references/artifact_output_policy.md` and include compact
+`data_facts` references in the same `statectl apply` payload.
 
 Do not reserve or submit an artifact for an audit that created no durable
 output.
 
 ## Boundaries
 
-This route audits data readiness and may run bounded profiling or audit code
-when inspectable data exist. It does not choose the final causal method,
-validate a causal claim, or execute the approved causal analysis.
+This route may run bounded profiling or audit code only to evaluate data
+readiness. It must not estimate or test the target analysis, choose the final
+causal method, validate a causal claim, or execute approved causal analysis.
 
 Do not let generic profiling crowd out causal-data risks: unit, timing, leakage,
 support, missingness, dependencies, and variable roles are the priority.

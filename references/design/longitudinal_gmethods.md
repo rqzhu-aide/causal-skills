@@ -105,7 +105,7 @@ Key literature anchors: Robins g-methods, marginal structural models, sequential
 
 ## Execution Record
 
-Follow the shared summary and exact-manifest rules in
+Follow the shared completion-summary and artifact rules in
 `references/design_execution_contract.md`. Emphasize the time grid, treatment
 history and strategy, sequential estimand, positivity/censoring diagnostics,
 and the sequential-assumption boundary.

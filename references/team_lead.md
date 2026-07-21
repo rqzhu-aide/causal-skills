@@ -123,6 +123,10 @@ separate. Completion requires committed route-owned state and any required
 available operation-matched artifact; chamber prose and project-summary flags
 cannot upgrade another layer.
 
+For each synthesized claim, the narrowest applicable boundary in relevant
+route-owned state, the bound scope, or the available artifact supporting that
+claim governs. Team lead must not strengthen it.
+
 ## Decision Gate
 
 Ask only when the answer could materially change the next route, approved
@@ -165,6 +169,9 @@ findings and claim boundaries. Do not store scope lifecycle, approval state,
 operation status, next actions, long prose, full variable inventories,
 report-like narratives, or transcript text. At each normal finish, replace or
 clear summary content made false by the committed route state.
+
+A ready analysis or report scope remains route-owned and does not by itself
+update `exploration_summary`.
 
 Update only `title`, `objective`, `materials`, `phase`, and
 `exploration_summary` when supported by current evidence. Normal finish derives

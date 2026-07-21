@@ -108,7 +108,7 @@ Key literature anchors: synthetic control, augmented SCM, generalized SCM, synth
 
 ## Execution Record
 
-Follow the shared summary and exact-manifest rules in
+Follow the shared completion-summary and artifact rules in
 `references/design_execution_contract.md`. Emphasize treated and donor units,
 intervention timing and estimand, pre-fit/placebo and time-series diagnostics,
 concurrent shocks, and the aggregate claim boundary.

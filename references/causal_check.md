@@ -58,11 +58,14 @@ Use two readiness layers:
 - `analysis_readiness`: analysis-route readiness status, `ready`, `limited`,
   `not_ready`, or `blocked`.
 
-Recommend at most one primary `design` route for the next analysis scope. Add
-one `support` route when it materially improves validity, diagnostics, or
-interpretation. Use `statistical-validity` only when unresolved concerns exceed
-the selected design's normal diagnostics. Do not recommend support-only
-execution or add support merely by default.
+When analysis readiness or method fit is reassessed, treat
+`recommended_method_routes` as the complete current recommendation, not
+history. Replace it with at most one primary `design` item and, only when
+materially useful, one separate `support` item. Never retain a previous target's
+route or encode selected support only in `route_cautions`. Use
+`statistical-validity` only when unresolved concerns exceed the selected
+design's normal diagnostics. Do not recommend support-only execution or add
+support by default.
 
 If more than one design remains plausible, leave `recommended_method_routes`
 empty, keep `analysis_readiness: not_ready`, and record the smallest fact or
@@ -149,13 +152,12 @@ need plainly instead of implying a teammate can already review it.
 
 ## Boundaries
 
-This route may inspect data and completed evidence and compute diagnostics only
-to determine causal support or analysis readiness. It must not produce a new
-result that answers the target analysis; that requires an approval-bound
+This route may inspect data and completed evidence and compute only diagnostics
+needed to determine causal support or analysis readiness. It must not compute a
+new estimate or test for the target analysis; that requires an approval-bound
 `analysis_execution` operation. Store identification, support, readiness, and
-claim boundaries in `causal_facts`, not new target-effect estimates or
-target-analysis test results. This route does not choose final report wording or
-create outputs.
+claim boundaries in `causal_facts`, not target-analysis results. This route does
+not choose final report wording or create outputs.
 
 Do not create output folders or `artifact_records` entries from `causal_check`
 work. Do not let team-review suggestions crowd out a critical causal boundary,

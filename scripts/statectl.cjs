@@ -7649,7 +7649,7 @@ var require_core = __commonJS({
         fs2.fsyncSync(handle);
         fs2.closeSync(handle);
         handle = void 0;
-        if (process.env.STATECTL_FAIL_BEFORE_RENAME === "1") {
+        if (process.env.STATECTL_FAIL_BEFORE_RENAME === "1" && path2.basename(filePath) === STATE_FILE) {
           fail("INJECTED_WRITE_FAILURE", "injected failure before atomic replacement");
         }
         fs2.renameSync(tempPath, filePath);
@@ -8152,7 +8152,7 @@ var require_core = __commonJS({
         if (/^legacy-\d{4}$/.test(record.artifact_id)) return;
         let kind;
         try {
-          const stat = fs2.statSync(resolved);
+          const stat = fs2.lstatSync(resolved);
           if (stat.isFile()) kind = "file";
           else if (stat.isDirectory()) kind = "directory";
           else {
@@ -8176,6 +8176,15 @@ var require_core = __commonJS({
         if (!fs2.existsSync(manifestPath)) {
           warnings.push({
             code: "MISSING_HISTORICAL_ARTIFACT_MANIFEST",
+            artifact_id: record.artifact_id,
+            location: record.location,
+            manifest_path: relativeManifestPath
+          });
+          return;
+        }
+        if (!fs2.lstatSync(manifestPath).isFile()) {
+          warnings.push({
+            code: "INVALID_HISTORICAL_ARTIFACT_MANIFEST",
             artifact_id: record.artifact_id,
             location: record.location,
             manifest_path: relativeManifestPath
@@ -8246,7 +8255,7 @@ var require_core = __commonJS({
             includesPrimary = true;
             includesDeliverable = true;
           }
-          if (!fs2.existsSync(listedPath) || !fs2.statSync(listedPath).isFile()) {
+          if (!fs2.existsSync(listedPath) || !fs2.lstatSync(listedPath).isFile()) {
             warnings.push({
               code: "MISSING_HISTORICAL_ARTIFACT_FILE",
               artifact_id: record.artifact_id,
@@ -8595,14 +8604,12 @@ var require_core = __commonJS({
       if (!intent) fail("MISSING_ARTIFACT", "no artifact is reserved for this operation");
       const target = resolveOutputPath(projectRoot, intent.location);
       if (!fs2.existsSync(target)) fail("MISSING_ARTIFACT", `reserved artifact does not exist: ${intent.location}`);
-      const stat = fs2.statSync(target);
-      if (intent.kind === "file") {
-        if (!stat.isFile() || stat.size === 0) fail("MISSING_ARTIFACT", "reserved file artifact is empty or not a file");
-      } else if (!stat.isDirectory()) {
-        fail("MISSING_ARTIFACT", "reserved directory artifact is not a directory");
-      }
+      validateArtifactBody(projectRoot, operation, target);
       const manifestPath = manifestPathFor(target, intent.kind);
       if (!fs2.existsSync(manifestPath)) fail("MISSING_ARTIFACT", `completion manifest does not exist: ${manifestPath}`);
+      if (!fs2.lstatSync(manifestPath).isFile()) {
+        fail("INVALID_ARTIFACT_MANIFEST", "completion manifest must be a regular file");
+      }
       let manifest;
       try {
         manifest = JSON.parse(fs2.readFileSync(manifestPath, "utf8"));
@@ -8655,27 +8662,168 @@ var require_core = __commonJS({
       }
       return { target, manifestPath, manifest };
     }
+    function validateArtifactBody(projectRoot, operation, artifactPath, temporary = false) {
+      const intent = operation.artifact_intent;
+      let stat;
+      try {
+        stat = fs2.lstatSync(artifactPath);
+      } catch (error) {
+        fail("MISSING_ARTIFACT", `reserved artifact cannot be inspected: ${error.message}`);
+      }
+      if (intent.kind === "file") {
+        if (!stat.isFile() || stat.size === 0) {
+          fail("MISSING_ARTIFACT", "reserved file artifact is empty or not a regular file");
+        }
+        return [intent.location];
+      }
+      if (!stat.isDirectory()) fail("MISSING_ARTIFACT", "reserved directory artifact is not a directory");
+      const files = [];
+      const visit = (directory, relativeDirectory = "") => {
+        let entries;
+        try {
+          entries = fs2.readdirSync(directory, { withFileTypes: true });
+        } catch (error) {
+          fail("IO_ERROR", `could not inspect reserved directory artifact: ${error.message}`);
+        }
+        for (const entry of entries) {
+          const relative = relativeDirectory ? path2.join(relativeDirectory, entry.name) : entry.name;
+          const absolute = path2.join(directory, entry.name);
+          if (entry.isDirectory()) visit(absolute, relative);
+          else if (entry.isFile()) files.push(normalizePath(relative));
+          else fail("INVALID_ARTIFACT_PATH", `reserved artifact contains an unsupported entry: ${normalizePath(relative)}`);
+        }
+      };
+      visit(artifactPath);
+      if (temporary && files.includes("artifact-manifest.json")) {
+        fail("ARTIFACT_COLLISION", "artifact-manifest.json is controller-owned");
+      }
+      if (!files.length) fail("MISSING_ARTIFACT", "reserved directory artifact contains no deliverable files");
+      return files.sort().map((relative) => `${normalizePath(intent.location)}/${relative}`);
+    }
+    function generatedManifest(operation, actor, files, summary) {
+      return {
+        schema_version: MANIFEST_VERSION,
+        operation_id: operation.id,
+        route: expectedArtifactRoute(actor),
+        scope_ref: operation.scope_ref ?? null,
+        files,
+        completed_at: nowIso(),
+        summary
+      };
+    }
+    function artifactSummary(artifactInput) {
+      if (!isObject(artifactInput) || Object.keys(artifactInput).some((key) => key !== "summary")) {
+        fail("INVALID_INPUT", "artifact input must contain only summary");
+      }
+      if (typeof artifactInput.summary !== "string" || !artifactInput.summary.trim()) {
+        fail("INVALID_INPUT", "artifact summary must be nonempty");
+      }
+      return artifactInput.summary.trim();
+    }
+    function publishReservedArtifact(projectRoot, operation, actor, artifactInput) {
+      const summary = artifactSummary(artifactInput);
+      const intent = operation.artifact_intent;
+      if (!intent) fail("MISSING_ARTIFACT", "no artifact is reserved for this operation");
+      const target = resolveOutputPath(projectRoot, intent.location);
+      const temporaryLocation = temporaryArtifactLocation(intent, operation.id);
+      const temporary = resolveOutputPath(projectRoot, temporaryLocation);
+      const manifestPath = manifestPathFor(target, intent.kind);
+      const artifactStatus = inspectReservedArtifact(projectRoot, operation, actor);
+      if (artifactStatus.location_state === "collision") {
+        fail("ARTIFACT_COLLISION", "the reserved artifact locations are in conflict");
+      }
+      if (artifactStatus.location_state === "absent") {
+        fail("MISSING_ARTIFACT", `reserved temporary artifact does not exist: ${temporaryLocation}`);
+      }
+      if (artifactStatus.location_state === "complete") {
+        const completed2 = validateManifest(projectRoot, operation, actor);
+        if (completed2.manifest.summary.trim() !== summary) {
+          fail("INVALID_ARTIFACT_MANIFEST", "artifact summary must match the completion manifest summary");
+        }
+        return completed2;
+      }
+      if (artifactStatus.location_state === "invalid") {
+        if (artifactEntryExists(manifestPath)) validateManifest(projectRoot, operation, actor);
+        validateArtifactBody(projectRoot, operation, target);
+        fail(artifactStatus.reason_code, "reserved artifact is invalid");
+      }
+      if (artifactStatus.location_state === "final-awaiting-manifest") {
+        const files = validateArtifactBody(projectRoot, operation, target);
+        atomicWrite(manifestPath, `${JSON.stringify(generatedManifest(operation, actor, files, summary), null, 2)}
+`);
+      } else if (artifactStatus.location_state === "temp-only") {
+        const files = validateArtifactBody(projectRoot, operation, temporary, true);
+        const manifest = generatedManifest(operation, actor, files, summary);
+        try {
+          fs2.renameSync(temporary, target);
+        } catch (error) {
+          fail("IO_ERROR", `could not publish reserved artifact: ${error.message}`);
+        }
+        atomicWrite(manifestPath, `${JSON.stringify(manifest, null, 2)}
+`);
+      } else {
+        fail("INTERNAL_ERROR", `unsupported artifact location state: ${artifactStatus.location_state}`);
+      }
+      const completed = validateManifest(projectRoot, operation, actor);
+      if (completed.manifest.summary.trim() !== summary) {
+        fail("INVALID_ARTIFACT_MANIFEST", "artifact summary must match the completion manifest summary");
+      }
+      return completed;
+    }
+    function artifactEntryExists(filePath) {
+      try {
+        fs2.lstatSync(filePath);
+        return true;
+      } catch (error) {
+        if (["ENOENT", "ENOTDIR"].includes(error.code)) return false;
+        fail("IO_ERROR", `could not inspect reserved artifact path: ${error.message}`);
+      }
+    }
     function inspectReservedArtifact(projectRoot, operation, actor) {
       const target = resolveOutputPath(projectRoot, operation.artifact_intent.location);
+      const temporary = resolveOutputPath(
+        projectRoot,
+        temporaryArtifactLocation(operation.artifact_intent, operation.id)
+      );
       const manifestPath = manifestPathFor(target, operation.artifact_intent.kind);
       const relativeManifestPath = normalizePath(path2.relative(path2.resolve(projectRoot), manifestPath));
+      const base = {
+        location: operation.artifact_intent.location,
+        temporary_path: temporaryArtifactLocation(operation.artifact_intent, operation.id),
+        manifest_path: relativeManifestPath
+      };
+      const describe = (locationState, reasonCode = null) => ({
+        status: locationState === "complete" ? "complete" : "incomplete",
+        location_state: locationState,
+        ...base,
+        ...reasonCode === null ? {} : { reason_code: reasonCode }
+      });
+      const targetExists = artifactEntryExists(target);
+      const temporaryExists = artifactEntryExists(temporary);
+      const manifestExists = artifactEntryExists(manifestPath);
+      if (targetExists && temporaryExists || !targetExists && manifestExists) {
+        return describe("collision", "ARTIFACT_COLLISION");
+      }
+      if (!targetExists) {
+        return temporaryExists ? describe("temp-only", "MISSING_ARTIFACT") : describe("absent", "MISSING_ARTIFACT");
+      }
+      if (!manifestExists) {
+        try {
+          validateArtifactBody(projectRoot, operation, target);
+          return describe("final-awaiting-manifest", "MISSING_ARTIFACT");
+        } catch (error) {
+          if (error instanceof StateError2 && ["MISSING_ARTIFACT", "INVALID_ARTIFACT_PATH"].includes(error.code)) {
+            return describe("invalid", error.code);
+          }
+          throw error;
+        }
+      }
       try {
         validateManifest(projectRoot, operation, actor);
-        return {
-          status: "complete",
-          location: operation.artifact_intent.location,
-          temporary_path: temporaryArtifactLocation(operation.artifact_intent, operation.id),
-          manifest_path: relativeManifestPath
-        };
+        return describe("complete");
       } catch (error) {
-        if (error instanceof StateError2 && ["MISSING_ARTIFACT", "INVALID_ARTIFACT_MANIFEST"].includes(error.code)) {
-          return {
-            status: "incomplete",
-            location: operation.artifact_intent.location,
-            temporary_path: temporaryArtifactLocation(operation.artifact_intent, operation.id),
-            manifest_path: relativeManifestPath,
-            reason_code: error.code
-          };
+        if (error instanceof StateError2 && ["MISSING_ARTIFACT", "INVALID_ARTIFACT_MANIFEST", "INVALID_ARTIFACT_PATH"].includes(error.code)) {
+          return describe("invalid", error.code);
         }
         throw error;
       }
@@ -8875,18 +9023,27 @@ var require_core = __commonJS({
         }
       }
     }
+    function normalizeCompletedHandoff(updates, actor, artifactInput) {
+      if (artifactInput === void 0 || artifactInput === null) return;
+      const summary = artifactSummary(artifactInput);
+      if (actor.startsWith("analysis_execution.")) {
+        const design = actor.slice("analysis_execution.".length);
+        const patch = updates.council_chamber.analysis_execution[design];
+        patch.summary = summary;
+        patch.questions_for_user = [];
+      } else if (actor === "report_writer") {
+        const patch = updates.council_chamber.report_writer;
+        patch.summary = summary;
+        patch.questions_for_user = [];
+      }
+    }
     function appendArtifactRecord(state, projectRoot, operation, actor, artifactInput) {
-      if (!isObject(artifactInput) || Object.keys(artifactInput).some((key) => key !== "summary")) {
-        fail("INVALID_INPUT", "artifact input must contain only summary");
-      }
-      if (typeof artifactInput.summary !== "string" || !artifactInput.summary.trim()) {
-        fail("INVALID_INPUT", "artifact summary must be nonempty");
-      }
+      const summary = artifactSummary(artifactInput);
       const { manifest } = validateManifest(projectRoot, operation, actor);
       if ((actor === "report_writer" || actor.startsWith("analysis_execution.")) && operation.scope_ref === null) {
         fail("SCOPE_MISMATCH", `${actor} output requires an exact approved scope_ref`);
       }
-      if (artifactInput.summary.trim() !== manifest.summary.trim()) {
+      if (summary !== manifest.summary.trim()) {
         fail("INVALID_ARTIFACT_MANIFEST", "artifact summary must match the completion manifest summary");
       }
       if (state.artifact_records.some((record2) => record2.operation_id === operation.id)) {
@@ -8899,7 +9056,7 @@ var require_core = __commonJS({
         route: expectedArtifactRoute(actor),
         location: operation.artifact_intent.location,
         created_at: nowIso(),
-        summary: artifactInput.summary.trim()
+        summary
       };
       if (actor.startsWith("analysis_execution.")) {
         record.design = planInfo.design;
@@ -8957,20 +9114,31 @@ var require_core = __commonJS({
         payload.artifact !== void 0 && payload.artifact !== null
       );
       resetNewScopeState(state, payload.actor, payload.scope_transition);
+      normalizeCompletedHandoff(updates, payload.actor, payload.artifact);
       stampWorkerUpdates(updates, payload.actor, nowIso());
+      const hasArtifact = payload.artifact !== void 0 && payload.artifact !== null;
+      const merged = deepMerge(state, updates);
+      validateScopeCompletion(merged, payload.actor, updates, hasArtifact);
       let artifactRecord = null;
-      if (payload.artifact !== void 0 && payload.artifact !== null) {
+      if (hasArtifact) {
         if (!operation.artifact_intent) fail("MISSING_ARTIFACT", "artifact output was not reserved");
-        artifactRecord = appendArtifactRecord(state, projectRoot, operation, payload.actor, payload.artifact);
+        if (merged.artifact_records.some((record) => record.operation_id === operation.id)) {
+          fail("DUPLICATE_ARTIFACT", "this operation already has an artifact record");
+        }
+        publishReservedArtifact(projectRoot, operation, payload.actor, payload.artifact);
+        artifactRecord = appendArtifactRecord(merged, projectRoot, operation, payload.actor, payload.artifact);
       } else if (operation.artifact_intent) {
         const artifactStatus = inspectReservedArtifact(projectRoot, operation, payload.actor);
-        if (artifactStatus.status === "complete") {
-          fail("MISSING_ARTIFACT_RECORD", "a completed reserved artifact must be recorded by apply");
+        if (!["absent", "temp-only"].includes(artifactStatus.location_state)) {
+          if (artifactStatus.location_state === "collision") {
+            fail("ARTIFACT_COLLISION", "the reserved artifact locations are in conflict and cannot be left unrecorded");
+          }
+          if (artifactStatus.location_state === "invalid" && artifactStatus.reason_code !== "MISSING_ARTIFACT") {
+            fail(artifactStatus.reason_code, "the reserved final artifact is invalid and cannot be left unrecorded");
+          }
+          fail("MISSING_ARTIFACT_RECORD", "a reserved final artifact must be completed and recorded by apply");
         }
       }
-      const merged = deepMerge(state, updates);
-      const hasArtifact = payload.artifact !== void 0 && payload.artifact !== null;
-      validateScopeCompletion(merged, payload.actor, updates, hasArtifact);
       if (deriveSummaryAggregates(merged)) merged.project_summary.last_updated = nowIso();
       merged.state_meta.active_operation.stage = "lead_pending";
       const revision = commitMutation(statePath, merged);
@@ -9001,6 +9169,17 @@ var require_core = __commonJS({
       Object.assign(state.project_summary, derived);
       return changed;
     }
+    function rejectReadyScopeSummaryUpdate(state, updates) {
+      if (!updates.project_summary || !Object.prototype.hasOwnProperty.call(updates.project_summary, "exploration_summary")) return;
+      const actor = validatePlan(state.next_step_plan).actor;
+      const status = actor && actor.startsWith("analysis_execution.") ? state.council_chamber.analysis_execution[actor.slice("analysis_execution.".length)].current_status : actor === "report_writer" ? state.council_chamber.report_writer.current_status : null;
+      if (status === "ready" && !deepEqual(updates.project_summary.exploration_summary, state.project_summary.exploration_summary)) {
+        fail(
+          "OWNERSHIP_VIOLATION",
+          "a ready analysis or report scope remains route-owned and cannot update project_summary.exploration_summary"
+        );
+      }
+    }
     function finishOperation2({ projectRoot, payload, cancel = false }) {
       const { statePath, state } = loadCurrentState(projectRoot);
       assertExpected(state, payload);
@@ -9026,6 +9205,7 @@ var require_core = __commonJS({
           ["last_updated", ...DERIVED_SUMMARY_FIELDS]
         );
       }
+      rejectReadyScopeSummaryUpdate(state, updates);
       const previousSummary = clone(state.project_summary);
       const merged = deepMerge(state, updates);
       deriveSummaryAggregates(merged);
@@ -9039,8 +9219,30 @@ var require_core = __commonJS({
         project_id: merged.state_meta.project_id,
         revision,
         operation_id: operation.id,
-        mode: "idle"
+        mode: "idle",
+        next_action: "respond_and_stop"
       };
+    }
+    function scopeSnapshot(state) {
+      const analysis = {};
+      for (const design of Object.keys(state.council_chamber.analysis_execution).sort()) {
+        const slot = state.council_chamber.analysis_execution[design];
+        if (slot.scope_id === null) continue;
+        analysis[design] = {
+          scope_id: slot.scope_id,
+          scope_revision: slot.scope_revision,
+          current_status: slot.current_status,
+          support: slot.support,
+          last_updated: slot.last_updated
+        };
+      }
+      const report = state.report_assembly.scope_id === null ? null : {
+        scope_id: state.report_assembly.scope_id,
+        scope_revision: state.report_assembly.scope_revision,
+        current_status: state.council_chamber.report_writer.current_status,
+        last_updated: state.council_chamber.report_writer.last_updated
+      };
+      return { analysis, report };
     }
     function validateProject2({ projectRoot }) {
       const root = path2.resolve(projectRoot);
@@ -9059,12 +9261,18 @@ var require_core = __commonJS({
         active_operation: state.state_meta.active_operation,
         plan: state.next_step_plan,
         plan_actor: planInfo.actor,
+        scope_snapshot: scopeSnapshot(state),
         warnings: artifactWarnings(root, state)
       };
     }
     function validateTemplate2({ skillRoot }) {
       loadTemplate(skillRoot);
-      return { ok: true, code: "VALID_TEMPLATE", schema_version: SCHEMA_VERSION };
+      return {
+        ok: true,
+        code: "VALID_TEMPLATE",
+        schema_version: SCHEMA_VERSION,
+        capabilities: { scope_snapshot: 1 }
+      };
     }
     module2.exports = {
       StateError: StateError2,

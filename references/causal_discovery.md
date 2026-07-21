@@ -155,13 +155,11 @@ scoped findings, limitations, reviewer requests, and chamber feedback only.
 
 Valid discovery artifacts include graph objects, edge tables, local-neighborhood
 tables, stability tables, graph plots, diagnostic figures, source scripts,
-notebooks, manifests, and technical notes.
+notebooks, and technical notes.
 
 When a graph object, table, figure, script, notebook, or technical note is
-created, follow `references/artifact_output_policy.md`: reserve first, write and
-validate temporary output, atomically publish it with its completion manifest,
-then include the completed artifact and compact `discovery_sidecar` references
-in `statectl apply`.
+created, follow `references/artifact_output_policy.md` and include compact
+`discovery_sidecar` references in the same `statectl apply` payload.
 
 Do not reserve or submit an artifact for verbal discovery framing or for
 inspecting existing files without creating new durable output.

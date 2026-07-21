@@ -82,7 +82,7 @@ Use package choice after the data shape and approved lane are clear.
 
 ## Execution Record
 
-Follow the shared summary and exact-manifest rules in
+Follow the shared completion-summary and artifact rules in
 `references/design_execution_contract.md`. Emphasize variables, analysis lane,
 multiplicity, key/null/unstable patterns, material limits, and the explicit
 non-causal boundary.

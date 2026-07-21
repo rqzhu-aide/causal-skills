@@ -111,7 +111,7 @@ Key literature anchors: SUTVA/no-interference violations, partial interference, 
 
 ## Execution Record
 
-Follow the shared summary and exact-manifest rules in
+Follow the shared completion-summary and artifact rules in
 `references/design_execution_contract.md`. Emphasize units and exposure mapping,
 the direct/spillover estimand, support and dependence diagnostics,
 confounding/homophily limits, and the interference claim boundary.

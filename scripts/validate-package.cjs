@@ -77,5 +77,8 @@ function validateRoutes() {
 
 validateFrontmatter();
 validateRoutes();
-validateTemplate({ skillRoot: ROOT });
+const template = validateTemplate({ skillRoot: ROOT });
+if (template.capabilities?.scope_snapshot !== 1) {
+  throw new Error("state controller must advertise scope_snapshot capability 1");
+}
 process.stdout.write("skill package is valid\n");

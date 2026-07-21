@@ -109,7 +109,7 @@ Key literature anchors: continuity-based RD, local polynomial RD, robust bias co
 
 ## Execution Record
 
-Follow the shared summary and exact-manifest rules in
+Follow the shared completion-summary and artifact rules in
 `references/design_execution_contract.md`. Emphasize the cutoff and running
 variable, treatment jump, local estimand, manipulation/support and bandwidth
 diagnostics, and the local claim boundary.

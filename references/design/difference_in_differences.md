@@ -107,7 +107,7 @@ Key literature anchors: canonical DiD, parallel trends, Callaway-Sant'Anna group
 
 ## Execution Record
 
-Follow the shared summary and exact-manifest rules in
+Follow the shared completion-summary and artifact rules in
 `references/design_execution_contract.md`. Emphasize treatment cohorts and
 comparison units, the DiD/event-time estimand, pre-period and timing diagnostics,
 inference level, and the parallel-trends claim boundary.

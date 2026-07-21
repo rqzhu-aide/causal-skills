@@ -67,10 +67,11 @@ Use these analysis scope handoff fields:
   when no consequential decision remains.
 - `feedback_to_route`: 0-2 fit, review, or implementation cautions.
 
-An approval-ready handoff covers only what is needed to approve execution:
-design fit, support role, required inputs, target estimand or contrast,
-estimation strategy or model family, diagnostics, main output, and claim
-boundary. Do not store analysis scope in
+An approval-ready handoff contains one complete default covering design fit,
+support role, required inputs, target estimand or contrast, estimation strategy
+or model family, diagnostics, main output, and claim boundary.
+`questions_for_user` may offer revisions to that default, but must not leave a
+material scope element undecided. Do not store analysis scope in
 `discovery_sidecar`, `report_assembly`, pending artifact records, output
 folders, or `project_summary`.
 
@@ -89,22 +90,27 @@ a scope-consistency check, not a repeat of the full begin gate.
 
 When the approved scope remains current:
 
+Before marking the handoff `done`, reconcile every required target, design or
+support choice, model or estimation strategy, diagnostic, main output, and
+claim boundary against the bound scope. If a required item is missing or
+materially substituted, repair it or return `ready` or `blocked` without an
+artifact; never submit `done`.
+
 1. Call `statectl reserve-artifact` for one meaningful directory directly under
    `output/`.
 2. Follow `references/artifact_output_policy.md` to write temporary output,
-   validate it, atomically publish it, and complete the returned manifest.
+   then validate it against the bound scope.
 3. Submit one `statectl apply` JSON payload with
    `actor: analysis_execution.<that_design_id>`, `scope_transition: preserve`,
    updates only for the matching chamber slot, `current_status: done`, and the
    completed `artifact: {summary}`. Include the selected design, optional
    support, main result, limitations, and useful next analysis in that summary.
 
-Keep the completion manifest in the exact shape defined by
-`references/artifact_output_policy.md`; never add design-specific keys. Put a
-compact prose record in its `summary`: design, support when used, target or
-estimand, main result, diagnostics completed or missing, claim boundary, and
-material limitations. Put detailed data contracts, settings, package versions,
-tables, and diagnostic inventories in the output files or chamber summary.
+Put a compact prose record in the artifact `summary`: design, support when used,
+target or estimand, main result, diagnostics completed or missing, claim
+boundary, and material limitations. Put detailed data contracts, settings,
+package versions, tables, and diagnostic inventories in the output files or
+chamber summary.
 
 `statectl apply` owns timestamps, IDs, artifact append, revision checks, route
 ownership validation, and transition to `lead_pending`. It rejects changes to

@@ -241,6 +241,69 @@ test("open creates a valid state and a normal open is a byte-preserving no-op", 
   expectSuccess(execute(projectRoot, "validate"), "VALID");
 });
 
+test("validate exposes a deterministic scope snapshot without mutating state", (t) => {
+  const projectRoot = temporaryProject(t);
+  expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const state = readState(projectRoot);
+  const singleId = crypto.randomUUID();
+  const differenceId = crypto.randomUUID();
+  const reportId = crypto.randomUUID();
+  state.council_chamber.analysis_execution.single_time_observational = {
+    ...analysisSlot("ready", "Single-time scope."),
+    last_updated: null,
+    scope_id: singleId,
+    scope_revision: 2,
+  };
+  state.council_chamber.analysis_execution.difference_in_differences = {
+    ...analysisSlot("blocked", "Difference-in-differences scope.", "statistical-validity"),
+    last_updated: null,
+    scope_id: differenceId,
+    scope_revision: 1,
+  };
+  state.council_chamber.analysis_execution.randomized_assignment = {
+    ...analysisSlot("requested", "No scope identity yet."),
+    last_updated: null,
+    scope_id: null,
+    scope_revision: 0,
+  };
+  state.report_assembly.scope_id = reportId;
+  state.report_assembly.scope_revision = 3;
+  state.council_chamber.report_writer.current_status = "ready";
+  writeState(projectRoot, state);
+  const before = fs.readFileSync(statePath(projectRoot), "utf8");
+
+  const validated = expectSuccess(execute(projectRoot, "validate"), "VALID");
+  assert.deepEqual(Object.keys(validated.scope_snapshot.analysis), [
+    "difference_in_differences",
+    "single_time_observational",
+  ]);
+  assert.deepEqual(validated.scope_snapshot, {
+    analysis: {
+      difference_in_differences: {
+        scope_id: differenceId,
+        scope_revision: 1,
+        current_status: "blocked",
+        support: "statistical-validity",
+        last_updated: null,
+      },
+      single_time_observational: {
+        scope_id: singleId,
+        scope_revision: 2,
+        current_status: "ready",
+        support: null,
+        last_updated: null,
+      },
+    },
+    report: {
+      scope_id: reportId,
+      scope_revision: 3,
+      current_status: "ready",
+      last_updated: null,
+    },
+  });
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+});
+
 test("open --fresh archives exact prior bytes before replacing even malformed state", (t) => {
   const projectRoot = temporaryProject(t);
   const malformed = "project_summary: [unterminated\r\n# preserve these exact bytes\r\n";
@@ -1126,6 +1189,11 @@ test("analysis and report done handoffs require an artifact in the same apply", 
 test("artifact reservation, manifest verification, resume, and recording are one atomic protocol", (t) => {
   const projectRoot = temporaryProject(t);
   const prepared = prepareAnalysisScope(projectRoot);
+  const seeded = readState(projectRoot);
+  seeded.council_chamber.analysis_execution[prepared.design].summary = "Stale ready-scope summary.";
+  seeded.council_chamber.analysis_execution[prepared.design].questions_for_user = ["Stale approval question?"];
+  seeded.council_chamber.analysis_execution[prepared.design].feedback_to_route = ["Preserve this feedback."];
+  writeState(projectRoot, seeded);
   const reorderedScopeRef = {
     revision: prepared.scope_ref.revision,
     id: prepared.scope_ref.id,
@@ -1148,6 +1216,7 @@ test("artifact reservation, manifest verification, resume, and recording are one
   const incomplete = expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER");
   assert.deepEqual(incomplete.artifact_status, {
     status: "incomplete",
+    location_state: "absent",
     location: reserved.artifact_intent.location,
     temporary_path: reserved.temporary_path,
     manifest_path: reserved.manifest_path,
@@ -1157,7 +1226,7 @@ test("artifact reservation, manifest verification, resume, and recording are one
   const workerPatch = {
     council_chamber: {
       analysis_execution: {
-        [prepared.design]: analysisSlot("done", "Approved analysis and artifact completed."),
+        [prepared.design]: { current_status: "done" },
       },
     },
   };
@@ -1176,20 +1245,82 @@ test("artifact reservation, manifest verification, resume, and recording are one
 
   const artifactPath = path.join(projectRoot, ...reserved.artifact_intent.location.split("/"));
   const temporaryArtifactPath = path.join(projectRoot, ...reserved.temporary_path.split("/"));
+  const manifestPath = path.join(projectRoot, ...reserved.manifest_path.split("/"));
   fs.mkdirSync(path.dirname(temporaryArtifactPath), { recursive: true });
   fs.writeFileSync(temporaryArtifactPath, "estimate,se\n1.25,0.18\n", "utf8");
-  fs.renameSync(temporaryArtifactPath, artifactPath);
-  const manifest = {
+  fs.copyFileSync(temporaryArtifactPath, artifactPath);
+  const collision = expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER");
+  assert.equal(collision.artifact_status.location_state, "collision");
+  assert.equal(collision.artifact_status.reason_code, "ARTIFACT_COLLISION");
+  const beforeCollision = fs.readFileSync(statePath(projectRoot), "utf8");
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: execution.operation_id,
+      actor: `analysis_execution.${prepared.design}`,
+      scope_transition: "preserve",
+      updates: workerPatch,
+      artifact: { summary: "Treatment-effect estimates." },
+    },
+  }), "ARTIFACT_COLLISION");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeCollision);
+  fs.rmSync(artifactPath);
+
+  const beforeStatusMismatch = fs.readFileSync(statePath(projectRoot), "utf8");
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: execution.operation_id,
+      actor: `analysis_execution.${prepared.design}`,
+      scope_transition: "preserve",
+      updates: {
+        council_chamber: {
+          analysis_execution: {
+            [prepared.design]: analysisSlot("ready", "Artifact exists but status is not done."),
+          },
+        },
+      },
+      artifact: { summary: "Treatment-effect estimates." },
+    },
+  }), "SCOPE_MISMATCH");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeStatusMismatch);
+  assert.equal(fs.existsSync(temporaryArtifactPath), true);
+  assert.equal(fs.existsSync(artifactPath), false);
+
+  const beforeInterruptedApply = fs.readFileSync(statePath(projectRoot), "utf8");
+  expectFailure(execute(projectRoot, "apply", {
+    env: { STATECTL_FAIL_BEFORE_RENAME: "1" },
+    payload: {
+      ...expected(reserved),
+      operation_id: execution.operation_id,
+      actor: `analysis_execution.${prepared.design}`,
+      scope_transition: "preserve",
+      updates: workerPatch,
+      artifact: { summary: "Treatment-effect estimates." },
+    },
+  }), "INJECTED_WRITE_FAILURE");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeInterruptedApply);
+  assert.equal(fs.existsSync(temporaryArtifactPath), false);
+  assert.equal(fs.existsSync(artifactPath), true);
+  assert.equal(fs.existsSync(manifestPath), true);
+
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  assert.deepEqual(manifest, {
     schema_version: 1,
     operation_id: execution.operation_id,
     route: "analysis_execution",
     scope_ref: prepared.scope_ref,
     files: [reserved.artifact_intent.location],
-    completed_at: "2000-01-01T00:00:00.000Z",
+    completed_at: manifest.completed_at,
     summary: "Treatment-effect estimates.",
-  };
-  const manifestPath = path.join(projectRoot, ...reserved.manifest_path.split("/"));
-  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  });
+  assert.match(manifest.completed_at, /^\d{4}-\d{2}-\d{2}T/);
+  assert.ok(Date.parse(manifest.completed_at) <= Date.now() + 1000);
+
+  const reusable = expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER");
+  assert.equal(reusable.artifact_status.status, "complete");
+  assert.equal(reusable.artifact_status.location_state, "complete");
+  assert.equal(reusable.artifact_status.manifest_path, reserved.manifest_path);
 
   const beforeInvalidManifest = fs.readFileSync(statePath(projectRoot), "utf8");
   manifest.files = {};
@@ -1208,29 +1339,6 @@ test("artifact reservation, manifest verification, resume, and recording are one
   manifest.files = [reserved.artifact_intent.location];
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 
-  const reusable = expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER");
-  assert.equal(reusable.artifact_status.status, "complete");
-  assert.equal(reusable.artifact_status.manifest_path, reserved.manifest_path);
-
-  const beforeStatusMismatch = fs.readFileSync(statePath(projectRoot), "utf8");
-  expectFailure(execute(projectRoot, "apply", {
-    payload: {
-      ...expected(reserved),
-      operation_id: execution.operation_id,
-      actor: `analysis_execution.${prepared.design}`,
-      scope_transition: "preserve",
-      updates: {
-        council_chamber: {
-          analysis_execution: {
-            [prepared.design]: analysisSlot("ready", "Artifact exists but status is not done."),
-          },
-        },
-      },
-      artifact: { summary: manifest.summary },
-    },
-  }), "SCOPE_MISMATCH");
-  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeStatusMismatch);
-
   const applied = expectSuccess(execute(projectRoot, "apply", {
     payload: {
       ...expected(reserved),
@@ -1244,9 +1352,12 @@ test("artifact reservation, manifest verification, resume, and recording are one
   assert.equal(applied.artifact_record.operation_id, execution.operation_id);
   assert.equal(applied.artifact_record.location, reserved.artifact_intent.location);
   assert.equal(applied.artifact_record.design, prepared.design);
-  assert.notEqual(applied.artifact_record.created_at, manifest.completed_at);
   assert.match(applied.artifact_record.created_at, /^\d{4}-\d{2}-\d{2}T/);
   const afterApply = readState(projectRoot);
+  const completedSlot = afterApply.council_chamber.analysis_execution[prepared.design];
+  assert.equal(completedSlot.summary, manifest.summary);
+  assert.deepEqual(completedSlot.questions_for_user, []);
+  assert.deepEqual(completedSlot.feedback_to_route, ["Preserve this feedback."]);
   assert.equal(afterApply.project_summary.analysis_output, "exist");
   const summaryTimestamp = afterApply.project_summary.last_updated;
 
@@ -1272,6 +1383,145 @@ test("artifact reservation, manifest verification, resume, and recording are one
   const warning = expectSuccess(execute(projectRoot, "open"), "OPENED").warnings;
   assert.equal(warning.length, 1);
   assert.equal(warning[0].code, "MISSING_HISTORICAL_ARTIFACT");
+});
+
+test("reserved artifact state is explicit and final output cannot be silently abandoned", async (t) => {
+  const updates = {
+    data_facts: {
+      data_checked: "limited",
+      audit_scope: "No artifact was adopted.",
+    },
+    council_chamber: {
+      data_audit: {
+        current_status: "limited",
+        summary: "Audit handoff without an artifact.",
+        questions_for_user: [],
+        feedback_to_route: [],
+      },
+    },
+  };
+
+  const setup = (projectRoot, slug) => {
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const started = expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+    const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+      payload: {
+        ...expected(started),
+        operation_id: started.operation_id,
+        kind: "file",
+        slug,
+        extension: "csv",
+      },
+    }), "ARTIFACT_RESERVED");
+    return {
+      started,
+      reserved,
+      target: path.join(projectRoot, ...reserved.artifact_intent.location.split("/")),
+      temporary: path.join(projectRoot, ...reserved.temporary_path.split("/")),
+      manifestPath: path.join(projectRoot, ...reserved.manifest_path.split("/")),
+    };
+  };
+
+  for (const physicalState of ["absent", "temp-only"]) {
+    await t.test(`${physicalState} may close without adopting output`, () => {
+      const projectRoot = temporaryProject(t);
+      const context = setup(projectRoot, `allowed-${physicalState}`);
+      if (physicalState === "temp-only") {
+        fs.mkdirSync(path.dirname(context.temporary), { recursive: true });
+        fs.writeFileSync(context.temporary, "field,missing\noutcome,0\n", "utf8");
+      }
+      const opened = expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER");
+      assert.equal(opened.artifact_status.location_state, physicalState);
+      const applied = expectSuccess(execute(projectRoot, "apply", {
+        payload: {
+          ...expected(context.reserved),
+          operation_id: context.started.operation_id,
+          actor: "data_audit",
+          updates,
+        },
+      }), "WORKER_APPLIED");
+      assert.equal(applied.artifact_record, null);
+      assert.deepEqual(readState(projectRoot).artifact_records, []);
+      if (physicalState === "temp-only") assert.equal(fs.existsSync(context.temporary), true);
+      expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+    });
+  }
+
+  const projectRoot = temporaryProject(t);
+  const context = setup(projectRoot, "guarded-final");
+  fs.mkdirSync(path.dirname(context.temporary), { recursive: true });
+  fs.writeFileSync(context.temporary, "field,missing\noutcome,0\n", "utf8");
+  fs.renameSync(context.temporary, context.target);
+  assert.equal(
+    expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER").artifact_status.location_state,
+    "final-awaiting-manifest",
+  );
+
+  const applyWithoutArtifact = () => execute(projectRoot, "apply", {
+    payload: {
+      ...expected(context.reserved),
+      operation_id: context.started.operation_id,
+      actor: "data_audit",
+      updates,
+    },
+  });
+  const stateBefore = fs.readFileSync(statePath(projectRoot), "utf8");
+  expectFailure(applyWithoutArtifact(), "MISSING_ARTIFACT_RECORD");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), stateBefore);
+
+  fs.writeFileSync(context.target, "", "utf8");
+  const invalidFinal = expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER").artifact_status;
+  assert.equal(invalidFinal.location_state, "invalid");
+  expectFailure(applyWithoutArtifact(), "MISSING_ARTIFACT_RECORD");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), stateBefore);
+
+  fs.writeFileSync(context.target, "field,missing\noutcome,0\n", "utf8");
+  fs.writeFileSync(context.manifestPath, "{}\n", "utf8");
+  const invalidManifest = expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER").artifact_status;
+  assert.equal(invalidManifest.location_state, "invalid");
+  assert.equal(invalidManifest.reason_code, "INVALID_ARTIFACT_MANIFEST");
+  expectFailure(applyWithoutArtifact(), "INVALID_ARTIFACT_MANIFEST");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), stateBefore);
+
+  const manifest = {
+    schema_version: 1,
+    operation_id: context.started.operation_id,
+    route: "data_audit",
+    scope_ref: null,
+    files: [context.reserved.artifact_intent.location],
+    completed_at: new Date().toISOString(),
+    summary: "Completed but unrecorded audit artifact.",
+  };
+  fs.writeFileSync(context.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  assert.equal(
+    expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER").artifact_status.location_state,
+    "complete",
+  );
+  expectFailure(applyWithoutArtifact(), "MISSING_ARTIFACT_RECORD");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), stateBefore);
+
+  fs.rmSync(context.target);
+  const manifestOnly = expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER").artifact_status;
+  assert.equal(manifestOnly.location_state, "collision");
+  expectFailure(applyWithoutArtifact(), "ARTIFACT_COLLISION");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), stateBefore);
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(context.reserved),
+      operation_id: context.started.operation_id,
+      actor: "data_audit",
+      updates,
+      artifact: { summary: manifest.summary },
+    },
+  }), "ARTIFACT_COLLISION");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), stateBefore);
+
+  fs.writeFileSync(context.target, "field,missing\noutcome,0\n", "utf8");
+  fs.writeFileSync(context.temporary, "field,missing\noutcome,0\n", "utf8");
+  const collision = expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER").artifact_status;
+  assert.equal(collision.location_state, "collision");
+  expectFailure(applyWithoutArtifact(), "ARTIFACT_COLLISION");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), stateBefore);
 });
 
 test("atomic finish failure preserves a resumable lead operation and removes temp state", (t) => {
@@ -1431,19 +1681,7 @@ test("directory artifacts require a real in-directory deliverable and reject par
   const temporary = path.join(projectRoot, ...reserved.temporary_path.split("/"));
   fs.mkdirSync(temporary, { recursive: true });
   fs.writeFileSync(path.join(temporary, "results.csv"), "variable,missing\noutcome,0\n", "utf8");
-  fs.renameSync(temporary, target);
   const manifestPath = path.join(projectRoot, ...reserved.manifest_path.split("/"));
-  const manifest = {
-    schema_version: 1,
-    operation_id: started.operation_id,
-    route: "data_audit",
-    scope_ref: null,
-    files: [reserved.manifest_path],
-    completed_at: new Date().toISOString(),
-    summary: "Data-audit package.",
-  };
-  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-
   const updates = {
     data_facts: { data_checked: "passing" },
     council_chamber: {
@@ -1460,9 +1698,33 @@ test("directory artifacts require a real in-directory deliverable and reject par
     operation_id: started.operation_id,
     actor: "data_audit",
     updates,
-    artifact: { summary: manifest.summary },
+    artifact: { summary: "Data-audit package." },
   };
   const stateBeforeFailures = fs.readFileSync(statePath(projectRoot), "utf8");
+
+  const workerManifestPath = path.join(temporary, "artifact-manifest.json");
+  fs.writeFileSync(workerManifestPath, "{}\n", "utf8");
+  expectFailure(execute(projectRoot, "apply", { payload: applyPayload }), "ARTIFACT_COLLISION");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), stateBeforeFailures);
+  assert.equal(fs.existsSync(temporary), true);
+  assert.equal(fs.existsSync(target), false);
+  fs.rmSync(workerManifestPath);
+
+  expectFailure(execute(projectRoot, "apply", {
+    env: { STATECTL_FAIL_BEFORE_RENAME: "1" },
+    payload: applyPayload,
+  }), "INJECTED_WRITE_FAILURE");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), stateBeforeFailures);
+  assert.equal(fs.existsSync(temporary), false);
+  assert.equal(fs.existsSync(target), true);
+  assert.equal(fs.existsSync(manifestPath), true);
+
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const generatedFiles = [`${reserved.artifact_intent.location}/results.csv`];
+  assert.deepEqual(manifest.files, generatedFiles);
+
+  manifest.files = [reserved.manifest_path];
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   expectFailure(execute(projectRoot, "apply", { payload: applyPayload }), "INVALID_ARTIFACT_MANIFEST");
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), stateBeforeFailures);
 
@@ -1473,7 +1735,7 @@ test("directory artifacts require a real in-directory deliverable and reject par
   expectFailure(execute(projectRoot, "apply", { payload: applyPayload }), "INVALID_ARTIFACT_MANIFEST");
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), stateBeforeFailures);
 
-  manifest.files = [`${reserved.artifact_intent.location}/results.csv`];
+  manifest.files = generatedFiles;
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   const applied = expectSuccess(execute(projectRoot, "apply", { payload: applyPayload }), "WORKER_APPLIED");
   assert.equal(applied.artifact_record.location, reserved.artifact_intent.location);
@@ -1489,6 +1751,67 @@ test("directory artifacts require a real in-directory deliverable and reject par
     location: reserved.artifact_intent.location,
     file: `${reserved.artifact_intent.location}/results.csv`,
   }]);
+});
+
+test("existing artifact manifests cannot use links outside the reserved location", (t) => {
+  const projectRoot = temporaryProject(t);
+  const outsideRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+  const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      kind: "directory",
+      slug: "linked-audit",
+    },
+  }), "ARTIFACT_RESERVED");
+
+  const target = path.join(projectRoot, ...reserved.artifact_intent.location.split("/"));
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(path.join(outsideRoot, "result.csv"), "outside,reservation\n1,true\n", "utf8");
+  try {
+    fs.symlinkSync(outsideRoot, target, process.platform === "win32" ? "junction" : "dir");
+  } catch (error) {
+    if (["EPERM", "EACCES", "ENOTSUP"].includes(error.code)) {
+      t.skip(`link creation is unavailable: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+  const manifest = {
+    schema_version: 1,
+    operation_id: started.operation_id,
+    route: "data_audit",
+    scope_ref: null,
+    files: [`${reserved.artifact_intent.location}/result.csv`],
+    completed_at: new Date().toISOString(),
+    summary: "Linked audit package.",
+  };
+  fs.writeFileSync(path.join(outsideRoot, "artifact-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+  const before = fs.readFileSync(statePath(projectRoot), "utf8");
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: started.operation_id,
+      actor: "data_audit",
+      updates: {
+        data_facts: { data_checked: "passing" },
+        council_chamber: {
+          data_audit: {
+            current_status: "complete",
+            summary: "Audit completed.",
+            questions_for_user: [],
+            feedback_to_route: [],
+          },
+        },
+      },
+      artifact: { summary: manifest.summary },
+    },
+  }), "MISSING_ARTIFACT");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+  expectSuccess(finish(projectRoot, reserved, {}, { cancel: true }), "OPERATION_CANCELLED");
 });
 
 test("finish --cancel rejects semantic updates, preserves worker state, and synchronizes aggregates", (t) => {
@@ -1558,6 +1881,11 @@ test("finish --cancel rejects semantic updates, preserves worker state, and sync
 test("a historical report artifact remains valid with a new scope but cannot be relabeled non-existent", (t) => {
   const projectRoot = temporaryProject(t);
   const prepared = prepareReportScope(projectRoot);
+  const seeded = readState(projectRoot);
+  seeded.council_chamber.report_writer.summary = "Stale ready report summary.";
+  seeded.council_chamber.report_writer.questions_for_user = ["Stale report approval question?"];
+  seeded.council_chamber.report_writer.feedback_to_route = ["Preserve report feedback."];
+  writeState(projectRoot, seeded);
   const execution = expectSuccess(begin(projectRoot, prepared, "report_writer", {
     scope_ref: prepared.scope_ref,
   }), "BEGAN_WORKER");
@@ -1575,17 +1903,9 @@ test("a historical report artifact remains valid with a new scope but cannot be 
   fs.mkdirSync(path.dirname(temporaryPath), { recursive: true });
   fs.writeFileSync(temporaryPath, "<!doctype html><title>Clinical report</title>\n", "utf8");
   fs.renameSync(temporaryPath, artifactPath);
-  const manifest = {
-    schema_version: 1,
-    operation_id: execution.operation_id,
-    route: "report_writer",
-    scope_ref: prepared.scope_ref,
-    files: [reserved.artifact_intent.location],
-    completed_at: new Date().toISOString(),
-    summary: "Completed clinical report.",
-  };
+  const artifactSummary = "Completed clinical report.";
   const manifestPath = path.join(projectRoot, ...reserved.manifest_path.split("/"));
-  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  assert.equal(fs.existsSync(manifestPath), false);
   const beforeInvalidReportApply = fs.readFileSync(statePath(projectRoot), "utf8");
   expectFailure(execute(projectRoot, "apply", {
     payload: {
@@ -1594,7 +1914,7 @@ test("a historical report artifact remains valid with a new scope but cannot be 
       actor: "report_writer",
       scope_transition: "preserve",
       updates: { report_assembly: { current_format: "html" } },
-      artifact: { summary: manifest.summary },
+      artifact: { summary: artifactSummary },
     },
   }), "INVALID_INPUT");
   expectFailure(execute(projectRoot, "apply", {
@@ -1607,7 +1927,7 @@ test("a historical report artifact remains valid with a new scope but cannot be 
         report_assembly: { current_format: "html" },
         council_chamber: { report_writer: { current_status: "ready" } },
       },
-      artifact: { summary: manifest.summary },
+      artifact: { summary: artifactSummary },
     },
   }), "SCOPE_MISMATCH");
   expectFailure(execute(projectRoot, "apply", {
@@ -1620,7 +1940,7 @@ test("a historical report artifact remains valid with a new scope but cannot be 
         report_assembly: { draft_notes: ["Missing explicit HTML format."] },
         council_chamber: { report_writer: { current_status: "done" } },
       },
-      artifact: { summary: manifest.summary },
+      artifact: { summary: artifactSummary },
     },
   }), "SCOPE_MISMATCH");
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeInvalidReportApply);
@@ -1636,21 +1956,20 @@ test("a historical report artifact remains valid with a new scope but cannot be 
           draft_notes: ["Published historical report."],
         },
         council_chamber: {
-          report_writer: {
-            current_status: "done",
-            summary: "Historical report completed.",
-            questions_for_user: [],
-            feedback_to_route: [],
-          },
+          report_writer: { current_status: "done" },
         },
       },
-      artifact: { summary: manifest.summary },
+      artifact: { summary: artifactSummary },
     },
   }), "WORKER_APPLIED");
+  assert.equal(fs.existsSync(manifestPath), true);
   const published = expectSuccess(finish(projectRoot, reportApplied, {}, { cancel: true }), "OPERATION_CANCELLED");
   const historical = readState(projectRoot);
   assert.equal(historical.artifact_records.length, 1);
   assert.equal(historical.project_summary.report_output, "exist");
+  assert.equal(historical.council_chamber.report_writer.summary, artifactSummary);
+  assert.deepEqual(historical.council_chamber.report_writer.questions_for_user, []);
+  assert.deepEqual(historical.council_chamber.report_writer.feedback_to_route, ["Preserve report feedback."]);
 
   const newScopeStarted = expectSuccess(begin(projectRoot, published, "report_writer"), "BEGAN_WORKER");
   const newScopeApplied = expectSuccess(execute(projectRoot, "apply", {
@@ -1745,6 +2064,89 @@ test("an approved scope may return a new or revised ready handoff without creati
       expectSuccess(finish(projectRoot, approvedAgain, {}, { cancel: true }), "OPERATION_CANCELLED");
     });
   }
+});
+
+test("ready scopes remain route-owned and do not become durable exploration summaries", async (t) => {
+  const cases = [
+    {
+      name: "analysis",
+      prepare: prepareAnalysisScope,
+      route: (prepared) => `analysis_execution.${prepared.design}`,
+      apply: (prepared, started) => ({
+        ...expected(started),
+        operation_id: started.operation_id,
+        actor: `analysis_execution.${prepared.design}`,
+        scope_transition: "preserve",
+        updates: {
+          council_chamber: {
+            analysis_execution: {
+              [prepared.design]: analysisSlot("ready", "Analysis scope remains ready."),
+            },
+          },
+        },
+      }),
+    },
+    {
+      name: "report",
+      prepare: prepareReportScope,
+      route: () => "report_writer",
+      apply: (_prepared, started) => ({
+        ...expected(started),
+        operation_id: started.operation_id,
+        actor: "report_writer",
+        scope_transition: "preserve",
+        updates: {
+          report_assembly: { draft_notes: ["Report scope remains ready."] },
+          council_chamber: {
+            report_writer: {
+              current_status: "ready",
+              summary: "Report scope remains ready.",
+              questions_for_user: [],
+              feedback_to_route: [],
+            },
+          },
+        },
+      }),
+    },
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, () => {
+      const projectRoot = temporaryProject(t);
+      const prepared = scenario.prepare(projectRoot);
+      const durableSummary = "Existing durable finding.";
+      const lead = expectSuccess(begin(projectRoot, prepared, "team_lead"), "BEGAN_LEAD");
+      const summarized = expectSuccess(finish(projectRoot, lead, {
+        project_summary: { exploration_summary: durableSummary },
+      }), "OPERATION_FINISHED");
+      const started = expectSuccess(begin(projectRoot, summarized, scenario.route(prepared)), "BEGAN_WORKER");
+      const applied = expectSuccess(execute(projectRoot, "apply", {
+        payload: scenario.apply(prepared, started),
+      }), "WORKER_APPLIED");
+      const before = fs.readFileSync(statePath(projectRoot), "utf8");
+      expectFailure(finish(projectRoot, applied, {
+        project_summary: { exploration_summary: "Transient approval state must not persist." },
+      }), "OWNERSHIP_VIOLATION");
+      assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+
+      const summaryTimestamp = readState(projectRoot).project_summary.last_updated;
+      const closed = expectSuccess(finish(projectRoot, applied, {
+        project_summary: { exploration_summary: durableSummary },
+      }), "OPERATION_FINISHED");
+      assert.equal(closed.next_action, "respond_and_stop");
+      const finished = readState(projectRoot);
+      assert.equal(finished.project_summary.exploration_summary, durableSummary);
+      assert.equal(finished.project_summary.last_updated, summaryTimestamp);
+    });
+  }
+
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+  expectSuccess(finish(projectRoot, started, {
+    project_summary: { exploration_summary: "Durable reviewed finding." },
+  }), "OPERATION_FINISHED");
+  assert.equal(readState(projectRoot).project_summary.exploration_summary, "Durable reviewed finding.");
 });
 
 test("new scope transitions clear only the replaced scope state", async (t) => {

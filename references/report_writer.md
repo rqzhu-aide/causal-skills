@@ -77,6 +77,10 @@ Classify the task into one of four report scope states:
   redesign. Create no revised file until a later turn clearly approves the
   resulting ready scope.
 
+A `ready` report scope contains one complete default. Questions may offer
+revisions, but must not leave the purpose, audience, evidence basis, structure,
+output, or claim boundary materially undecided.
+
 Minor refinements include shorter or longer length, reviewer-facing tone,
 cautious wording, emphasizing or omitting a small section, adding a brief
 limitation or heterogeneity paragraph, or changing report style without
@@ -146,9 +150,12 @@ visible. Avoid invented results, YAML field names as prose, decorative figures,
 tables without interpretation, hidden omissions, and claims beyond
 `artifact_records` or route-owned state.
 
-Keep prose concise and consistent: preserve the approved scope, separate
+Preserve the approved scope. For each report claim, the narrowest applicable
+boundary in relevant route-owned state, the bound scope, or the available
+artifact supporting that claim governs. Report and derivative communication
+output must not strengthen it. Keep prose concise and consistent: separate
 assumptions, methods, results, limitations, and interpretations, use consistent
-terms, and keep report prose clear, concise, and direct.
+terms, and write clearly and directly.
 
 ## Report Scope And Handoff
 
@@ -167,8 +174,8 @@ When scope feedback is needed:
   `assets/report_template_analysis.md`.
 - Inspect `artifact_records`, `project_summary`, `report_assembly`,
   `discovery_sidecar`, `council_chamber.causal_discovery`, route-owned
-  summaries, and existing report-relevant output files before proposing the
-  report scope.
+  summaries, and available files explicitly referenced by artifact records or
+  the persisted assignment before proposing the report scope.
 - Write a compact `report_assembly.planned_structure` list that names the
   envisioned sections and what each section would do. Keep each entry short and
   approval-oriented, not drafted prose.
@@ -230,9 +237,15 @@ handles closeout synthesis through `finish`.
 When report text, a draft, HTML, or another report artifact is actually
 created:
 
-1. Reserve and publish one meaningful report file or directory through
-   `references/artifact_output_policy.md`; pooled reports never live inside an
-   analysis artifact folder.
+Before marking the handoff `done`, reconcile the rendered output with every
+bound-scope commitment, including purpose and audience, evidence basis,
+required structure or content, output format, and claim boundary. Repair any
+missing or materially substituted item, or return `ready` or `blocked` without
+an artifact; never submit `done`.
+
+1. Reserve, write, and validate one meaningful temporary report file or
+   directory through `references/artifact_output_policy.md`; pooled reports
+   never live inside an analysis artifact folder.
 2. Set `report_assembly.current_format` to `html` and add one compact draft note
    stating output kind, source basis, whether new analysis was performed,
    inherited causal boundary, limitations, and reserved output location.

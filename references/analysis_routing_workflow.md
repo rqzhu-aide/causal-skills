@@ -60,9 +60,11 @@ The controller enforces these structured requirements. The router uses
 no-causal-claim boundary; the controller enforces the readiness value but does
 not interpret prose.
 
-If eligibility fails, route the owner of the missing or stale state:
+If eligibility fails, route only the owner of the missing or stale state:
 `data_audit`, `domain_expert`, or `causal_check`. Use only `team_lead` when the
-missing input must come from the user or no valid route can be selected.
+missing input must come from the user or no valid route can be selected. That
+gate-owner review is the turn's sole operation; scope preparation or execution
+waits for a later user message.
 
 A non-null `scope_ref` supplied to `begin` records approval and remains
 authoritative during worker resume; `begin` verifies it against the current

@@ -103,7 +103,7 @@ Key literature anchors: target-trial emulation, Rubin/Holland potential outcomes
 
 ## Execution Record
 
-Follow the shared summary and exact-manifest rules in
+Follow the shared completion-summary and artifact rules in
 `references/design_execution_contract.md`. Emphasize the target-trial slots,
 time zero, estimand and target population, support and adjustment diagnostics,
 and the measured-confounding claim boundary.

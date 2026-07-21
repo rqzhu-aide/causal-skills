@@ -11,6 +11,10 @@ manager synthesis and the only user-facing response belong to
 `<skill-root>/scripts/statectl.cjs` for every
 `project_state.yaml` operation. Never edit that file directly.
 
+Only an approval-bound `analysis_execution` operation may compute a new result
+that estimates or tests the target analysis. Other routes may inspect inputs,
+assess route-owned readiness or support, and summarize completed artifacts.
+
 ## Turn Protocol
 
 1. Resolve the project root once and keep it for the turn: use an explicit root
@@ -59,18 +63,20 @@ manager synthesis and the only user-facing response belong to
    and never speaks to the user.
 7. If the worker will create durable output, follow
    `references/artifact_output_policy.md`: reserve the location before writing,
-   complete and validate the output plus manifest, then include the completion
-   in `statectl apply`.
+   write and validate only the returned temporary path, then submit the artifact
+   summary through `statectl apply`. The controller publishes and records it.
 8. Load `references/team_lead.md` exactly once after the operation reaches
    `lead_pending`. Team lead submits only its semantic `project_summary` update
    through `statectl finish`; normal finish derives aggregate flags.
 9. Each assistant turn handles at most one operation, whether newly begun or
-   resumed. After `finish` succeeds, produce the normal team-lead user-facing
-   response and stop; do not run `open` or `begin` again until a new user
-   message. The sole exception is a read-only preflight-failure response when no
-   operation can be opened. A rejected `begin` may be corrected or rerouted. A
-   rejected `reserve-artifact`, `apply`, or `finish` remains at its persisted
-   stage; correct and retry it, or cancel only after an explicit user request.
+   resumed. A rejected `begin` may be corrected or rerouted only before any
+   `begin` succeeds. Once one succeeds, that operation consumes the turn. After
+   `finish` succeeds, produce the normal team-lead user-facing response and
+   stop; do not run `open` or `begin` again until a new user message. The sole
+   exception is a read-only preflight-failure response when no operation can be
+   opened. A rejected `reserve-artifact`, `apply`, or `finish` remains at its
+   persisted stage; correct and retry it, or cancel only after an explicit user
+   request.
    If a revision-controlled mutation returns missing or unusable JSON, run
    `open` once. Continue from the committed stage when the same project is at
    the next revision; retry the same mutation only when project, revision, and

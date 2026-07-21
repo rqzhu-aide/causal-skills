@@ -112,7 +112,7 @@ Key literature anchors: LATE/CACE, Wald estimands, 2SLS, weak instruments, monot
 
 ## Execution Record
 
-Follow the shared summary and exact-manifest rules in
+Follow the shared completion-summary and artifact rules in
 `references/design_execution_contract.md`. Emphasize the instrument source,
 treatment moved and IV estimand, first-stage and weak-IV diagnostics, exclusion
 and local-effect assumptions, and the resulting claim boundary.

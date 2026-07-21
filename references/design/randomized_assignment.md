@@ -106,7 +106,7 @@ Key literature anchors: Neyman randomization, Fisher randomization tests, Rubin/
 
 ## Execution Record
 
-Follow the shared summary and exact-manifest rules in
+Follow the shared completion-summary and artifact rules in
 `references/design_execution_contract.md`. Emphasize the assignment mechanism,
 assignment-based estimand, integrity and inference diagnostics, compliance when
 relevant, and the resulting claim boundary.
