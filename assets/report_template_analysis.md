@@ -1,6 +1,6 @@
 # Analysis Report Template
 
-Use when `project_summary.analysis_output: exist`.
+Use when the current report scope has relevant, available analysis artifacts.
 
 This report is for results, interpretation, and decision support based on analysis outputs created inside the causal-consultant workflow. Do not include results that are not supported by `artifact_records`, route-owned durable sections, or created output files.
 
@@ -31,7 +31,7 @@ When source notes are brief, expand them into manuscript-style paragraphs that e
 - how strongly the evidence supports interpretation
 - what limitation or next action follows
 
-Do not merely restate YAML bullets or expose YAML field names unless the report is documenting reproducibility. If an artifact summary is too thin to support a report sentence, name the missing detail as a limitation rather than inventing context.
+Do not merely restate YAML bullets or expose route IDs, operation IDs, state-field names, or filesystem paths. Include technical provenance only when the approved scope explicitly requests it. If an artifact summary is too thin to support a report sentence, name the missing detail as a limitation rather than inventing context.
 
 ## Title
 
@@ -151,17 +151,16 @@ Separate scientific interpretation, statistical uncertainty, practical relevance
 
 Do not restate every result. Select the evidence that changes the decision or interpretation.
 
-## Reproducibility And Artifact Records
+## Evidence Sources And Limitations
 
-List the workflow evidence used for the report:
+Describe the evidence used for the report in terms meaningful to its audience:
 
-- analysis output folder
-- relevant `artifact_records` entries
-- source script, notebook, or manifest if available
-- route-owned state sections reviewed
-- important deviations or missing assets
+- the data, analysis, or other source supporting each main claim
+- what each source contributes to the report
+- important availability, measurement, or interpretation limitations
+- material deviations, substitutions, or missing evidence
 
-Mention material deviations, substitutions, or omitted diagnostics when they affect interpretation.
+Keep internal identifiers, state fields, manifests, and filesystem locations in the project record unless the approved scope calls for a technical reproducibility appendix.
 
 ## Appendix Notes
 

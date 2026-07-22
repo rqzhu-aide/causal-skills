@@ -14,8 +14,10 @@ Use exactly one reserved artifact per output-producing operation:
 2. Write only to `temporary_path`. Do not write into an unrelated output folder
    or adopt an unreserved path.
 3. Validate the output against the persisted assignment and, when present, the
-   approved scope before submission. Files must open or parse, required tables,
-   figures, and diagnostics must exist, and required code or notebooks must run.
+   approved scope before submission. Files must open or parse. Every promised
+   deliverable must exist in its promised rendered form before `done`; source
+   data does not substitute for a rendered figure, table, or document. Required
+   diagnostics must exist, and required code or notebooks must run.
    Reports must render with their required content and boundary language; HTML reports
    must also have valid fragment targets and resolvable project-local links.
    If validation fails, correct the temporary output and revalidate within the

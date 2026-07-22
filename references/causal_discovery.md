@@ -41,7 +41,9 @@ about:
 
 Do not use this route to validate adjustment sets, prove causal direction,
 choose the final causal method, estimate effects, or upgrade claim strength.
-Those decisions belong to `causal_check`.
+Questions about adjustment validity, causal-direction support, method fit, and
+claim strength belong to `causal_check`. Target effect estimation belongs to an
+approval-bound `analysis_execution` operation.
 
 ## Discovery Work Modes
 

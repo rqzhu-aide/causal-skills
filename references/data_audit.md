@@ -46,6 +46,10 @@ support diagnostics, profiling output, or reshape notes in audit artifacts.
 Submit durable data context only under `updates.data_facts`. Keep it compact and
 causal-analysis oriented; it is live decision memory, not a data dictionary.
 
+Preserve explicit user-provided study facts unless inspectable evidence directly
+contradicts them. If the data cannot verify such a fact, record it as a stated
+assumption rather than replacing it with an inference.
+
 Supported fields:
 
 - `data_checked`: `passing`, `limited`, `imagined`, or `blocked`; leave
@@ -112,8 +116,10 @@ output.
 ## Boundaries
 
 This route may run bounded profiling or audit code only to evaluate data
-readiness. It must not estimate or test the target analysis, choose the final
-causal method, validate a causal claim, or execute approved causal analysis.
+readiness. A calculation that estimates or tests the requested target is target
+analysis, even if described as profiling, exploration, or a diagnostic, and
+must wait for approval-bound `analysis_execution`. This route does not choose
+the final causal method, validate a causal claim, or execute causal analysis.
 
 Do not let generic profiling crowd out causal-data risks: unit, timing, leakage,
 support, missingness, dependencies, and variable roles are the priority.

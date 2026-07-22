@@ -111,5 +111,6 @@ domain practice, but it does not choose the final method or validate a causal
 claim. Final causal support is checked by `causal_check`.
 
 If the user explicitly asks for a standalone domain memo, source table, or
-reportable write-up, let `team_lead` route that as report writing or another
-output-producing task rather than creating a domain-expert artifact folder.
+reportable write-up, record report writing or another output-producing task in
+`feedback_to_route` for `team_lead` to surface as a later operation. Do not
+create a domain-expert artifact folder.

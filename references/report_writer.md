@@ -112,9 +112,9 @@ approved report output:
 Use the Markdown templates as section logic, not output targets or fixed prose.
 Omit sections that are irrelevant to the approved scope, but preserve the causal
 boundary, evidence status, limitations, and next-decision logic. Build the
-approved report directly in the HTML shell, including figures, tables, artifact
-links, callouts, sources, and report notes when supported by state and
-artifacts.
+approved report directly in the HTML shell, including required figures, tables,
+callouts, audience-facing evidence sources, and limitations when supported by
+state and artifacts.
 
 ## Causal Report Writing Logic
 
@@ -146,8 +146,10 @@ Calibrate wording to evidence status:
   discovery findings, or unvalidated contrasts.
 
 Make missing diagnostics, omitted analyses, weak support, and parked items
-visible. Avoid invented results, YAML field names as prose, decorative figures,
-tables without interpretation, hidden omissions, and claims beyond
+visible. Treat route IDs, operation IDs, state-field names, and filesystem paths
+as internal provenance; include them only when the approved scope explicitly
+requests technical reproducibility detail. Avoid invented results, decorative
+figures, tables without interpretation, hidden omissions, and claims beyond
 `artifact_records` or route-owned state.
 
 Preserve the approved scope. For each report claim, the narrowest applicable
@@ -204,10 +206,11 @@ Submit supported fields under `report_assembly`:
 - `wording_constraints`
 - `draft_notes`
 
-In report scope setup, `draft_notes` should include a compact finished-artifact
-inventory: what artifacts exist, what each contributes to the proposed report,
-and which expected report pieces are missing, omitted, or only suitable as
-limitations.
+In report scope setup, keep in `draft_notes` a compact internal
+finished-artifact inventory: what artifacts exist, what each contributes to the
+proposed report, and which expected report pieces are missing, omitted, or only
+suitable as limitations. Translate that provenance into audience-facing
+evidence descriptions rather than copying it into the rendered report.
 
 Submit chamber feedback only under `updates.council_chamber.report_writer`.
 

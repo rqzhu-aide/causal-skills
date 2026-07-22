@@ -171,16 +171,16 @@ function assertArray(value, label, code = "INVALID_STATE") {
   if (!Array.isArray(value)) fail(code, `${label} must be a list`);
 }
 
-function assertStringOrNull(value, label) {
+function assertStringOrNull(value, label, code = "INVALID_STATE") {
   if (value !== null && typeof value !== "string") {
-    fail("INVALID_STATE", `${label} must be a string or null`);
+    fail(code, `${label} must be a string or null`);
   }
 }
 
-function assertStringArray(value, label) {
-  assertArray(value, label);
+function assertStringArray(value, label, code = "INVALID_STATE") {
+  assertArray(value, label, code);
   if (value.some((item) => typeof item !== "string")) {
-    fail("INVALID_STATE", `${label} must contain only strings`);
+    fail(code, `${label} must contain only strings`);
   }
 }
 
@@ -1785,6 +1785,48 @@ function validateScopeCompletion(state, actor, updates, hasArtifact) {
   }
 }
 
+function validateCausalCheckReadiness(state, actor, updates) {
+  if (actor !== "causal_check") return;
+
+  const patch = updates.causal_facts || {};
+  const decisionFields = [
+    "analysis_readiness",
+    "support_status",
+    "recommended_checks",
+    "recommended_method_routes",
+  ];
+  const reassessed = Object.hasOwn(patch, "analysis_readiness")
+    || Object.hasOwn(patch, "recommended_method_routes");
+  if (!reassessed) return;
+
+  const missing = decisionFields.filter((field) => !Object.hasOwn(patch, field));
+  if (missing.length) {
+    fail("INVALID_INPUT", `causal_check readiness reassessment requires the complete decision bundle; missing: ${missing.join(", ")}`);
+  }
+
+  const readiness = state.causal_facts.analysis_readiness;
+  const recommendations = state.causal_facts.recommended_method_routes;
+  assertEnum(readiness, ["ready", "limited", "not_ready", "blocked"], "causal_facts.analysis_readiness", "INVALID_INPUT");
+  assertStringOrNull(state.causal_facts.support_status, "causal_facts.support_status", "INVALID_INPUT");
+  assertStringArray(state.causal_facts.recommended_checks, "causal_facts.recommended_checks", "INVALID_INPUT");
+  assertArray(recommendations, "causal_facts.recommended_method_routes", "INVALID_INPUT");
+  recommendations.forEach((route, index) => assertObject(
+    route,
+    `causal_facts.recommended_method_routes[${index}]`,
+    "INVALID_INPUT",
+  ));
+  const designRoutes = recommendations.filter((route) => route.category === "design");
+  if (["ready", "limited"].includes(readiness) && designRoutes.length !== 1) {
+    fail("INVALID_INPUT", "causal_check apply with analysis_readiness ready or limited requires one recommended design route");
+  }
+  if (["not_ready", "blocked"].includes(readiness) && recommendations.length) {
+    fail("INVALID_INPUT", "causal_check apply with analysis_readiness not_ready or blocked requires empty method recommendations");
+  }
+  if (readiness === "ready" && designRoutes[0] && designRoutes[0].id === "descriptive_association") {
+    fail("INVALID_INPUT", "descriptive_association requires analysis_readiness limited");
+  }
+}
+
 function stampWorkerUpdates(updates, actor, timestamp) {
   const roots = Object.keys(updates).filter((key) => key !== "council_chamber");
   for (const root of roots) updates[root].last_updated = timestamp;
@@ -1903,6 +1945,7 @@ function applyWorker({ projectRoot, payload }) {
 
   const hasArtifact = payload.artifact !== undefined && payload.artifact !== null;
   const merged = deepMerge(state, updates);
+  validateCausalCheckReadiness(merged, payload.actor, updates);
   validateScopeCompletion(merged, payload.actor, updates, hasArtifact);
 
   let artifactRecord = null;

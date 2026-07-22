@@ -119,6 +119,20 @@ function analysisSlot(status, summary, support = null) {
   };
 }
 
+function causalCheckUpdates(causalFacts, summary = "Causal review completed.") {
+  return {
+    causal_facts: causalFacts,
+    council_chamber: {
+      causal_check: {
+        current_status: "review_complete",
+        summary,
+        questions_for_user: [],
+        feedback_to_route: [],
+      },
+    },
+  };
+}
+
 function seedAnalysisEligibility(projectRoot, options = {}) {
   const {
     design = "single_time_observational",
@@ -966,7 +980,15 @@ test("domain, causal-check, and discovery workers can update only their owned se
     {
       actor: "causal_check",
       root: "causal_facts",
-      patch: { causal_checked: "passing", analysis_readiness: "ready" },
+      patch: {
+        causal_checked: "passing",
+        analysis_readiness: "ready",
+        support_status: "A mature observational design is ready for scope review.",
+        recommended_checks: [],
+        recommended_method_routes: [
+          { id: "single_time_observational", category: "design", route_cautions: [] },
+        ],
+      },
     },
     {
       actor: "causal_discovery",
@@ -1001,6 +1023,196 @@ test("domain, causal-check, and discovery workers can update only their owned se
       expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
     });
   }
+});
+
+test("causal-check actionable readiness requires a recommended design", async (t) => {
+  for (const analysisReadiness of ["ready", "limited"]) {
+    await t.test(analysisReadiness, () => {
+      const projectRoot = temporaryProject(t);
+      const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+      const started = expectSuccess(begin(projectRoot, opened, "causal_check"), "BEGAN_WORKER");
+      const before = fs.readFileSync(statePath(projectRoot), "utf8");
+      const updates = causalCheckUpdates({
+        causal_checked: "limited",
+        analysis_readiness: analysisReadiness,
+        support_status: "A bounded observational design is ready for scope review.",
+        recommended_checks: [],
+        recommended_method_routes: [],
+      });
+
+      const failure = expectFailure(execute(projectRoot, "apply", {
+        payload: {
+          ...expected(started),
+          operation_id: started.operation_id,
+          actor: "causal_check",
+          updates,
+        },
+      }), "INVALID_INPUT");
+      assert.match(failure.message, /requires one recommended design route/);
+      assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+
+      updates.causal_facts.recommended_method_routes = [
+        { id: "single_time_observational", category: "design", route_cautions: [] },
+      ];
+      const applied = expectSuccess(execute(projectRoot, "apply", {
+        payload: {
+          ...expected(started),
+          operation_id: started.operation_id,
+          actor: "causal_check",
+          updates,
+        },
+      }), "WORKER_APPLIED");
+      expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+    });
+  }
+});
+
+test("causal-check readiness reassessment requires one complete decision bundle", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "causal_check"), "BEGAN_WORKER");
+  const before = fs.readFileSync(statePath(projectRoot), "utf8");
+  const updates = causalCheckUpdates({
+    causal_checked: "limited",
+    analysis_readiness: "limited",
+    support_status: "A bounded observational design is ready for scope review.",
+    recommended_method_routes: [
+      { id: "single_time_observational", category: "design", route_cautions: [] },
+    ],
+  });
+
+  const failure = expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "causal_check",
+      updates,
+    },
+  }), "INVALID_INPUT");
+  assert.match(failure.message, /complete decision bundle.*recommended_checks/);
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+
+  updates.causal_facts.recommended_checks = [];
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "causal_check",
+      updates,
+    },
+  }), "WORKER_APPLIED");
+  expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+});
+
+test("causal-check readiness reassessment rejects malformed recommendation input atomically", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "causal_check"), "BEGAN_WORKER");
+  const before = fs.readFileSync(statePath(projectRoot), "utf8");
+  const failure = expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "causal_check",
+      updates: causalCheckUpdates({
+        causal_checked: "limited",
+        analysis_readiness: "limited",
+        support_status: "A bounded observational design is under review.",
+        recommended_checks: [],
+        recommended_method_routes: null,
+      }),
+    },
+  }), "INVALID_INPUT");
+  assert.match(failure.message, /recommended_method_routes must be a list/);
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+  expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
+test("causal-check nonactionable readiness rejects method recommendations atomically", async (t) => {
+  for (const analysisReadiness of ["not_ready", "blocked"]) {
+    await t.test(analysisReadiness, () => {
+      const projectRoot = temporaryProject(t);
+      const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+      const started = expectSuccess(begin(projectRoot, opened, "causal_check"), "BEGAN_WORKER");
+      const before = fs.readFileSync(statePath(projectRoot), "utf8");
+      const failure = expectFailure(execute(projectRoot, "apply", {
+        payload: {
+          ...expected(started),
+          operation_id: started.operation_id,
+          actor: "causal_check",
+          updates: causalCheckUpdates({
+            causal_checked: analysisReadiness === "blocked" ? "blocked" : "limited",
+            analysis_readiness: analysisReadiness,
+            support_status: "No method route is mature enough for scope review.",
+            recommended_checks: ["Resolve the remaining design question."],
+            recommended_method_routes: [
+              { id: "single_time_observational", category: "design", route_cautions: [] },
+            ],
+          }),
+        },
+      }), "INVALID_INPUT");
+      assert.match(failure.message, /requires empty method recommendations/);
+      assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+      expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+    });
+  }
+});
+
+test("causal-check descriptive fallback is limited and nondecision updates remain independent", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "causal_check"), "BEGAN_WORKER");
+  const before = fs.readFileSync(statePath(projectRoot), "utf8");
+  const updates = causalCheckUpdates({
+    causal_checked: "limited",
+    analysis_readiness: "ready",
+    support_status: "Only an association analysis is supportable.",
+    recommended_checks: [],
+    recommended_method_routes: [
+      { id: "descriptive_association", category: "design", route_cautions: [] },
+    ],
+  });
+  const failure = expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "causal_check",
+      updates,
+    },
+  }), "INVALID_INPUT");
+  assert.match(failure.message, /descriptive_association requires analysis_readiness limited/);
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+
+  updates.causal_facts.analysis_readiness = "limited";
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "causal_check",
+      updates,
+    },
+  }), "WORKER_APPLIED");
+  expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+
+  const staleDecision = readState(projectRoot);
+  staleDecision.causal_facts.analysis_readiness = "ready";
+  staleDecision.causal_facts.recommended_method_routes = [];
+  writeState(projectRoot, staleDecision);
+
+  const reopened = expectSuccess(execute(projectRoot, "open"), "OPENED");
+  const next = expectSuccess(begin(projectRoot, reopened, "causal_check"), "BEGAN_WORKER");
+  const independent = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(next),
+      operation_id: next.operation_id,
+      actor: "causal_check",
+      updates: causalCheckUpdates(
+        { assumptions: ["No unmeasured confounding is not established."] },
+        "One causal assumption was clarified.",
+      ),
+    },
+  }), "WORKER_APPLIED");
+  expectSuccess(finish(projectRoot, independent), "OPERATION_FINISHED");
 });
 
 test("analysis and report workers require an explicit completed scope handoff status", async (t) => {

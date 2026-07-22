@@ -1,6 +1,6 @@
 # Planning Report Template
 
-Use when `project_summary.analysis_output: non_exist`.
+Use when the current report scope lacks relevant, available analysis artifacts.
 
 This report is for planning, framing, and decision support. It must not describe completed analysis results, estimates, diagnostics, or empirical findings that do not exist inside the causal-consultant workflow.
 
@@ -30,7 +30,7 @@ When state entries are brief, expand them into manuscript-style paragraphs that 
 - why it matters for the causal planning decision
 - what boundary or next action follows
 
-Do not merely restate YAML bullets or expose YAML field names unless the report is documenting reproducibility. If a state note is too thin to support a report sentence, name the missing detail as a limitation or open question instead of padding.
+Do not merely restate YAML bullets or expose route IDs, operation IDs, state-field names, or filesystem paths. Include technical provenance only when the approved scope explicitly requests it. If a state note is too thin to support a report sentence, name the missing detail as a limitation or open question instead of padding.
 
 ## Title
 
@@ -144,15 +144,17 @@ End with one recommended choice and the approval or information needed from the 
 
 The close should not introduce a new method, claim, or source. It should convert the planning bottleneck into an action.
 
-## Sources, State, And Open Questions
+## Evidence Basis And Open Questions
 
-Summarize what the planning report used:
+Summarize the planning basis in terms meaningful to its audience:
 
-- `project_state.yaml` sections reviewed
-- relevant `council_chamber` feedback
-- artifact records, if any
+- known facts and their sources
+- assumptions that still need confirmation
+- available evidence and its main limitations
 - open questions that block analysis
-- reviewer routes that should inspect the next step
+- the evidence or review needed next
+
+Keep internal identifiers, state fields, manifests, and filesystem locations in the project record unless the approved scope calls for a technical reproducibility appendix.
 
 ## Paragraph Quality Check
 

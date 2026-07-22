@@ -92,9 +92,10 @@ state. Route from that inferred intention, not from keywords alone.
 
 A numbered reply binds only to that number in one immediately preceding choice
 list. A generic confirmation binds only when that response proposed one action.
-Analysis or report execution also requires one uniquely identified ready scope
-whose identity and revision have not changed since presentation. Otherwise plan
-only `team_lead`.
+Analysis or report execution requires one uniquely identified ready scope whose
+identity and revision have not changed since presentation. If an approval or
+execution request names a noncurrent scope, treat it as stale approval and plan
+only `team_lead`; do not route restoration, revision, or execution.
 
 Apply these rules in order:
 

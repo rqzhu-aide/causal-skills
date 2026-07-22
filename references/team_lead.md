@@ -101,9 +101,10 @@ or the transcript.
 
 Use these chamber fields compactly:
 
-- `current_status`: for analysis and report routes, the scope lifecycle
-  (`requested`, `ready`, `blocked`, or `done`); for core routes, only a short
-  handoff disposition. The route-owned structured status remains authoritative.
+- `current_status`: for `analysis_execution` and `report_writer`, the scope
+  lifecycle (`requested`, `ready`, `blocked`, or `done`); for `data_audit`,
+  `domain_expert`, `causal_check`, and `causal_discovery`, only a short handoff
+  disposition. The route-owned structured status remains authoritative.
 - `summary`: one compact finding for team lead to synthesize.
 - `questions_for_user`: questions or choices that would most improve the next
   step.
@@ -127,6 +128,10 @@ For each synthesized claim, the narrowest applicable boundary in relevant
 route-owned state, the bound scope, or the available artifact supporting that
 claim governs. Team lead must not strengthen it.
 
+Core-route findings establish readiness and claim boundaries, not newly
+computed target-analysis results. Present such a result only from an available
+artifact produced from the exact approved analysis scope.
+
 ## Decision Gate
 
 Ask only when the answer could materially change the next route, approved
@@ -136,8 +141,10 @@ translated into plain user choices when useful.
 
 Use approval/run/execute/output language only when that is the real decision.
 Present a ready analysis or report scope for approval only when it remains
-semantically current against durable state; otherwise require revision or treat
-it as blocked. Analysis also requires current analysis-begin eligibility.
+semantically current against durable state. If the user approves a noncurrent
+scope, leave the current scope unchanged, explain that the approval cannot bind,
+and ask for one explicit next action. Analysis also requires current
+analysis-begin eligibility.
 `ready` is a scope status, not approval or output evidence.
 When analysis is blocked by missing core review, identify the data, domain, or
 claim-boundary uncertainty and ask only when user input is needed to resolve it.

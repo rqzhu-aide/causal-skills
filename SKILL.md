@@ -27,9 +27,10 @@ assess route-owned readiness or support, and summarize completed artifacts.
    only for that explicit request; vague confirmation such as "yes", "ok", or
    "go ahead" is never a reset. Otherwise run the same command without
    `--fresh`.
-3. Read the structured result and the validated state. On a controller error,
-   load team lead only in preflight-failure mode to explain the exact recovery
-   boundary; do not repair, replace, or bypass rejected state manually.
+3. On successful `open`, read its structured result and then read the validated
+   state at the returned `state_path`. On a controller error, load team lead
+   only in preflight-failure mode to explain the exact recovery boundary; do
+   not repair, replace, or bypass rejected state manually.
    For `LEGACY_ACTIVE_PLAN`, an explicit user choice to abandon only the old
    transient plan may be carried out with `open --discard-legacy-plan`; this
    archives the original and preserves its durable v4.5 evidence. Use
@@ -74,19 +75,19 @@ assess route-owned readiness or support, and summarize completed artifacts.
    `finish` succeeds, produce the normal team-lead user-facing response and
    stop; do not run `open` or `begin` again until a new user message. The sole
    exception is a read-only preflight-failure response when no operation can be
-   opened. A rejected `reserve-artifact`, `apply`, or `finish` remains at its
-   persisted stage; correct and retry it, or cancel only after an explicit user
-   request.
-   If a revision-controlled mutation returns missing or unusable JSON, run
-   `open` once. Continue from the committed stage when the same project is at
-   the next revision; retry the same mutation only when project, revision, and
-   stage are unchanged. If this follows `finish` and the project is now idle at
-   the next revision, treat `finish` as committed, produce the team-lead
-   response, and stop.
+   opened. An ordinary validation rejection from `reserve-artifact`, `apply`,
+   or `finish` leaves the operation at its persisted stage; correct and retry
+   it, or cancel only after an explicit user request. On any project, revision,
+   operation, or stage mismatch, or when mutation JSON is missing or unusable,
+   run `open` once and follow the persisted stage. Retry the same mutation only
+   when project, revision, operation, and stage are unchanged. If this follows
+   `finish` and the project is now idle at the next revision, treat `finish` as
+   committed, produce the team-lead response, and stop.
 
 ## Controller Inputs
 
-Run mutating commands as:
+Run input-bearing mutations (`begin`, `reserve-artifact`, `apply`, and
+`finish`) as:
 
 ```text
 node <skill-root>/scripts/statectl.cjs <command> --project-root <root> --input <json-file|->
@@ -98,10 +99,11 @@ latest successful controller result. Command-specific fields are:
 - `begin`: `route`, optional `support`, compact self-contained `intent_summary`,
   and optional exact `scope_ref`.
 - `reserve-artifact`: `operation_id`, `kind` (`file` or `directory`), `slug`,
-  and optional file `extension`.
-- `apply`: `operation_id`, `actor`, owner-scoped `updates`, optional
-  `scope_transition` (`new`, `revise`, or `preserve`), and optional completed
-  `artifact: {summary}`.
+  and `extension` when `kind` is `file`; omit `extension` for a directory.
+- `apply`: `operation_id`, `actor`, owner-scoped `updates`, and optional
+  completed `artifact: {summary}`. Analysis and report workers must also supply
+  `scope_transition` (`new`, `revise`, or `preserve`); other workers must omit
+  it.
 - `finish`: `operation_id` and optional team-lead-owned semantic
   `updates: {project_summary: {...}}`; add `--cancel` only after explicit user
   cancellation.
