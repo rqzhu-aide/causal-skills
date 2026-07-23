@@ -117,8 +117,7 @@ Apply these rules in order:
 
 When a message asks for several in-scope things at once, infer the user's
 dominant current intention from the prior headings and current wording, then
-route only the first bounded route that can make a useful state update this
-turn.
+choose one bounded assignment for this `begin`.
 
 For in-scope work selection after the conversation match:
 
@@ -148,8 +147,9 @@ For exploration:
 - Prefer missing checks before improving limited checks.
 - If multiple checks are missing, choose the one most directly connected to the
   user's current request.
-- After `data_audit` inspects actual data and records concrete facts, prefer
-  `causal_check` on the next substantive analysis-planning turn.
+- After `data_audit` changes analysis-relevant facts, route `causal_check` only
+  when causal readiness or the current design/support recommendation is missing
+  or stale.
 
 For analysis begin eligibility and approval binding, use
 `analysis_routing_workflow.md`.

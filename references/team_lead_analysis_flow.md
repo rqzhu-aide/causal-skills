@@ -30,14 +30,19 @@ worker handoff. If a planned route observes either, no completed analysis
 handoff exists; explain the boundary using only visible state.
 
 If the analysis scope status is `ready`, no output should have been created for
-this operation. Before offering approval, check the current Analysis Begin
-Eligibility in `analysis_routing_workflow.md`. If it fails, state that the
-analysis is not currently runnable, name the failed prerequisite, and do not
-revise the scope automatically. Otherwise summarize the proposed scope inside
-the normal headings with only the target or estimand, design and support,
-required inputs, estimation strategy or model family, main diagnostics, main
-output, and claim boundary. Translate chamber `support` into plain language
-when helpful. Present the stored ready default faithfully; do not invent or
+this operation. Before offering approval, check that its target, design,
+support, and claim boundary still match the current causal review and Analysis
+Begin Eligibility in `analysis_routing_workflow.md`. If the scope no longer
+matches, describe it only as an earlier plan needing revision; do not offer it
+for approval or execution or revise it automatically. If eligibility fails for
+another reason, state that the analysis is not currently runnable, name the
+failed prerequisite, and do not revise the scope automatically. Otherwise
+summarize the proposed scope inside the normal headings with only the target or
+estimand, design and support, required inputs, estimation strategy or model
+family, main diagnostics, main output, and claim boundary. Translate design and
+support into plain user-facing method language. Do not expose route IDs, state
+field names or values, scope IDs or revisions, or controller mechanics unless
+the user asks. Present the stored ready default faithfully; do not invent or
 negate a consequential scope choice. Then use the decision gate in
 `team_lead.md` to ask one approval or revision question. If the handoff or
 chamber slot is missing, do not imply hidden scope was shown; use only the

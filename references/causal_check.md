@@ -47,9 +47,12 @@ When the task requires method recommendation, analysis planning, or execution
 readiness, load `references/method_route_catalog.yaml` and use route IDs exactly
 as written in `route_index.yaml`.
 
-Do not recommend a method route merely because the user named it. Match the
-route to the causal target, data structure, timing, estimand, identifying
-assumptions, and likely diagnostics.
+Do not recommend a method route merely because the user named it. Treat the
+latest explicit user target as current; intended use or a preferred alternative
+must not silently narrow or replace its population, contrast, or estimand. If a
+material target element is unspecified, record it as unresolved. Match the route
+to that target, data structure, timing, estimand, identifying assumptions, and
+likely diagnostics.
 
 Use two readiness layers:
 
@@ -58,14 +61,20 @@ Use two readiness layers:
 - `analysis_readiness`: analysis-route readiness status, `ready`, `limited`,
   `not_ready`, or `blocked`.
 
-When analysis readiness or method fit is reassessed, replace
-`analysis_readiness`, `support_status`, `recommended_checks`, and
-`recommended_method_routes` together as one current decision. Use at most one
-primary `design` item and, only when materially useful, one separate `support`
-item. Never retain a previous target's route or encode selected support only in
-`route_cautions`. Use `statistical-validity` only when unresolved concerns
-exceed the selected design's normal diagnostics. Do not recommend support-only
-execution or add support by default.
+When the assignment assesses an alternative without changing the current
+target, preserve the current target-specific causal facts, readiness, and
+`recommended_method_routes`; record the alternative's feasibility, limitations,
+and decision discriminators in chamber feedback. An alternative becomes current
+only when the user explicitly adopts it. Whenever the current target or method
+decision changes, keep its target-defining facts, readiness, support status,
+checks, and route recommendations mutually consistent; replace superseded
+values rather than carrying them forward.
+
+Use at most one primary `design` item and, only when materially useful, one
+separate `support` item. Never retain a previous target's route or encode
+selected support only in `route_cautions`. Use `statistical-validity` only when
+unresolved concerns exceed the selected design's normal diagnostics. Do not
+recommend support-only execution or add support by default.
 
 If more than one design remains plausible, leave `recommended_method_routes`
 empty, keep `analysis_readiness: not_ready`, and record the smallest fact or

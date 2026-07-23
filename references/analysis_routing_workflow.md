@@ -37,8 +37,12 @@ Decision rules:
 - If multiple `ready` slots remain plausible, plan only `team_lead`. Recency may
   order their presentation but never selects one for execution.
 - If the user changes the causal target, contrast, data source, model family,
-  main output, or claim boundary, do not reference or approve the old scope;
-  route the new work normally so the design route can revise it.
+  main output, or claim boundary, the old scope is no longer current. Route the
+  current eligible design to revise it; otherwise route the owner of the missing
+  or stale eligibility state.
+- A support-only change does not make the current design stale. When that design
+  remains eligible, route it with the current support selection to revise the
+  scope.
 - If the relevant slot is missing, unknown, invalid, or method fit changed
   without a clear design/support route, route `causal_check` or `team_lead`
   instead of guessing.
@@ -62,9 +66,8 @@ not interpret prose.
 
 If eligibility fails, route only the owner of the missing or stale state:
 `data_audit`, `domain_expert`, or `causal_check`. Use only `team_lead` when the
-missing input must come from the user or no valid route can be selected. That
-gate-owner review is the turn's sole operation; scope preparation or execution
-waits for a later user message.
+missing input must come from the user or no valid route can be selected. Do not
+prepare or execute analysis under that operation.
 
 A non-null `scope_ref` supplied to `begin` records approval and remains
 authoritative during worker resume; `begin` verifies it against the current

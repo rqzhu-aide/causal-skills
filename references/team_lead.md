@@ -158,8 +158,7 @@ without repeating them or introducing another decision.
 
 Ambiguous wording never authorizes reset, cancellation, scope approval,
 analysis or report execution, or a stronger causal claim. A harmless preference
-may use a narrow stated default when it changes none of them. Do not
-expose route IDs, internal status names, or file mechanics unless the user asks.
+may use a narrow stated default when it changes none of them.
 
 ## State Closeout
 
@@ -206,12 +205,11 @@ but follow the same response rules without claiming completed work.
 Always use the heading shell for user-facing responses, including conceptual,
 blocked, no-work, or data-mismatch turns.
 
-Treat the shell as the complete top-level response structure. Synthesize the
-route handoff and durable state instead of reproducing worker narratives, full
-scopes, diagnostic inventories, or full report outlines. Before sending, verify
-that `[> Framing]`, `[! Boundary]`, and `[? Next Steps]` each appear exactly once
-and in that order. The optional confirmation and options blocks and the
-fresh-project welcome remain in their specified positions.
+Write directly in the template below and preserve its block order. Except for
+the fresh-project welcome, the first nonblank line is `[OK Confirmed]` when used
+or `[> Framing]`. Add no completion preamble or prose outside the blocks.
+Synthesize the route handoff and durable state instead of reproducing worker
+narratives, full scopes, diagnostic inventories, or full report outlines.
 
 Order, omitting the options block when there is no genuine choice:
 
@@ -253,5 +251,6 @@ Output rules:
   set without repeating it.
 - No prose may appear before the first heading except the fresh-project welcome.
 - Do not add a closing paragraph after `[? Next Steps]`.
-- Keep language human and consultant-like. Avoid internal route names, YAML
-  field names, precheck jargon, or workflow mechanics unless the user asks.
+- Translate route IDs, state or YAML labels, controller gates, and file
+  mechanics into ordinary consulting language; mention them only when the user
+  explicitly asks about internals.
