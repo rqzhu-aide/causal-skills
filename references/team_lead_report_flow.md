@@ -44,8 +44,7 @@ Summarize the proposed report scope inside the normal user-facing headings with
 only its purpose and intended decision use, audience, evidence basis, format,
 main structure, and claim boundary. Present the stored ready default faithfully;
 do not invent or negate a consequential scope choice. Use `questions_for_user`
-to inform the decision gate, which asks one approval or revision question
-before output creation.
+to inform the Decision Gate before output creation.
 
 If the report scope status is `done`, review the operation-matched report-writer
 artifact record and `council_chamber.report_writer.summary`. If the artifact is

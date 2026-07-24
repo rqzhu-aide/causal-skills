@@ -63,8 +63,9 @@ Use these analysis scope handoff fields:
   Null or `requested` is a pre-work or legacy marker, not a completed handoff.
 - `support`: selected support route ID or `null`.
 - `summary`: compact scope, blocker, or completed-output description.
-- `questions_for_user`: 0-3 choices or approval points for team lead; use none
-  when no consequential decision remains.
+- `questions_for_user`: 0-3 current questions, choices, or approval points for
+  `ready` or `blocked` handoffs. Use `[]` for `done`; team lead derives later
+  choices from the completed evidence.
 - `feedback_to_route`: 0-2 fit, review, or implementation cautions.
 
 An approval-ready handoff contains one complete default covering design fit,

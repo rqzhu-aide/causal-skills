@@ -6,6 +6,8 @@ turn.
 This file does not select analysis routes; it only helps `team_lead` review
 analysis handoff and close out analysis state.
 
+Use the Decision Gate in `team_lead.md` for any question or options below.
+
 ## Analysis Handoff Review
 
 When `next_step_plan` contains an `analysis_execution.<design_id>` entry, parse
@@ -43,10 +45,8 @@ family, main diagnostics, main output, and claim boundary. Translate design and
 support into plain user-facing method language. Do not expose route IDs, state
 field names or values, scope IDs or revisions, or controller mechanics unless
 the user asks. Present the stored ready default faithfully; do not invent or
-negate a consequential scope choice. Then use the decision gate in
-`team_lead.md` to ask one approval or revision question. If the handoff or
-chamber slot is missing, do not imply hidden scope was shown; use only the
-visible plan entry.
+negate a consequential scope choice. If the handoff or chamber slot is missing,
+do not imply hidden scope was shown; use only the visible plan entry.
 
 If the analysis scope status is `blocked`, explain the blocker under the normal
 headings and ask for the smallest useful clarification, data detail, design

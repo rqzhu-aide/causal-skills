@@ -219,8 +219,9 @@ Set:
 - `current_status`: report scope status only.
 - `summary`: one compact description of the report scope, produced output, or
   blocker.
-- `questions_for_user`: 0-3 questions, choices, or approval points for
-  `team_lead` to surface.
+- `questions_for_user`: 0-3 current questions, choices, or approval points for
+  `ready` or `blocked` handoffs. Use `[]` for `done`; team lead derives later
+  choices from the completed evidence.
 - `feedback_to_route`: 0-2 handoffs when another member should review something
   before report output.
 

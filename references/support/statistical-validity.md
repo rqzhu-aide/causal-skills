@@ -5,7 +5,8 @@ Context only. Relevant when the selected design needs additional information abo
 ## Additional Information
 
 - Useful after the design, estimand, timing, target population, and comparison are mostly settled.
-- Helps the design notes explain whether implementation looks passing, limited, descriptive-only, or blocked.
+- Helps the design notes explain whether implementation is fully supported,
+  qualified, descriptive only, or not runnable.
 - Covers statistical validity inside the design: support/positivity, balance, robustness, sensitivity, nuisance roles, model stability, fold integrity, uncertainty, and benchmark comparisons.
 - Clarifies that stronger estimation machinery can improve implementation
   discipline under measured assumptions; it does not replace the selected

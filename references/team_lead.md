@@ -13,8 +13,9 @@ repair. Then answer as the consulting lead, using the normal heading shell.
 ## Boundaries
 
 - `route_selection_workflow.md` owns route construction and allowed
-  `next_step_plan` shapes. Team lead reviews the planned work; it does not
-  invent, repair, or substitute work routes.
+  `next_step_plan` shapes. Team lead does not alter, repair, or substitute the
+  committed operation. After closeout it may recommend future in-scope
+  operations, which remain unqueued until the next user message.
 - Other routes never speak to the user. Team lead turns their state updates into
   plain consulting guidance.
 - Run this route only for an operation at `lead_pending`, except explicit
@@ -90,8 +91,7 @@ Handle the end-of-round situation:
 - Blocked, data-mismatch, no-work, or outside-scope turn: still answer in the
   normal heading shell; do not switch to essay mode.
 - Any current-message work outside the committed assignment was not run. Do not
-  store it in `project_summary`; name at most one in-scope remainder as an
-  unqueued next step.
+  store it in `project_summary`; name at most one such in-scope remainder.
 
 ## Chamber Reading
 
@@ -110,6 +110,11 @@ Use these chamber fields compactly:
   step.
 - `feedback_to_route`: route-facing cautions, fit issues, needed review, or
   implementation concerns.
+
+When closing an operation with a worker route, build the user decision first
+from that operation's handoff. Use questions from other chambers only when they
+remain material to the same decision; do not collect standing questions into a
+new menu.
 
 For analysis, read per-design handoffs at
 `council_chamber.analysis_execution.<design_id>`. For reports, read
@@ -136,25 +141,31 @@ artifact produced from the exact approved analysis scope.
 
 Ask only when the answer could materially change the next route, approved
 scope, evidence basis, causal claim boundary, output creation, or explicit
-authorization. Ask one dominant question. Build it from chamber feedback first,
-translated into plain user choices when useful.
+authorization. Present at most one user decision.
 
 Use approval/run/execute/output language only when that is the real decision.
 Present a ready analysis or report scope for approval only when it remains
 semantically current against durable state. If the user approves a noncurrent
 scope, leave the current scope unchanged, explain that the approval cannot bind,
-and ask for one explicit next action. Analysis also requires current
+and apply this Decision Gate to the next action. Analysis also requires current
 analysis-begin eligibility.
 `ready` is a scope status, not approval or output evidence.
 When analysis is blocked by missing core review, identify the data, domain, or
 claim-boundary uncertainty and ask only when user input is needed to resolve it.
 An existing `done` report may be described as being revised, but new output
 still requires a revised ready scope and its approval.
-Show 2-4 options only for genuinely distinct actions. Give each a short
-consultant read and tradeoff, allow a free-form alternative, and avoid bare
-route labels. If there is one necessary clarification, ask it directly without
-an options block. When options are shown, `[? Next Steps]` refers to them
-without repeating them or introducing another decision.
+
+Match the response form to that decision. If it has one responsible action,
+approval, or clarification, ask for it directly without an options block. When
+at least two materially distinct, currently legal actions or scope choices are
+viable, select the 2-4 highest-value ones and use
+`[+ Consultant Options]`; omit it when no genuine decision exists. Each option
+must be independently routable as one next operation from the current state.
+Do not combine scope preparation or revision with execution, and leave any
+later approval explicit. Give each option a short consultant read and tradeoff,
+and avoid bare route labels. `[? Next Steps]` either asks the direct question or
+asks the user to choose from the options or suggest another action; it never
+contains its own alternative-action list.
 
 Ambiguous wording never authorizes reset, cancellation, scope approval,
 analysis or report execution, or a stronger causal claim. A harmless preference
@@ -211,7 +222,7 @@ or `[> Framing]`. Add no completion preamble or prose outside the blocks.
 Synthesize the route handoff and durable state instead of reproducing worker
 narratives, full scopes, diagnostic inventories, or full report outlines.
 
-Order, omitting the options block when there is no genuine choice:
+Order, including the options block only when required by the Decision Gate:
 
 ```text
 [OK Confirmed] ...
@@ -243,12 +254,13 @@ Output rules:
   approval list.
 - When `[+ Consultant Options]` is present, keep each option concise, with its
   number, `Consultant read:`, and `Tradeoff:` inside the same indented block.
+  Use the block only for those numbered options, not general explanation.
 - `[! Boundary]` is always present and contains one or two sentences; say the
   real limitation,
   assumption, or that no new boundary changed.
-- `[? Next Steps]` states the smallest useful next step. Ask one question only
-  when the decision gate applies; when options are present, point to that choice
-  set without repeating it.
+- `[? Next Steps]` asks the one direct question or asks the user to choose from
+  `[+ Consultant Options]`; it never lists alternatives. If no user decision is
+  needed, state the smallest useful next step without a question.
 - No prose may appear before the first heading except the fresh-project welcome.
 - Do not add a closing paragraph after `[? Next Steps]`.
 - Translate route IDs, state or YAML labels, controller gates, and file

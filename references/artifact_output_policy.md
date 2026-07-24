@@ -23,7 +23,8 @@ Use exactly one reserved artifact per output-producing operation:
    If validation fails, correct the temporary output and revalidate within the
    same operation when possible. Do not submit the artifact or mark the route
    done unless validation passes. If validation cannot be completed, return the
-   route's normal incomplete or blocked handoff.
+   route's normal non-completion handoff, using `blocked` when its contract
+   requires it.
 4. Submit the owner-scoped state patch and `artifact: {summary}` through
    `statectl apply`. The controller derives the manifest identity, timestamp,
    scope reference, and file inventory, atomically publishes the exact reserved

@@ -90,8 +90,11 @@ First infer the user's current intention from the current message, the previous
 `[? Next Steps]`, `[+ Consultant Options]`, `[! Boundary]`, and the current YAML
 state. Route from that inferred intention, not from keywords alone.
 
-A numbered reply binds only to that number in one immediately preceding choice
-list. A generic confirmation binds only when that response proposed one action.
+A numbered reply binds only to the matching item in the
+`[+ Consultant Options]` block of the immediately preceding user-facing
+response. A generic confirmation binds only when that response's
+`[? Next Steps]` asked one explicit yes/no question about an action, approval,
+or clarification.
 Analysis or report execution requires one uniquely identified ready scope whose
 identity and revision have not changed since presentation. If an approval or
 execution request names a noncurrent scope, treat it as stale approval and plan
@@ -125,8 +128,9 @@ For in-scope work selection after the conversation match:
   boundaries, route that preference.
 - If user-provided information still lacks relevant core review, route the most
   relevant unreviewed or stale core member.
-- If there is no clear preference, route the most useful next review or work
-  route for the current state.
+- If the intended action, target, claim boundary, output, or authorization
+  remains materially ambiguous, plan only `team_lead`. Otherwise choose the
+  most useful valid route; the user need not name it.
 - Load the report or analysis routing reference only when the selected branch is
   report or analysis work.
 
