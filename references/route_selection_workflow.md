@@ -147,9 +147,11 @@ For in-scope work selection after the conversation match:
 For exploration:
 
 - Plan `data_audit` when actual data, a file path, schema, variables, sample
-  rows, a data dictionary, or a concrete dataset description is provided. Also
-  plan it for timing, leakage, missingness, dependence, support/positivity, data
-  validity, or feasible restructuring questions.
+  rows, or a concrete dataset description is provided for inspection. A data
+  dictionary used only for construct, measurement, endpoint, label, or coding
+  interpretation may instead route `domain_expert`. Also plan data audit for
+  timing, leakage, missingness, dependence, support/positivity, data validity,
+  or feasible restructuring.
 - Plan `causal_check` when the causal target, claim boundary, analysis
   readiness, or current design/support recommendation must be established or
   refreshed. When those are current and uniquely identify an eligible design,

@@ -9661,7 +9661,7 @@ ${presentation.next_steps}`);
         revision,
         operation_id: operation.id,
         mode: "idle",
-        next_action: "respond_and_stop",
+        next_action: "emit_response_markdown_verbatim_and_stop",
         pending_decision: merged.pending_decision,
         response_markdown: responseMarkdown
       };

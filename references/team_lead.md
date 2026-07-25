@@ -150,14 +150,15 @@ still requires a revised ready scope and its approval.
 Match the presentation to that decision. If it has one responsible action,
 approval, or clarification, keep options empty and ask for it directly. When at
 least two materially distinct, currently legal actions or scope choices are
-viable, select the 2-4 highest-value ones. Each option must describe exactly one
-normal `begin` assignment. An analysis or report assignment without `scope_ref`
-ends at scope preparation, revision, or repair; one with an exact `scope_ref` is
-the execution assignment for the unchanged ready scope, although its live gate
-may still block without output. Do not include later approval or output in this
-assignment; state any required later approval as a separate deferred step. Give
-each option a useful label, short consultant read, tradeoff, and normal `begin`
-assignment; avoid bare route labels.
+viable, select the 2-4 highest-value ones. Construct each option's normal
+`begin` assignment first, with an `intent_summary` containing only work owned by
+its route in that operation. Then make its label, consultant read, and tradeoff
+a faithful plain-language description of that exact assignment. Neither the
+assignment nor its visible wording may promise a later operation. For an
+analysis or report assignment, missing `scope_ref` means scope preparation,
+revision, or repair only; an exact `scope_ref` means execution of the unchanged
+ready scope, although its live gate may still block without output. Avoid bare
+route labels.
 Encode options only from the current request or routes supported by the
 committed handoff or durable state, with the exact current scope reference when
 needed.
@@ -226,9 +227,8 @@ or full report outlines. Unless the user requests provenance, keep route and
 operation IDs, scope IDs and revisions, raw status or field names, and
 controller mechanics out of the presentation. The controller validates the
 structure, assigns option numbers, renders the established heading shell, and
-replaces or clears the one pending decision. The `presentation` payload is the
-complete response draft; after `finish` succeeds, emit its `response_markdown`
-verbatim without rewriting, expanding, or surrounding it.
+replaces or clears the one pending decision. The `presentation` payload is
+complete; after successful `finish`, follow `SKILL.md`'s terminal response rule.
 
 In read-only preflight-failure mode, skip `finish` and use only `[> Framing]`,
 `[! Boundary]`, and `[? Next Steps]`, without claiming completed work.

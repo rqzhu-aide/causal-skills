@@ -1,7 +1,7 @@
 # Interactive Causal Consultant
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-5.1.8-blue.svg)]()
+[![Version](https://img.shields.io/badge/version-5.1.9-blue.svg)]()
 [![Status](https://img.shields.io/badge/status-active%20development-orange.svg)]()
 
 An interactive causal inference consultant skill for moving from a rough causal
@@ -46,7 +46,7 @@ The internal team is:
   response, mediation, transportability, non-continuous outcomes, and
   statistical validity.
 
-Version 5.1.8 keeps the compact route-reference architecture and deterministic
+Version 5.1.9 keeps the compact route-reference architecture and deterministic
 v5 state protocol: strict YAML validation, migration from recognized v4.5 and
 v5 schema-2 states, revision-checked owner-scoped updates, exact analysis and report
 scope identities, verified artifact manifests, and automatic recovery at
@@ -126,25 +126,25 @@ of the personal skill runtime.
 Codex personal install:
 
 ```text
-Copy the folder from https://github.com/rqzhu-aide/causal-consultant/tree/v5.1.8 into `~/.codex/skills/causal-consultant`.
+Copy the folder from https://github.com/rqzhu-aide/causal-consultant/tree/v5.1.9 into `~/.codex/skills/causal-consultant`.
 ```
 
 Claude Code personal install:
 
 ```text
-Copy the folder from https://github.com/rqzhu-aide/causal-consultant/tree/v5.1.8 into `~/.claude/skills/causal-consultant`.
+Copy the folder from https://github.com/rqzhu-aide/causal-consultant/tree/v5.1.9 into `~/.claude/skills/causal-consultant`.
 ```
 
 Codex or other agent project-local install:
 
 ```text
-Copy the folder from https://github.com/rqzhu-aide/causal-consultant/tree/v5.1.8 into `.agents/skills/causal-consultant`.
+Copy the folder from https://github.com/rqzhu-aide/causal-consultant/tree/v5.1.9 into `.agents/skills/causal-consultant`.
 ```
 
 Alternative project-local install:
 
 ```text
-Copy the folder from https://github.com/rqzhu-aide/causal-consultant/tree/v5.1.8 into `.agent/skills/causal-consultant`.
+Copy the folder from https://github.com/rqzhu-aide/causal-consultant/tree/v5.1.9 into `.agent/skills/causal-consultant`.
 ```
 
 ### Optional Project Hooks
@@ -159,8 +159,8 @@ run:
 
 ```powershell
 New-Item -ItemType Directory -Force -Path ".codex" | Out-Null
-Invoke-WebRequest "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v5.1.8/project-hooks/.codex/hooks.json" -OutFile ".codex\hooks.json"
-Invoke-WebRequest "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v5.1.8/project-hooks/.codex/project_state_stop_check.js" -OutFile ".codex\project_state_stop_check.js"
+Invoke-WebRequest "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v5.1.9/project-hooks/.codex/hooks.json" -OutFile ".codex\hooks.json"
+Invoke-WebRequest "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v5.1.9/project-hooks/.codex/project_state_stop_check.js" -OutFile ".codex\project_state_stop_check.js"
 ```
 
 Codex project hook, macOS/Linux shell. Navigate to your project working
@@ -168,8 +168,8 @@ directory, then run:
 
 ```sh
 mkdir -p .codex
-curl -L "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v5.1.8/project-hooks/.codex/hooks.json" -o .codex/hooks.json
-curl -L "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v5.1.8/project-hooks/.codex/project_state_stop_check.js" -o .codex/project_state_stop_check.js
+curl -L "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v5.1.9/project-hooks/.codex/hooks.json" -o .codex/hooks.json
+curl -L "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v5.1.9/project-hooks/.codex/project_state_stop_check.js" -o .codex/project_state_stop_check.js
 ```
 
 Codex may require you to trust or approve the project hook in Codex settings
@@ -180,8 +180,8 @@ directory, then run:
 
 ```powershell
 New-Item -ItemType Directory -Force -Path ".claude" | Out-Null
-Invoke-WebRequest "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v5.1.8/project-hooks/.claude/settings.json" -OutFile ".claude\settings.json"
-Invoke-WebRequest "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v5.1.8/project-hooks/.claude/project_state_stop_check.js" -OutFile ".claude\project_state_stop_check.js"
+Invoke-WebRequest "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v5.1.9/project-hooks/.claude/settings.json" -OutFile ".claude\settings.json"
+Invoke-WebRequest "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v5.1.9/project-hooks/.claude/project_state_stop_check.js" -OutFile ".claude\project_state_stop_check.js"
 ```
 
 Claude Code project hook, macOS/Linux shell. Navigate to your project working
@@ -189,8 +189,8 @@ directory, then run:
 
 ```sh
 mkdir -p .claude
-curl -L "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v5.1.8/project-hooks/.claude/settings.json" -o .claude/settings.json
-curl -L "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v5.1.8/project-hooks/.claude/project_state_stop_check.js" -o .claude/project_state_stop_check.js
+curl -L "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v5.1.9/project-hooks/.claude/settings.json" -o .claude/settings.json
+curl -L "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v5.1.9/project-hooks/.claude/project_state_stop_check.js" -o .claude/project_state_stop_check.js
 ```
 
 ## License

@@ -37,9 +37,10 @@ function execute(projectRoot, command, options = {}) {
   });
   const lines = child.stdout.trim().split(/\r?\n/).filter(Boolean);
   assert.ok(lines.length, `statectl emitted no JSON\nstdout: ${child.stdout}\nstderr: ${child.stderr}`);
+  assert.equal(lines.length, 1, `statectl must emit exactly one JSON result\nstdout: ${child.stdout}`);
   let result;
   assert.doesNotThrow(() => {
-    result = JSON.parse(lines.at(-1));
+    result = JSON.parse(lines[0]);
   }, `statectl emitted invalid JSON\nstdout: ${child.stdout}\nstderr: ${child.stderr}`);
   return { ...child, result };
 }
@@ -2543,7 +2544,7 @@ test("ready scopes remain route-owned and do not become durable exploration summ
       const closed = expectSuccess(finish(projectRoot, applied, {
         project_summary: { exploration_summary: durableSummary },
       }), "OPERATION_FINISHED");
-      assert.equal(closed.next_action, "respond_and_stop");
+      assert.equal(closed.next_action, "emit_response_markdown_verbatim_and_stop");
       const finished = readState(projectRoot);
       assert.equal(finished.project_summary.exploration_summary, durableSummary);
       assert.equal(finished.project_summary.last_updated, summaryTimestamp);

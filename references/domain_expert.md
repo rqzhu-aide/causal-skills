@@ -32,8 +32,11 @@ route, claim boundary, measurement reading, or report wording:
 - common study designs, data structures, comparators, diagnostics, and reporting
   conventions when they are directly relevant.
 
-Use verified data facts only when they already exist from `data_audit` or
-user-provided materials. Do not infer data availability from domain knowledge.
+Treat user-stated study facts as stated context, and use data dictionaries only
+for domain interpretation. Treat facts obtained through dataset inspection as
+verified only when they are recorded by `data_audit`. Do not open, query,
+profile, or otherwise inspect raw or row-level datasets on this route, or infer
+data availability from domain knowledge.
 
 ## Domain Knowledge Updates
 
@@ -48,8 +51,8 @@ Supported fields:
 - `domain_scope`: compact domain question, setting, population,
   exposure/treatment, and outcome scope.
 - `user_provided`: concise durable summary of user-provided domain framing.
-- `data_facts`: verified domain-relevant data facts, or note that none are
-  verified yet.
+- `data_facts`: domain-relevant facts already verified by `data_audit`, or note
+  that none are verified yet.
 - `construct_notes`, `measurement_notes`, `population_setting_notes`: compact
   durable bullets.
 - `domain_practice`: short decision-relevant bullets about common practice,
