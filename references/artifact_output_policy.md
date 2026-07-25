@@ -29,6 +29,8 @@ Use exactly one reserved artifact per output-producing operation:
    `statectl apply`. The controller derives the manifest identity, timestamp,
    scope reference, and file inventory, atomically publishes the exact reserved
    temporary output, and appends the artifact record.
+   Persist and link only the returned `artifact_intent.location`; never store
+   `temporary_path` or `manifest_path` in route-owned state.
 
 If `apply` fails or is interrupted, reopen the state and follow its artifact
 status. Reuse valid output only at the exact reserved temporary or final path.

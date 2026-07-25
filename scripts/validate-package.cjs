@@ -81,4 +81,12 @@ const template = validateTemplate({ skillRoot: ROOT });
 if (template.capabilities?.scope_snapshot !== 1) {
   throw new Error("state controller must advertise scope_snapshot capability 1");
 }
+if (
+  template.capabilities?.response_rendering !== 1
+  || template.capabilities?.pending_decision !== 1
+  || template.capabilities?.response_receipt !== 1
+  || template.capabilities?.startup_notice !== 1
+) {
+  throw new Error("state controller must advertise response rendering and persistence capabilities");
+}
 process.stdout.write("skill package is valid\n");

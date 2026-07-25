@@ -17,9 +17,11 @@ workflow lane, handoff status, output status, or final answer.
 Read these before planning:
 
 1. The current user message.
-2. The immediately previous user-facing response, especially `[? Next Steps]`,
-   `[+ Consultant Options]`, and `[! Boundary]`.
-3. The validated state returned by `statectl open`.
+2. The validated state at the `state_path` returned by `statectl open`,
+   including any pending decision and response receipt.
+3. The immediately previous user-facing response for a direct question or
+   boundary; a matching pending decision is authoritative for the chosen
+   option's assignment.
 4. `references/route_index.yaml`.
 
 Do not load `references/method_route_catalog.yaml` from the router. Only
@@ -75,6 +77,10 @@ The controller appends `team_lead` and rejects mixed or unknown routes. For
 analysis, encode a listed design as `analysis_execution.<design_id>` and use
 `support` only for a listed support route or `null`.
 
+When a matching pending decision exists, submit an unmodified choice as
+`selection: {decision_id, option_number}`. The controller retrieves its
+assignment; do not reconstruct it.
+
 Include `scope_ref` only when routing approval of an existing ready analysis or
 report scope. A non-null `scope_ref` accepted by `begin` records that approval
 for worker resume; the worker does not re-decide it from a later message. Write
@@ -86,15 +92,18 @@ holds the detail.
 
 ## Routing Priority
 
-First infer the user's current intention from the current message, the previous
-`[? Next Steps]`, `[+ Consultant Options]`, `[! Boundary]`, and the current YAML
-state. Route from that inferred intention, not from keywords alone.
+First infer the user's current intention from the current message, the pending
+decision, the previous direct next step and boundary, and the current state.
+Route from that inferred intention, not from keywords alone.
 
-A numbered reply binds only to the matching item in the
-`[+ Consultant Options]` block of the immediately preceding user-facing
-response. A generic confirmation binds only when that response's
+A choice binds only when the current message unambiguously identifies one menu
+item. A bare number additionally requires that menu in the immediately previous
+user-facing response. Without a matching pending decision, use normal routing
+instead of `selection`. A generic confirmation binds only when the previous response's
 `[? Next Steps]` asked one explicit yes/no question about an action, approval,
 or clarification.
+A successful selection consumes the decision; any successful normal `begin`
+supersedes it.
 Analysis or report execution requires one uniquely identified ready scope whose
 identity and revision have not changed since presentation. If an approval or
 execution request names a noncurrent scope, treat it as stale approval and plan
@@ -104,11 +113,12 @@ Apply these rules in order:
 
 1. If the intention is outside the current project or causal scope, or needs no
    project-state update, plan only `team_lead`.
-2. If the intention is unclear, could refer to multiple prior options, rejects
-   the options without giving a new in-scope request, or is only meta, setup,
-   boundary, synthesis, or no-action, plan only `team_lead`.
-3. If the intention is to continue or approve a prior active choice, route the
-   matching work only when it remains inside the project and causal boundary.
+2. If the intention is unclear, could refer to multiple pending options, rejects
+   them without giving a new in-scope request, or is only meta, setup, boundary,
+   synthesis, or no-action, plan only `team_lead`.
+3. If the intention selects a pending choice or answers the previous direct
+   question, route the matching work only when it remains inside the project
+   and causal boundary.
    For analysis or report execution, a matching `current_status: ready` handoff
    must exist.
 4. If the intention is to revise or add work based on the previous user-facing

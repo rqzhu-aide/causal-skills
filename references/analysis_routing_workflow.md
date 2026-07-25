@@ -40,6 +40,10 @@ Decision rules:
   main output, or claim boundary, the old scope is no longer current. Route the
   current eligible design to revise it; otherwise route the owner of the missing
   or stale eligibility state.
+- Later committed data or domain findings make the causal review and any ready
+  analysis scope stale only when they could change the target, design, support,
+  or claim boundary. In that case route `causal_check` without a `scope_ref`;
+  otherwise keep the review and scope current.
 - A support-only change does not make the current design stale. When that design
   remains eligible, route it with the current support selection to revise the
   scope.

@@ -1,10 +1,11 @@
 state_meta:
-  schema_version: 2
+  schema_version: 3
   project_id: null
   revision: 0
   created_at: null
   updated_at: null
   active_operation: null
+  startup_notice: null
 
 project_summary:
   title: null
@@ -58,6 +59,8 @@ council_chamber:
     feedback_to_route: []
 
 next_step_plan: []
+pending_decision: null
+response_receipt: null
 
 data_facts:
   last_updated: null

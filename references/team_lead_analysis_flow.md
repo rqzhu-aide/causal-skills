@@ -39,7 +39,7 @@ matches, describe it only as an earlier plan needing revision; do not offer it
 for approval or execution or revise it automatically. If eligibility fails for
 another reason, state that the analysis is not currently runnable, name the
 failed prerequisite, and do not revise the scope automatically. Otherwise
-summarize the proposed scope inside the normal headings with only the target or
+summarize the proposed scope in the presentation with only the target or
 estimand, design and support, required inputs, estimation strategy or model
 family, main diagnostics, main output, and claim boundary. Translate design and
 support into plain user-facing method language. Do not expose route IDs, state
@@ -48,8 +48,8 @@ the user asks. Present the stored ready default faithfully; do not invent or
 negate a consequential scope choice. If the handoff or chamber slot is missing,
 do not imply hidden scope was shown; use only the visible plan entry.
 
-If the analysis scope status is `blocked`, explain the blocker under the normal
-headings and ask for the smallest useful clarification, data detail, design
+If the analysis scope status is `blocked`, explain the blocker in the
+presentation and ask for the smallest useful clarification, data detail, design
 revision, or fallback choice.
 
 If the analysis scope status is `done`, use the available operation-matched
@@ -60,6 +60,3 @@ contrast, diagnostic, sensitivity check, heterogeneity question, claim wording,
 or missing data/domain interpretation. Do not default to report, formatting, or
 deliverable-production choices unless the user explicitly asked for that
 deliverable or report work is already pending.
-
-Ready analysis scope remains available through its chamber `scope_id` and
-`scope_revision`; `statectl finish` clears the completed plan and operation.

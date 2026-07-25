@@ -7,12 +7,21 @@ const { isDeepStrictEqual } = require("node:util");
 const YAML = require("yaml");
 const ROUTES = require("./route-catalog.json");
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const MANIFEST_VERSION = 1;
 const STATE_FILE = "project_state.yaml";
 const ARCHIVE_DIR = "project_state.archives";
 const MAX_INTENT_LENGTH = 1000;
+const MAX_RESPONSE_TEXT_LENGTH = 1000;
 const MAX_ARTIFACT_SLUG_LENGTH = 80;
+const WELCOME_LINE = "[Causal-Consultant Loaded] This is a new project. Causal analysis team ready.";
+const RESPONSE_HEADINGS = new Set([
+  "[OK Confirmed]",
+  "[> Framing]",
+  "[+ Consultant Options]",
+  "[! Boundary]",
+  "[? Next Steps]",
+]);
 const DERIVED_SUMMARY_FIELDS = [
   "data_audit_complete",
   "domain_knowledge_complete",
@@ -27,6 +36,8 @@ const REQUIRED_TOP_LEVEL = [
   "project_summary",
   "council_chamber",
   "next_step_plan",
+  "pending_decision",
+  "response_receipt",
   "data_facts",
   "domain_knowledge",
   "causal_facts",
@@ -35,7 +46,12 @@ const REQUIRED_TOP_LEVEL = [
   "artifact_records",
 ];
 
-const LEGACY_TOP_LEVEL = REQUIRED_TOP_LEVEL.filter((key) => key !== "state_meta");
+const LEGACY_TOP_LEVEL = REQUIRED_TOP_LEVEL.filter(
+  (key) => !["state_meta", "pending_decision", "response_receipt"].includes(key),
+);
+const V2_TOP_LEVEL = REQUIRED_TOP_LEVEL.filter(
+  (key) => !["pending_decision", "response_receipt"].includes(key),
+);
 const CORE_WORKERS = new Set(ROUTES.core.filter((id) => id !== "team_lead"));
 const DESIGN_IDS = new Set(ROUTES.design);
 const SUPPORT_IDS = new Set(ROUTES.support);
@@ -214,6 +230,27 @@ function assertExactTopLevel(state, expected = REQUIRED_TOP_LEVEL) {
   if (extra.length) fail("INVALID_STATE", `unsupported top-level sections: ${extra.join(", ")}`);
 }
 
+function normalizeResponseText(value, label, singleLine = false) {
+  if (typeof value !== "string" || !value.trim()) {
+    fail("INVALID_INPUT", `${label} must be a nonempty string`);
+  }
+  const normalized = value.replace(/\r\n?/g, "\n").trim();
+  if (normalized.length > MAX_RESPONSE_TEXT_LENGTH) {
+    fail("INVALID_INPUT", `${label} must contain at most ${MAX_RESPONSE_TEXT_LENGTH} characters`);
+  }
+  if (singleLine && normalized.includes("\n")) {
+    fail("INVALID_INPUT", `${label} must be a single line`);
+  }
+  if (normalized.split("\n").some((line) => {
+    const trimmed = line.trim();
+    return trimmed.startsWith("[Causal-Consultant Loaded]")
+      || [...RESPONSE_HEADINGS].some((heading) => trimmed.startsWith(heading));
+  })) {
+    fail("INVALID_INPUT", `${label} must not contain a response heading`);
+  }
+  return normalized;
+}
+
 function isUuid(value) {
   return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -339,6 +376,12 @@ function deepEqual(left, right) {
   return isDeepStrictEqual(left, right);
 }
 
+function hasDuplicateAssignments(options) {
+  return options.some((option, index) => (
+    options.slice(0, index).some((previous) => deepEqual(previous.assignment, option.assignment))
+  ));
+}
+
 function validatePlan(plan) {
   assertArray(plan, "next_step_plan");
   if (plan.length === 0) return { kind: "idle", actor: null, design: null, support: null };
@@ -374,6 +417,36 @@ function validateScopeRef(value, label = "scope_ref", code = "INVALID_STATE") {
   if (!isUuid(value.id)) fail(code, `${label}.id must be a UUID`);
   if (!Number.isInteger(value.revision) || value.revision < 1) {
     fail(code, `${label}.revision must be a positive integer`);
+  }
+}
+
+function validateStartupNotice(notice, templateMode) {
+  if (notice === null) return;
+  if (templateMode) fail("INVALID_STATE", "the bundled template must leave state_meta.startup_notice null");
+  assertKnownKeys(notice, new Set(["kind", "archive_path"]), "state_meta.startup_notice");
+  if (!Object.prototype.hasOwnProperty.call(notice, "kind")
+    || !Object.prototype.hasOwnProperty.call(notice, "archive_path")) {
+    fail("INVALID_STATE", "state_meta.startup_notice requires kind and archive_path");
+  }
+  assertEnum(notice.kind, ["created", "reset"], "state_meta.startup_notice.kind");
+  if (notice.kind === "created") {
+    if (notice.archive_path !== null) {
+      fail("INVALID_STATE", "a created startup notice must have a null archive_path");
+    }
+    return;
+  }
+  if (typeof notice.archive_path !== "string") {
+    fail("INVALID_STATE", "a reset startup notice requires an archive_path");
+  }
+  const normalized = normalizePath(notice.archive_path);
+  if (
+    normalized !== notice.archive_path
+    || normalized.includes("\0")
+    || path.posix.normalize(normalized) !== normalized
+    || !normalized.startsWith(`${ARCHIVE_DIR}/`)
+    || normalized === `${ARCHIVE_DIR}/`
+  ) {
+    fail("INVALID_STATE", `state_meta.startup_notice.archive_path must be a canonical path under ${ARCHIVE_DIR}/`);
   }
 }
 
@@ -502,6 +575,88 @@ function validateArtifactRecord(record, index) {
   }
 }
 
+function validatePendingDecision(state, planInfo) {
+  const decision = state.pending_decision;
+  if (decision === null) return;
+  if (planInfo.kind !== "idle" || state.state_meta.active_operation !== null) {
+    fail("INVALID_STATE", "pending_decision cannot coexist with an active operation or plan");
+  }
+  assertKnownKeys(
+    decision,
+    new Set(["decision_id", "source_operation_id", "created_at", "options"]),
+    "pending_decision",
+  );
+  if (!isUuid(decision.decision_id)) fail("INVALID_STATE", "pending_decision.decision_id must be a UUID");
+  if (!isUuid(decision.source_operation_id)) {
+    fail("INVALID_STATE", "pending_decision.source_operation_id must be a UUID");
+  }
+  if (!isTimestamp(decision.created_at)) {
+    fail("INVALID_STATE", "pending_decision.created_at must be an RFC3339 UTC timestamp");
+  }
+  assertArray(decision.options, "pending_decision.options");
+  if (decision.options.length < 2 || decision.options.length > 4) {
+    fail("INVALID_STATE", "pending_decision.options must contain 2-4 choices");
+  }
+  decision.options.forEach((option, index) => {
+    const label = `pending_decision.options[${index}]`;
+    assertKnownKeys(
+      option,
+      new Set(["number", "assignment"]),
+      label,
+    );
+    if (option.number !== index + 1) {
+      fail("INVALID_STATE", `${label}.number must match its sequential position`);
+    }
+    const normalizedAssignment = normalizeAssignmentShape(
+      option.assignment,
+      `${label}.assignment`,
+      true,
+    );
+    if (!deepEqual(option.assignment, normalizedAssignment)) {
+      fail("INVALID_STATE", `${label}.assignment must be stored in canonical form`);
+    }
+  });
+  if (hasDuplicateAssignments(decision.options)) {
+    fail("INVALID_STATE", "pending_decision.options must contain distinct assignments");
+  }
+}
+
+function validateResponseReceipt(state, planInfo) {
+  const receipt = state.response_receipt;
+  if (receipt === null) {
+    if (state.pending_decision !== null) {
+      fail("INVALID_STATE", "pending_decision requires its matching response_receipt");
+    }
+    return;
+  }
+  if (planInfo.kind !== "idle" || state.state_meta.active_operation !== null) {
+    fail("INVALID_STATE", "response_receipt cannot coexist with an active operation or plan");
+  }
+  assertKnownKeys(
+    receipt,
+    new Set(["operation_id", "revision", "created_at", "response_markdown"]),
+    "response_receipt",
+  );
+  if (!isUuid(receipt.operation_id)) {
+    fail("INVALID_STATE", "response_receipt.operation_id must be a UUID");
+  }
+  if (receipt.revision !== state.state_meta.revision) {
+    fail("INVALID_STATE", "response_receipt.revision must match the current state revision");
+  }
+  if (!isTimestamp(receipt.created_at)) {
+    fail("INVALID_STATE", "response_receipt.created_at must be an RFC3339 UTC timestamp");
+  }
+  if (typeof receipt.response_markdown !== "string" || !receipt.response_markdown.trim()) {
+    fail("INVALID_STATE", "response_receipt.response_markdown must be nonempty");
+  }
+  if (
+    state.pending_decision !== null
+    && state.pending_decision.source_operation_id !== receipt.operation_id
+  ) {
+    fail("INVALID_STATE", "pending_decision and response_receipt must come from the same operation");
+  }
+}
+
 function validateState(state, options = {}) {
   const { templateMode = false } = options;
   assertExactTopLevel(state);
@@ -513,6 +668,7 @@ function validateState(state, options = {}) {
     "created_at",
     "updated_at",
     "active_operation",
+    "startup_notice",
   ]), "state_meta");
   if (state.state_meta.schema_version !== SCHEMA_VERSION) {
     fail("UNSUPPORTED_SCHEMA", `unsupported schema version: ${state.state_meta.schema_version}`);
@@ -530,6 +686,7 @@ function validateState(state, options = {}) {
   if (!Number.isInteger(state.state_meta.revision) || state.state_meta.revision < 0) {
     fail("INVALID_STATE", "state_meta.revision must be a nonnegative integer");
   }
+  validateStartupNotice(state.state_meta.startup_notice, templateMode);
 
   assertKnownKeys(state.project_summary, SECTION_KEYS.project_summary, "project_summary");
   assertStringOrNull(state.project_summary.title, "project_summary.title");
@@ -699,10 +856,16 @@ function validateState(state, options = {}) {
     }
   }
 
+  validatePendingDecision(state, planInfo);
+  validateResponseReceipt(state, planInfo);
+  if (state.state_meta.startup_notice !== null
+    && (state.pending_decision !== null || state.response_receipt !== null)) {
+    fail("INVALID_STATE", "state_meta.startup_notice cannot coexist with a completed response");
+  }
   return { planInfo };
 }
 
-function instantiateTemplate(template) {
+function instantiateTemplate(template, startupNotice) {
   const state = clone(template);
   const timestamp = nowIso();
   state.state_meta.project_id = crypto.randomUUID();
@@ -710,6 +873,9 @@ function instantiateTemplate(template) {
   state.state_meta.created_at = timestamp;
   state.state_meta.updated_at = timestamp;
   state.state_meta.active_operation = null;
+  state.state_meta.startup_notice = clone(startupNotice);
+  state.pending_decision = null;
+  state.response_receipt = null;
   validateState(state);
   return state;
 }
@@ -761,9 +927,12 @@ function migrateLegacyState(legacy, options = {}) {
     created_at: timestamp,
     updated_at: timestamp,
     active_operation: null,
+    startup_notice: null,
   };
   const reordered = { state_meta: state.state_meta };
   for (const key of LEGACY_TOP_LEVEL) reordered[key] = state[key];
+  reordered.pending_decision = null;
+  reordered.response_receipt = null;
   if ("discovery_sidecar_output" in reordered.project_summary) {
     delete reordered.project_summary.discovery_sidecar_output;
   }
@@ -790,6 +959,25 @@ function migrateLegacyState(legacy, options = {}) {
   }));
   validateState(reordered);
   return reordered;
+}
+
+function migrateV2State(v2) {
+  assertExactTopLevel(v2, V2_TOP_LEVEL);
+  assertObject(v2.state_meta, "state_meta");
+  if (v2.state_meta.schema_version !== 2) {
+    fail("UNSUPPORTED_SCHEMA", `unsupported schema version: ${v2.state_meta.schema_version}`);
+  }
+
+  const migrated = clone(v2);
+  migrated.state_meta.schema_version = SCHEMA_VERSION;
+  migrated.state_meta.startup_notice = null;
+  migrated.pending_decision = null;
+  migrated.response_receipt = null;
+  validateState(migrated);
+  migrated.state_meta.revision += 1;
+  migrated.state_meta.updated_at = nowIso();
+  validateState(migrated);
+  return migrated;
 }
 
 function artifactWarnings(projectRoot, state) {
@@ -997,7 +1185,13 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
   if (fresh) {
     const previous = exists ? readBytes(statePath) : null;
     const archivePath = previous === null ? null : archiveBytes(root, previous, "reset");
-    const state = instantiateTemplate(template);
+    const startupNotice = archivePath === null
+      ? { kind: "created", archive_path: null }
+      : {
+        kind: "reset",
+        archive_path: normalizePath(path.relative(root, archivePath)),
+      };
+    const state = instantiateTemplate(template, startupNotice);
     atomicWrite(statePath, stringifyYaml(state));
     return {
       ok: true,
@@ -1012,7 +1206,10 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
   }
 
   if (!exists) {
-    const state = instantiateTemplate(template);
+    const state = instantiateTemplate(template, {
+      kind: "created",
+      archive_path: null,
+    });
     atomicWrite(statePath, stringifyYaml(state));
     return {
       ok: true,
@@ -1029,8 +1226,10 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
   const parsed = parseYaml(original.toString("utf8"), statePath);
   if (!isObject(parsed.state_meta)) {
     const migrated = migrateLegacyState(parsed, { discardPlan: discardLegacyPlan });
+    const warnings = artifactWarnings(root, migrated);
+    const serialized = stringifyYaml(migrated);
     const archivePath = archiveBytes(root, original, discardLegacyPlan ? "migration-v45-discarded-plan" : "migration-v45");
-    atomicWrite(statePath, stringifyYaml(migrated));
+    atomicWrite(statePath, serialized);
     return {
       ok: true,
       code: discardLegacyPlan ? "MIGRATED_LEGACY_PLAN_DISCARDED" : "MIGRATED",
@@ -1039,7 +1238,42 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
       project_id: migrated.state_meta.project_id,
       revision: migrated.state_meta.revision,
       mode: "idle",
-      warnings: artifactWarnings(root, migrated),
+      warnings,
+    };
+  }
+
+  if (parsed.state_meta.schema_version === 2) {
+    if (discardLegacyPlan) {
+      fail("INVALID_INPUT", "--discard-legacy-plan applies only to a recognized unversioned v4.5 state");
+    }
+    const migrated = migrateV2State(parsed);
+    const { planInfo } = validateState(migrated);
+    const operation = migrated.state_meta.active_operation;
+    const mode = operation === null
+      ? "idle"
+      : operation.stage === "worker_pending"
+        ? "resume_worker"
+        : "resume_lead";
+    const artifactStatus = operation && operation.artifact_intent
+      ? inspectReservedArtifact(root, operation, planInfo.actor)
+      : null;
+    const warnings = artifactWarnings(root, migrated);
+    const serialized = stringifyYaml(migrated);
+    const archivePath = archiveBytes(root, original, "migration-v2-v3");
+    atomicWrite(statePath, serialized);
+    return {
+      ok: true,
+      code: "MIGRATED_V2",
+      state_path: statePath,
+      archive_path: archivePath,
+      project_id: migrated.state_meta.project_id,
+      revision: migrated.state_meta.revision,
+      mode,
+      plan: migrated.next_step_plan,
+      plan_actor: planInfo.actor,
+      active_operation: operation,
+      artifact_status: artifactStatus,
+      warnings,
     };
   }
 
@@ -1181,55 +1415,141 @@ function assertAnalysisBeginAllowed(state, design, support) {
   }
 }
 
+function normalizeAssignmentShape(input, label = "assignment", stateMode = false) {
+  const inputCode = stateMode ? "INVALID_STATE" : "INVALID_INPUT";
+  const routeCode = stateMode ? "INVALID_STATE" : "PLAN_MISMATCH";
+  const scopeCode = stateMode ? "INVALID_STATE" : "SCOPE_MISMATCH";
+  assertKnownKeys(
+    input,
+    new Set(["route", "support", "intent_summary", "scope_ref"]),
+    label,
+    inputCode,
+  );
+  const route = input.route;
+  const support = input.support ?? null;
+  const scopeRef = input.scope_ref ?? null;
+  if (
+    typeof input.intent_summary !== "string"
+    || !input.intent_summary.trim()
+    || input.intent_summary.length > MAX_INTENT_LENGTH
+  ) {
+    fail(inputCode, `${label}.intent_summary must contain 1-${MAX_INTENT_LENGTH} characters`);
+  }
+  validateScopeRef(scopeRef, `${label}.scope_ref`, inputCode);
+
+  if (route === "team_lead") {
+    if (support !== null || scopeRef !== null) fail(inputCode, "team_lead cannot use support or scope_ref");
+  } else if (CORE_WORKERS.has(route)) {
+    if (support !== null) fail(inputCode, "core routes cannot use support");
+    if (scopeRef !== null && route !== "report_writer") fail(scopeCode, `${route} cannot use scope_ref`);
+    if (scopeRef !== null && scopeRef.kind !== "report") {
+      fail(scopeCode, "report_writer requires a report scope reference");
+    }
+  } else if (typeof route === "string" && route.startsWith("analysis_execution.")) {
+    const design = route.slice("analysis_execution.".length);
+    if (!DESIGN_IDS.has(design)) fail(routeCode, `unknown analysis design route: ${design}`);
+    if (support !== null && !SUPPORT_IDS.has(support)) fail(routeCode, `unknown support route: ${support}`);
+    if (scopeRef !== null && scopeRef.kind !== "analysis") {
+      fail(scopeCode, "analysis route requires an analysis scope reference");
+    }
+  } else {
+    fail(routeCode, `unknown route: ${route}`);
+  }
+
+  return {
+    route,
+    support,
+    intent_summary: input.intent_summary.trim(),
+    scope_ref: scopeRef === null ? null : clone(scopeRef),
+  };
+}
+
+function normalizeAssignment(state, input, label = "assignment") {
+  const assignment = normalizeAssignmentShape(input, label);
+  const {
+    route,
+    support,
+    scope_ref: scopeRef,
+  } = assignment;
+
+  let plan;
+  let stage;
+  if (route === "team_lead") {
+    plan = [{ id: "team_lead" }];
+    stage = "lead_pending";
+  } else if (CORE_WORKERS.has(route)) {
+    resolveScopeReference(state, route, scopeRef, support);
+    plan = [{ id: route }, { id: "team_lead" }];
+    stage = "worker_pending";
+  } else if (typeof route === "string" && route.startsWith("analysis_execution.")) {
+    const design = route.slice("analysis_execution.".length);
+    resolveScopeReference(state, route, scopeRef, support);
+    assertAnalysisBeginAllowed(state, design, support);
+    plan = [{ id: route, support }, { id: "team_lead" }];
+    stage = "worker_pending";
+  }
+
+  return {
+    assignment,
+    plan,
+    stage,
+  };
+}
+
+function resolveDecisionSelection(state, selection) {
+  assertKnownKeys(
+    selection,
+    new Set(["decision_id", "option_number"]),
+    "begin selection",
+    "INVALID_INPUT",
+  );
+  const decision = state.pending_decision;
+  if (decision === null) fail("NO_PENDING_DECISION", "no pending numbered decision exists");
+  if (selection.decision_id !== decision.decision_id) {
+    fail("STALE_DECISION", "decision_id does not match the pending decision");
+  }
+  if (!Number.isInteger(selection.option_number)) {
+    fail("INVALID_DECISION_OPTION", "option_number must be an integer");
+  }
+  const option = decision.options.find((item) => item.number === selection.option_number);
+  if (!option) fail("INVALID_DECISION_OPTION", "option_number does not exist in the pending decision");
+  return option.assignment;
+}
+
 function beginOperation({ projectRoot, payload }) {
   const { statePath, state } = loadCurrentState(projectRoot);
   assertExpected(state, payload);
   if (state.state_meta.active_operation !== null || state.next_step_plan.length) {
     fail("ACTIVE_OPERATION", "finish or cancel the active operation before beginning another");
   }
-  const allowedInput = new Set(["expected_project_id", "expected_revision", "route", "support", "intent_summary", "scope_ref"]);
+  const assignmentFields = ["route", "support", "intent_summary", "scope_ref"];
+  const allowedInput = new Set(["expected_project_id", "expected_revision", "selection", ...assignmentFields]);
   assertKnownKeys(payload, allowedInput, "begin input", "INVALID_INPUT");
-  const route = payload.route;
-  const support = payload.support ?? null;
-  const scopeRef = payload.scope_ref ?? null;
-  if (typeof payload.intent_summary !== "string" || !payload.intent_summary.trim() || payload.intent_summary.length > MAX_INTENT_LENGTH) {
-    fail("INVALID_INPUT", `intent_summary must contain 1-${MAX_INTENT_LENGTH} characters`);
+  const hasSelection = Object.prototype.hasOwnProperty.call(payload, "selection");
+  if (hasSelection && assignmentFields.some((field) => Object.prototype.hasOwnProperty.call(payload, field))) {
+    fail("INVALID_INPUT", "begin selection cannot be combined with route assignment fields");
   }
-
-  let plan;
-  let stage;
-  if (route === "team_lead") {
-    if (support !== null || scopeRef !== null) fail("INVALID_INPUT", "team_lead cannot use support or scope_ref");
-    plan = [{ id: "team_lead" }];
-    stage = "lead_pending";
-  } else if (CORE_WORKERS.has(route)) {
-    if (support !== null) fail("INVALID_INPUT", "core routes cannot use support");
-    if (scopeRef !== null && route !== "report_writer") fail("SCOPE_MISMATCH", `${route} cannot use scope_ref`);
-    resolveScopeReference(state, route, scopeRef, support);
-    plan = [{ id: route }, { id: "team_lead" }];
-    stage = "worker_pending";
-  } else if (typeof route === "string" && route.startsWith("analysis_execution.")) {
-    const design = route.slice("analysis_execution.".length);
-    if (!DESIGN_IDS.has(design)) fail("PLAN_MISMATCH", `unknown analysis design route: ${design}`);
-    if (support !== null && !SUPPORT_IDS.has(support)) fail("PLAN_MISMATCH", `unknown support route: ${support}`);
-    resolveScopeReference(state, route, scopeRef, support);
-    assertAnalysisBeginAllowed(state, design, support);
-    plan = [{ id: route, support }, { id: "team_lead" }];
-    stage = "worker_pending";
-  } else {
-    fail("PLAN_MISMATCH", `unknown route: ${route}`);
-  }
+  const assignmentInput = hasSelection
+    ? resolveDecisionSelection(state, payload.selection)
+    : Object.fromEntries(
+      assignmentFields
+        .filter((field) => Object.prototype.hasOwnProperty.call(payload, field))
+        .map((field) => [field, payload[field]]),
+    );
+  const { assignment, plan, stage } = normalizeAssignment(state, assignmentInput, "begin assignment");
 
   const operation = {
     id: crypto.randomUUID(),
     stage,
-    intent_summary: payload.intent_summary.trim(),
-    scope_ref: scopeRef,
+    intent_summary: assignment.intent_summary,
+    scope_ref: assignment.scope_ref,
     artifact_intent: null,
     started_at: nowIso(),
   };
   state.next_step_plan = plan;
   state.state_meta.active_operation = operation;
+  state.pending_decision = null;
+  state.response_receipt = null;
   const revision = commitMutation(statePath, state);
   return {
     ok: true,
@@ -2023,12 +2343,122 @@ function rejectReadyScopeSummaryUpdate(state, updates) {
   }
 }
 
+function normalizePresentation(state, presentation) {
+  const fields = ["confirmation", "framing", "options", "boundary", "next_steps"];
+  assertKnownKeys(presentation, new Set(fields), "finish presentation", "INVALID_INPUT");
+  const missing = fields.filter((field) => !Object.prototype.hasOwnProperty.call(presentation, field));
+  if (missing.length) fail("INVALID_INPUT", `finish presentation is missing: ${missing.join(", ")}`);
+
+  let confirmation = null;
+  if (presentation.confirmation !== null) {
+    confirmation = normalizeResponseText(
+      presentation.confirmation,
+      "finish presentation.confirmation",
+      true,
+    );
+  }
+  const framing = normalizeResponseText(presentation.framing, "finish presentation.framing");
+  const boundary = normalizeResponseText(presentation.boundary, "finish presentation.boundary");
+  const nextSteps = normalizeResponseText(presentation.next_steps, "finish presentation.next_steps");
+  assertArray(presentation.options, "finish presentation.options", "INVALID_INPUT");
+  if (presentation.options.length === 1 || presentation.options.length > 4) {
+    fail("INVALID_INPUT", "finish presentation.options must contain 0 or 2-4 choices");
+  }
+
+  const options = presentation.options.map((option, index) => {
+    const label = `finish presentation.options[${index}]`;
+    assertKnownKeys(
+      option,
+      new Set(["label", "consultant_read", "tradeoff", "assignment"]),
+      label,
+      "INVALID_INPUT",
+    );
+    const required = ["label", "consultant_read", "tradeoff", "assignment"];
+    const missingOptionFields = required.filter(
+      (field) => !Object.prototype.hasOwnProperty.call(option, field),
+    );
+    if (missingOptionFields.length) {
+      fail("INVALID_INPUT", `${label} is missing: ${missingOptionFields.join(", ")}`);
+    }
+    return {
+      label: normalizeResponseText(option.label, `${label}.label`, true),
+      consultant_read: normalizeResponseText(
+        option.consultant_read,
+        `${label}.consultant_read`,
+        true,
+      ),
+      tradeoff: normalizeResponseText(option.tradeoff, `${label}.tradeoff`, true),
+      assignment: normalizeAssignment(state, option.assignment, `${label}.assignment`).assignment,
+    };
+  });
+  const normalizedLabels = options.map((option) => option.label.toLowerCase());
+  if (new Set(normalizedLabels).size !== normalizedLabels.length) {
+    fail("INVALID_INPUT", "finish presentation.options must contain distinct labels");
+  }
+  if (hasDuplicateAssignments(options)) {
+    fail("INVALID_INPUT", "finish presentation.options must contain distinct assignments");
+  }
+
+  return {
+    confirmation,
+    framing,
+    options,
+    boundary,
+    next_steps: nextSteps,
+  };
+}
+
+function decisionFromPresentation(presentation, operationId) {
+  if (presentation.options.length === 0) return null;
+  return {
+    decision_id: crypto.randomUUID(),
+    source_operation_id: operationId,
+    created_at: nowIso(),
+    options: presentation.options.map((option, index) => ({
+      number: index + 1,
+      assignment: clone(option.assignment),
+    })),
+  };
+}
+
+function renderPresentation(presentation, includeWelcome) {
+  const blocks = [];
+  if (presentation.confirmation !== null) {
+    blocks.push(`[OK Confirmed] ${presentation.confirmation}`);
+  }
+  if (includeWelcome) blocks.push(WELCOME_LINE);
+  blocks.push(`[> Framing]\n${presentation.framing}`);
+  if (presentation.options.length) {
+    const optionLines = ["[+ Consultant Options]"];
+    presentation.options.forEach((option, index) => {
+      optionLines.push(
+        `    ${index + 1}. ${option.label}`,
+        `       Consultant read: ${option.consultant_read}`,
+        `       Tradeoff: ${option.tradeoff}`,
+      );
+    });
+    blocks.push(optionLines.join("\n"));
+  }
+  blocks.push(`[! Boundary]\n${presentation.boundary}`);
+  blocks.push(`[? Next Steps]\n${presentation.next_steps}`);
+  return blocks.join("\n\n");
+}
+
 function finishOperation({ projectRoot, payload, cancel = false }) {
   const { statePath, state } = loadCurrentState(projectRoot);
   assertExpected(state, payload);
-  const allowedInput = new Set(["expected_project_id", "expected_revision", "operation_id", "updates"]);
+  const allowedInput = new Set([
+    "expected_project_id",
+    "expected_revision",
+    "operation_id",
+    "updates",
+    "presentation",
+  ]);
   assertKnownKeys(payload, allowedInput, "finish input", "INVALID_INPUT");
   const operation = assertOperation(state, payload, cancel ? null : "lead_pending");
+  if (!Object.prototype.hasOwnProperty.call(payload, "presentation")) {
+    fail("INVALID_INPUT", "finish input requires presentation");
+  }
   const updates = payload.updates ?? {};
   assertObject(updates, "updates", "INVALID_INPUT");
   if (cancel && Object.keys(updates).length > 0) {
@@ -2049,12 +2479,27 @@ function finishOperation({ projectRoot, payload, cancel = false }) {
     );
   }
   rejectReadyScopeSummaryUpdate(state, updates);
+  const startupNotice = state.state_meta.startup_notice;
   const previousSummary = clone(state.project_summary);
   const merged = deepMerge(state, updates);
   deriveSummaryAggregates(merged);
   if (!deepEqual(previousSummary, merged.project_summary)) merged.project_summary.last_updated = nowIso();
   merged.next_step_plan = [];
   merged.state_meta.active_operation = null;
+  merged.state_meta.startup_notice = null;
+  merged.pending_decision = null;
+  const presentation = normalizePresentation(merged, payload.presentation);
+  merged.pending_decision = decisionFromPresentation(presentation, operation.id);
+  const responseMarkdown = renderPresentation(
+    presentation,
+    startupNotice !== null,
+  );
+  merged.response_receipt = {
+    operation_id: operation.id,
+    revision: merged.state_meta.revision + 1,
+    created_at: nowIso(),
+    response_markdown: responseMarkdown,
+  };
   const revision = commitMutation(statePath, merged);
   return {
     ok: true,
@@ -2064,6 +2509,8 @@ function finishOperation({ projectRoot, payload, cancel = false }) {
     operation_id: operation.id,
     mode: "idle",
     next_action: "respond_and_stop",
+    pending_decision: merged.pending_decision,
+    response_markdown: responseMarkdown,
   };
 }
 
@@ -2108,6 +2555,8 @@ function validateProject({ projectRoot }) {
     active_operation: state.state_meta.active_operation,
     plan: state.next_step_plan,
     plan_actor: planInfo.actor,
+    pending_decision: state.pending_decision,
+    response_receipt: state.response_receipt,
     scope_snapshot: scopeSnapshot(state),
     warnings: artifactWarnings(root, state),
   };
@@ -2119,7 +2568,13 @@ function validateTemplate({ skillRoot }) {
     ok: true,
     code: "VALID_TEMPLATE",
     schema_version: SCHEMA_VERSION,
-    capabilities: { scope_snapshot: 1 },
+    capabilities: {
+      scope_snapshot: 1,
+      response_rendering: 1,
+      pending_decision: 1,
+      response_receipt: 1,
+      startup_notice: 1,
+    },
   };
 }
 

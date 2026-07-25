@@ -75,6 +75,17 @@ function writeState(projectRoot, state) {
   fs.writeFileSync(statePath(projectRoot), YAML.stringify(state, { lineWidth: 0 }), "utf8");
 }
 
+function downgradeCurrentStateToV2(projectRoot) {
+  const state = readState(projectRoot);
+  assert.equal(state.state_meta.schema_version, 3);
+  state.state_meta.schema_version = 2;
+  delete state.state_meta.startup_notice;
+  delete state.pending_decision;
+  delete state.response_receipt;
+  writeState(projectRoot, state);
+  return state;
+}
+
 function copyFixture(projectRoot, fixtureName) {
   fs.copyFileSync(path.join(FIXTURES, fixtureName), statePath(projectRoot));
 }
@@ -97,6 +108,50 @@ function begin(projectRoot, prior, route, extras = {}) {
   });
 }
 
+const DEFAULT_PRESENTATION = Object.freeze({
+  confirmation: null,
+  framing: "The current operation is complete.",
+  options: [],
+  boundary: "No additional boundary changed.",
+  next_steps: "Continue with the next requested step.",
+});
+
+function decisionOption(label, route, extras = {}) {
+  return {
+    label,
+    consultant_read: `${label} is currently supportable.`,
+    tradeoff: `${label} uses this operation.`,
+    assignment: {
+      route,
+      intent_summary: `Exercise ${label.toLowerCase()}`,
+      ...extras,
+    },
+  };
+}
+
+function optionsPresentation(options) {
+  return {
+    confirmation: "The current operation is complete.",
+    framing: "There are multiple useful ways to continue.",
+    options,
+    boundary: "Each choice starts one operation and preserves the current evidence boundary.",
+    next_steps: "Choose one of the options.",
+  };
+}
+
+function beginSelection(projectRoot, prior, decisionId, optionNumber, extras = {}) {
+  return execute(projectRoot, "begin", {
+    payload: {
+      ...expected(prior),
+      selection: {
+        decision_id: decisionId,
+        option_number: optionNumber,
+      },
+      ...extras,
+    },
+  });
+}
+
 function finish(projectRoot, prior, updates = {}, options = {}) {
   return execute(projectRoot, "finish", {
     args: options.cancel ? ["--cancel"] : [],
@@ -105,6 +160,7 @@ function finish(projectRoot, prior, updates = {}, options = {}) {
       ...expected(prior),
       operation_id: prior.operation_id,
       updates,
+      presentation: options.presentation ?? DEFAULT_PRESENTATION,
     },
   });
 }
@@ -241,11 +297,17 @@ test("open creates a valid state and a normal open is a byte-preserving no-op", 
   const firstBytes = fs.readFileSync(statePath(projectRoot), "utf8");
   const state = readState(projectRoot);
 
-  assert.equal(state.state_meta.schema_version, 2);
+  assert.equal(state.state_meta.schema_version, 3);
   assert.equal(state.state_meta.project_id, created.project_id);
   assert.equal(state.state_meta.revision, 0);
   assert.equal(state.state_meta.active_operation, null);
+  assert.deepEqual(state.state_meta.startup_notice, {
+    kind: "created",
+    archive_path: null,
+  });
   assert.deepEqual(state.next_step_plan, []);
+  assert.equal(state.pending_decision, null);
+  assert.equal(state.response_receipt, null);
 
   const reopened = expectSuccess(execute(projectRoot, "open"), "OPENED");
   assert.equal(reopened.project_id, created.project_id);
@@ -326,11 +388,26 @@ test("open --fresh archives exact prior bytes before replacing even malformed st
   const reset = expectSuccess(execute(projectRoot, "open", { args: ["--fresh"] }), "RESET");
   assert.equal(fs.readFileSync(reset.archive_path, "utf8"), malformed);
   assert.notEqual(fs.readFileSync(statePath(projectRoot), "utf8"), malformed);
+  const resetState = readState(projectRoot);
+  const relativeArchive = path.relative(projectRoot, reset.archive_path).split(path.sep).join("/");
+  assert.deepEqual(resetState.state_meta.startup_notice, {
+    kind: "reset",
+    archive_path: relativeArchive,
+  });
+  assert.equal(path.isAbsolute(resetState.state_meta.startup_notice.archive_path), false);
+  assert.deepEqual(
+    fs.readFileSync(path.resolve(projectRoot, resetState.state_meta.startup_notice.archive_path)),
+    Buffer.from(malformed),
+  );
   expectSuccess(execute(projectRoot, "validate"), "VALID");
 
   const secondRoot = temporaryProject(t);
   const createdFresh = expectSuccess(execute(secondRoot, "open", { args: ["--fresh"] }), "CREATED_FRESH");
   assert.equal(createdFresh.archive_path, null);
+  assert.deepEqual(readState(secondRoot).state_meta.startup_notice, {
+    kind: "created",
+    archive_path: null,
+  });
 });
 
 test("supported v4.5 migration preserves evidence, adds identities, and is idempotent", (t) => {
@@ -347,6 +424,10 @@ test("supported v4.5 migration preserves evidence, adds identities, and is idemp
   }]);
 
   const state = readState(projectRoot);
+  assert.equal(state.state_meta.schema_version, 3);
+  assert.equal(state.state_meta.startup_notice, null);
+  assert.equal(state.pending_decision, null);
+  assert.equal(state.response_receipt, null);
   assert.equal(state.project_summary.title, "Legacy clinical study");
   assert.equal("discovery_sidecar_output" in state.project_summary, false);
   assert.match(state.council_chamber.analysis_execution.single_time_observational.scope_id, /^[0-9a-f-]{36}$/);
@@ -453,6 +534,52 @@ test("strict validation rejects malformed YAML, duplicate keys, and unknown sche
     expectFailure(execute(projectRoot, "validate"), "UNSUPPORTED_SCHEMA");
     assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), original);
   });
+});
+
+test("strict validation rejects malformed startup notices", async (t) => {
+  const cases = [
+    {
+      name: "missing notice",
+      mutate(state) {
+        delete state.state_meta.startup_notice;
+      },
+    },
+    {
+      name: "created notice with archive",
+      mutate(state) {
+        state.state_meta.startup_notice.archive_path = "project_state.archives/old.yaml";
+      },
+    },
+    {
+      name: "reset notice with traversal",
+      mutate(state) {
+        state.state_meta.startup_notice = {
+          kind: "reset",
+          archive_path: "project_state.archives/../old.yaml",
+        };
+      },
+    },
+    {
+      name: "unknown notice field",
+      mutate(state) {
+        state.state_meta.startup_notice.extra = true;
+      },
+    },
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, () => {
+      const projectRoot = temporaryProject(t);
+      expectSuccess(execute(projectRoot, "open"), "CREATED");
+      const state = readState(projectRoot);
+      scenario.mutate(state);
+      writeState(projectRoot, state);
+      const before = fs.readFileSync(statePath(projectRoot));
+
+      expectFailure(execute(projectRoot, "validate"), "INVALID_STATE");
+      assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+    });
+  }
 });
 
 test("method recommendations require one unique design with at most one support", async (t) => {
@@ -716,10 +843,13 @@ test("command input type failures use INVALID_INPUT without mutating state", (t)
 test("revision checks, ownership, worker resume, lead resume, and closeout form one lifecycle", (t) => {
   const projectRoot = temporaryProject(t);
   const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const startupNotice = readState(projectRoot).state_meta.startup_notice;
   const started = expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+  assert.deepEqual(readState(projectRoot).state_meta.startup_notice, startupNotice);
   const workerResume = expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER");
   assert.equal(workerResume.plan_actor, "data_audit");
   assert.equal(workerResume.active_operation.id, started.operation_id);
+  assert.deepEqual(readState(projectRoot).state_meta.startup_notice, startupNotice);
 
   const validUpdates = {
     data_facts: {
@@ -769,11 +899,14 @@ test("revision checks, ownership, worker resume, lead resume, and closeout form 
     },
   }), "WORKER_APPLIED");
   assert.equal(applied.revision, 2);
-  assert.equal(readState(projectRoot).project_summary.data_audit_complete, true);
+  const appliedState = readState(projectRoot);
+  assert.equal(appliedState.project_summary.data_audit_complete, true);
+  assert.deepEqual(appliedState.state_meta.startup_notice, startupNotice);
 
   const leadResume = expectSuccess(execute(projectRoot, "open"), "RESUME_LEAD");
   assert.equal(leadResume.active_operation.id, started.operation_id);
   assert.equal(leadResume.active_operation.stage, "lead_pending");
+  assert.deepEqual(readState(projectRoot).state_meta.startup_notice, startupNotice);
 
   const beforeBadFinish = fs.readFileSync(statePath(projectRoot), "utf8");
   expectFailure(finish(projectRoot, applied, { artifact_records: [] }), "OWNERSHIP_VIOLATION");
@@ -787,8 +920,13 @@ test("revision checks, ownership, worker resume, lead resume, and closeout form 
     },
   }), "OPERATION_FINISHED");
   assert.equal(closed.revision, 3);
+  assert.equal(
+    closed.response_markdown.match(/\[Causal-Consultant Loaded\]/g)?.length,
+    1,
+  );
   const finalState = readState(projectRoot);
   assert.equal(finalState.state_meta.active_operation, null);
+  assert.equal(finalState.state_meta.startup_notice, null);
   assert.deepEqual(finalState.next_step_plan, []);
   assert.equal(finalState.data_facts.data_checked, "passing");
   assert.equal(finalState.project_summary.data_audit_complete, true);
@@ -1741,12 +1879,24 @@ test("atomic finish failure preserves a resumable lead operation and removes tem
   const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
   const started = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
   const before = fs.readFileSync(statePath(projectRoot), "utf8");
+  const startupNotice = readState(projectRoot).state_meta.startup_notice;
+  const presentation = optionsPresentation([
+    decisionOption("Audit the data", "data_audit"),
+    decisionOption("Review the domain", "domain_expert"),
+  ]);
 
   expectFailure(finish(projectRoot, started, {
     project_summary: { title: "Must not be committed" },
-  }, { env: { STATECTL_FAIL_BEFORE_RENAME: "1" } }), "INJECTED_WRITE_FAILURE");
+  }, {
+    env: { STATECTL_FAIL_BEFORE_RENAME: "1" },
+    presentation,
+  }), "INJECTED_WRITE_FAILURE");
 
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+  const failedState = readState(projectRoot);
+  assert.deepEqual(failedState.state_meta.startup_notice, startupNotice);
+  assert.equal(failedState.pending_decision, null);
+  assert.equal(failedState.response_receipt, null);
   assert.deepEqual(
     fs.readdirSync(projectRoot).filter((name) => name.startsWith(".project_state.yaml.tmp-")),
     [],
@@ -1754,11 +1904,19 @@ test("atomic finish failure preserves a resumable lead operation and removes tem
   const resumed = expectSuccess(execute(projectRoot, "open"), "RESUME_LEAD");
   assert.equal(resumed.revision, started.revision);
   assert.equal(resumed.active_operation.id, started.operation_id);
+  assert.deepEqual(readState(projectRoot).state_meta.startup_notice, startupNotice);
 
-  expectSuccess(finish(projectRoot, started, {
+  const closed = expectSuccess(finish(projectRoot, started, {
     project_summary: { title: "Committed after retry" },
   }), "OPERATION_FINISHED");
-  assert.equal(readState(projectRoot).project_summary.title, "Committed after retry");
+  assert.equal(
+    closed.response_markdown.match(/\[Causal-Consultant Loaded\]/g)?.length,
+    1,
+  );
+  const committedState = readState(projectRoot);
+  assert.equal(committedState.project_summary.title, "Committed after retry");
+  assert.equal(committedState.state_meta.startup_notice, null);
+  assert.equal(committedState.response_receipt.response_markdown, closed.response_markdown);
 });
 
 test("bundled stop hook validates strictly without external YAML modules", async (t) => {
@@ -1777,6 +1935,19 @@ test("bundled stop hook validates strictly without external YAML modules", async
   await t.test("idle valid state passes", () => {
     const projectRoot = temporaryProject(t);
     expectSuccess(execute(projectRoot, "open"), "CREATED");
+    assert.deepEqual(runHook(projectRoot), { suppressOutput: true });
+  });
+
+  await t.test("idle pending decision passes", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const lead = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    expectSuccess(finish(projectRoot, lead, {}, {
+      presentation: optionsPresentation([
+        decisionOption("Audit the data", "data_audit"),
+        decisionOption("Review the domain", "domain_expert"),
+      ]),
+    }), "OPERATION_FINISHED");
     assert.deepEqual(runHook(projectRoot), { suppressOutput: true });
   });
 
@@ -2613,7 +2784,7 @@ test("--discard-legacy-plan is rejected when no legacy v4.5 state exists", async
     assert.equal(fs.existsSync(statePath(projectRoot)), false);
   });
 
-  await t.test("current v2 state", () => {
+  await t.test("current v3 state", () => {
     const projectRoot = temporaryProject(t);
     expectSuccess(execute(projectRoot, "open"), "CREATED");
     const before = fs.readFileSync(statePath(projectRoot), "utf8");
@@ -2623,4 +2794,586 @@ test("--discard-legacy-plan is rejected when no legacy v4.5 state exists", async
     assert.match(failure.message, /applies only to a recognized unversioned v4\.5 state/);
     assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
   });
+});
+
+test("finish renders the existing response shell and persists numbered choices atomically", async (t) => {
+  await t.test("response without options", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const started = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    const closed = expectSuccess(finish(projectRoot, started), "OPERATION_FINISHED");
+
+    assert.equal(closed.revision, 2);
+    assert.equal(closed.pending_decision, null);
+    assert.equal(
+      closed.response_markdown,
+      [
+        "[Causal-Consultant Loaded] This is a new project. Causal analysis team ready.",
+        "",
+        "[> Framing]",
+        "The current operation is complete.",
+        "",
+        "[! Boundary]",
+        "No additional boundary changed.",
+        "",
+        "[? Next Steps]",
+        "Continue with the next requested step.",
+      ].join("\n"),
+    );
+    const state = readState(projectRoot);
+    assert.equal(state.pending_decision, null);
+    assert.equal(state.response_receipt.operation_id, started.operation_id);
+    assert.equal(state.response_receipt.revision, closed.revision);
+    assert.equal(state.response_receipt.response_markdown, closed.response_markdown);
+    expectSuccess(execute(projectRoot, "open"), "OPENED");
+    const recovered = readState(projectRoot).response_receipt;
+    assert.equal(
+      recovered.response_markdown,
+      closed.response_markdown,
+    );
+  });
+
+  await t.test("response with options", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const started = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    const presentation = optionsPresentation([
+      decisionOption("Audit the data", "data_audit"),
+      decisionOption("Review the domain", "domain_expert"),
+    ]);
+    const closed = expectSuccess(finish(projectRoot, started, {}, { presentation }), "OPERATION_FINISHED");
+
+    assert.equal(closed.revision, 2);
+    assert.equal(
+      closed.response_markdown,
+      [
+        "[OK Confirmed] The current operation is complete.",
+        "",
+        "[Causal-Consultant Loaded] This is a new project. Causal analysis team ready.",
+        "",
+        "[> Framing]",
+        "There are multiple useful ways to continue.",
+        "",
+        "[+ Consultant Options]",
+        "    1. Audit the data",
+        "       Consultant read: Audit the data is currently supportable.",
+        "       Tradeoff: Audit the data uses this operation.",
+        "    2. Review the domain",
+        "       Consultant read: Review the domain is currently supportable.",
+        "       Tradeoff: Review the domain uses this operation.",
+        "",
+        "[! Boundary]",
+        "Each choice starts one operation and preserves the current evidence boundary.",
+        "",
+        "[? Next Steps]",
+        "Choose one of the options.",
+      ].join("\n"),
+    );
+
+    const pending = closed.pending_decision;
+    assert.match(pending.decision_id, /^[0-9a-f-]{36}$/);
+    assert.equal(pending.source_operation_id, started.operation_id);
+    assert.match(pending.created_at, /^\d{4}-\d{2}-\d{2}T/);
+    assert.deepEqual(pending.options.map((option) => option.number), [1, 2]);
+    assert.deepEqual(
+      pending.options.map((option) => Object.keys(option)),
+      [["number", "assignment"], ["number", "assignment"]],
+    );
+    assert.deepEqual(pending.options[0].assignment, {
+      route: "data_audit",
+      support: null,
+      intent_summary: "Exercise audit the data",
+      scope_ref: null,
+    });
+
+    const committedBytes = fs.readFileSync(statePath(projectRoot), "utf8");
+    const committed = readState(projectRoot);
+    assert.deepEqual(committed.pending_decision, pending);
+    assert.equal(committed.response_receipt.operation_id, started.operation_id);
+    assert.equal(committed.response_receipt.revision, closed.revision);
+    assert.equal(committed.response_receipt.response_markdown, closed.response_markdown);
+    const reopened = expectSuccess(execute(projectRoot, "open"), "OPENED");
+    assert.equal(reopened.mode, "idle");
+    assert.equal(Object.hasOwn(reopened, "pending_decision"), false);
+    assert.equal(Object.hasOwn(reopened, "response_receipt"), false);
+    assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), committedBytes);
+    const validated = expectSuccess(execute(projectRoot, "validate"), "VALID");
+    assert.deepEqual(validated.pending_decision, pending);
+    assert.deepEqual(validated.response_receipt, committed.response_receipt);
+  });
+
+  await t.test("subsequent response omits the fresh-project welcome", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const first = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    const initialized = expectSuccess(finish(projectRoot, first), "OPERATION_FINISHED");
+    assert.equal(
+      initialized.response_markdown.match(/\[Causal-Consultant Loaded\]/g)?.length,
+      1,
+    );
+    const initializedState = readState(projectRoot);
+    assert.equal(initializedState.project_summary.title, null);
+    assert.equal(initializedState.state_meta.startup_notice, null);
+    const second = expectSuccess(begin(projectRoot, initialized, "team_lead"), "BEGAN_LEAD");
+    const presentation = {
+      ...DEFAULT_PRESENTATION,
+      confirmation: "The follow-up is complete.",
+    };
+    const closed = expectSuccess(
+      finish(projectRoot, second, {}, { presentation }),
+      "OPERATION_FINISHED",
+    );
+
+    assert.equal(
+      closed.response_markdown,
+      [
+        "[OK Confirmed] The follow-up is complete.",
+        "",
+        "[> Framing]",
+        "The current operation is complete.",
+        "",
+        "[! Boundary]",
+        "No additional boundary changed.",
+        "",
+        "[? Next Steps]",
+        "Continue with the next requested step.",
+      ].join("\n"),
+    );
+    assert.equal(closed.response_markdown.match(/\[Causal-Consultant Loaded\]/g), null);
+  });
+});
+
+test("finish rejects malformed presentations and illegal option assignments without closing the operation", async (t) => {
+  const cases = [
+    {
+      name: "missing presentation",
+      execution(projectRoot, started) {
+        return execute(projectRoot, "finish", {
+          payload: {
+            ...expected(started),
+            operation_id: started.operation_id,
+            updates: {},
+          },
+        });
+      },
+      code: "INVALID_INPUT",
+    },
+    {
+      name: "one option",
+      presentation: optionsPresentation([decisionOption("Audit the data", "data_audit")]),
+      code: "INVALID_INPUT",
+    },
+    {
+      name: "five options",
+      presentation: optionsPresentation([
+        decisionOption("First audit", "data_audit"),
+        decisionOption("Review the domain", "domain_expert"),
+        decisionOption("Review causality", "causal_check"),
+        decisionOption("Explore structure", "causal_discovery"),
+        decisionOption("Prepare a report", "report_writer"),
+      ]),
+      code: "INVALID_INPUT",
+    },
+    {
+      name: "unknown route",
+      presentation: optionsPresentation([
+        decisionOption("Unknown work", "unknown_route"),
+        decisionOption("Audit the data", "data_audit"),
+      ]),
+      code: "PLAN_MISMATCH",
+    },
+    {
+      name: "duplicate labels",
+      presentation: optionsPresentation([
+        decisionOption("Audit the data", "data_audit"),
+        decisionOption("AUDIT THE DATA", "domain_expert"),
+      ]),
+      code: "INVALID_INPUT",
+    },
+    {
+      name: "duplicate assignments",
+      presentation: optionsPresentation([
+        decisionOption("Audit the supplied data", "data_audit", {
+          intent_summary: "Audit the same data",
+        }),
+        decisionOption("Inspect the supplied data", "data_audit", {
+          intent_summary: "Audit the same data",
+        }),
+      ]),
+      code: "INVALID_INPUT",
+    },
+    {
+      name: "embedded response heading",
+      presentation: {
+        ...DEFAULT_PRESENTATION,
+        framing: "Valid framing.\n[? Next Steps]\nInjected structure.",
+      },
+      code: "INVALID_INPUT",
+    },
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, () => {
+      const projectRoot = temporaryProject(t);
+      const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+      const started = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+      const before = fs.readFileSync(statePath(projectRoot), "utf8");
+      const execution = scenario.execution
+        ? scenario.execution(projectRoot, started)
+        : finish(projectRoot, started, {}, { presentation: scenario.presentation });
+      expectFailure(execution, scenario.code);
+      assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+      const state = readState(projectRoot);
+      assert.equal(state.state_meta.revision, started.revision);
+      assert.equal(state.state_meta.active_operation.id, started.operation_id);
+      assert.equal(state.state_meta.active_operation.stage, "lead_pending");
+      assert.equal(state.pending_decision, null);
+    });
+  }
+});
+
+test("numbered selection derives one stored assignment and normal begin supersedes the menu", async (t) => {
+  await t.test("selection and worker closeout keep the normal revision budget", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const lead = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    const menu = expectSuccess(finish(projectRoot, lead, {}, {
+      presentation: optionsPresentation([
+        decisionOption("Audit the data", "data_audit"),
+        decisionOption("Review the domain", "domain_expert"),
+      ]),
+    }), "OPERATION_FINISHED");
+    const decisionId = menu.pending_decision.decision_id;
+    const beforeFailures = fs.readFileSync(statePath(projectRoot), "utf8");
+
+    expectFailure(beginSelection(projectRoot, menu, crypto.randomUUID(), 2), "STALE_DECISION");
+    expectFailure(beginSelection(projectRoot, menu, decisionId, 9), "INVALID_DECISION_OPTION");
+    expectFailure(beginSelection(projectRoot, menu, decisionId, 2, {
+      route: "data_audit",
+      intent_summary: "Caller override must be rejected",
+    }), "INVALID_INPUT");
+    assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeFailures);
+
+    const selected = expectSuccess(
+      beginSelection(projectRoot, menu, decisionId, 2),
+      "BEGAN_WORKER",
+    );
+    assert.equal(selected.revision, menu.revision + 1);
+    assert.deepEqual(selected.plan, [{ id: "domain_expert" }, { id: "team_lead" }]);
+    let state = readState(projectRoot);
+    assert.equal(state.pending_decision, null);
+    assert.equal(state.response_receipt, null);
+    assert.equal(state.state_meta.active_operation.intent_summary, "Exercise review the domain");
+
+    const applied = expectSuccess(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(selected),
+        operation_id: selected.operation_id,
+        actor: "domain_expert",
+        updates: {
+          domain_knowledge: {
+            domain_checked: "limited",
+            domain_scope: "Selection revision test",
+          },
+          council_chamber: {
+            domain_expert: {
+              current_status: "limited",
+              summary: "The selected domain review completed.",
+              questions_for_user: [],
+              feedback_to_route: [],
+            },
+          },
+        },
+      },
+    }), "WORKER_APPLIED");
+    const closed = expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+    assert.equal(closed.revision, menu.revision + 3);
+    state = readState(projectRoot);
+    assert.equal(state.pending_decision, null);
+    assert.equal(state.domain_knowledge.domain_checked, "limited");
+  });
+
+  await t.test("ordinary begin supersedes the menu only after a successful commit", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const lead = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    const menu = expectSuccess(finish(projectRoot, lead, {}, {
+      presentation: optionsPresentation([
+        decisionOption("Audit the data", "data_audit"),
+        decisionOption("Review the domain", "domain_expert"),
+      ]),
+    }), "OPERATION_FINISHED");
+    const before = fs.readFileSync(statePath(projectRoot), "utf8");
+
+    expectFailure(begin(projectRoot, menu, "unknown_route"), "PLAN_MISMATCH");
+    assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+    assert.notEqual(readState(projectRoot).pending_decision, null);
+
+    const started = expectSuccess(begin(projectRoot, menu, "data_audit"), "BEGAN_WORKER");
+    assert.equal(started.revision, menu.revision + 1);
+    assert.equal(readState(projectRoot).pending_decision, null);
+    assert.equal(readState(projectRoot).response_receipt, null);
+    expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+
+    const idle = expectSuccess(execute(projectRoot, "open"), "OPENED");
+    expectFailure(beginSelection(projectRoot, idle, menu.pending_decision.decision_id, 1), "NO_PENDING_DECISION");
+  });
+});
+
+test("choice-based execution revalidates the exact current scope before binding approval", async (t) => {
+  await t.test("current scope", () => {
+    const projectRoot = temporaryProject(t);
+    const prepared = prepareAnalysisScope(projectRoot);
+    const lead = expectSuccess(begin(projectRoot, prepared, "team_lead"), "BEGAN_LEAD");
+    const menu = expectSuccess(finish(projectRoot, lead, {}, {
+      presentation: optionsPresentation([
+        decisionOption("Run the prepared analysis", `analysis_execution.${prepared.design}`, {
+          support: prepared.support,
+          scope_ref: prepared.scope_ref,
+        }),
+        decisionOption("Audit the data again", "data_audit"),
+      ]),
+    }), "OPERATION_FINISHED");
+
+    const selected = expectSuccess(
+      beginSelection(projectRoot, menu, menu.pending_decision.decision_id, 1),
+      "BEGAN_WORKER",
+    );
+    const state = readState(projectRoot);
+    assert.deepEqual(state.state_meta.active_operation.scope_ref, prepared.scope_ref);
+    assert.deepEqual(state.next_step_plan, [
+      { id: `analysis_execution.${prepared.design}`, support: prepared.support },
+      { id: "team_lead" },
+    ]);
+    expectSuccess(finish(projectRoot, selected, {}, { cancel: true }), "OPERATION_CANCELLED");
+  });
+
+  await t.test("scope changed after presentation", () => {
+    const projectRoot = temporaryProject(t);
+    const prepared = prepareAnalysisScope(projectRoot);
+    const lead = expectSuccess(begin(projectRoot, prepared, "team_lead"), "BEGAN_LEAD");
+    const menu = expectSuccess(finish(projectRoot, lead, {}, {
+      presentation: optionsPresentation([
+        decisionOption("Run the prepared analysis", `analysis_execution.${prepared.design}`, {
+          support: prepared.support,
+          scope_ref: prepared.scope_ref,
+        }),
+        decisionOption("Audit the data again", "data_audit"),
+      ]),
+    }), "OPERATION_FINISHED");
+
+    const changed = readState(projectRoot);
+    changed.council_chamber.analysis_execution[prepared.design].scope_revision += 1;
+    writeState(projectRoot, changed);
+    const before = fs.readFileSync(statePath(projectRoot), "utf8");
+    expectFailure(
+      beginSelection(projectRoot, menu, menu.pending_decision.decision_id, 1),
+      "SCOPE_MISMATCH",
+    );
+    assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+    assert.deepEqual(readState(projectRoot).pending_decision, menu.pending_decision);
+  });
+});
+
+test("schema-2 migration preserves idle and active route boundaries", async (t) => {
+  for (const scenario of [
+    { name: "idle", route: null, mode: "idle" },
+    { name: "worker pending", route: "data_audit", mode: "resume_worker" },
+    { name: "lead pending", route: "team_lead", mode: "resume_lead" },
+  ]) {
+    await t.test(scenario.name, () => {
+      const projectRoot = temporaryProject(t);
+      const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+      if (scenario.route !== null) {
+        expectSuccess(
+          begin(projectRoot, opened, scenario.route),
+          scenario.route === "team_lead" ? "BEGAN_LEAD" : "BEGAN_WORKER",
+        );
+      }
+      const v3 = readState(projectRoot);
+      const priorOperation = v3.state_meta.active_operation;
+      const priorPlan = v3.next_step_plan;
+      const v2 = downgradeCurrentStateToV2(projectRoot);
+      const original = fs.readFileSync(statePath(projectRoot), "utf8");
+
+      const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V2");
+      assert.equal(fs.readFileSync(migrated.archive_path, "utf8"), original);
+      assert.equal(migrated.project_id, v2.state_meta.project_id);
+      assert.equal(migrated.revision, v2.state_meta.revision + 1);
+      assert.equal(migrated.mode, scenario.mode);
+      assert.deepEqual(migrated.active_operation, priorOperation);
+      assert.deepEqual(migrated.plan, priorPlan);
+
+      const current = readState(projectRoot);
+      assert.equal(current.state_meta.schema_version, 3);
+      assert.equal(current.state_meta.project_id, v2.state_meta.project_id);
+      assert.equal(current.state_meta.revision, v2.state_meta.revision + 1);
+      assert.equal(current.state_meta.startup_notice, null);
+      assert.deepEqual(current.state_meta.active_operation, priorOperation);
+      assert.deepEqual(current.next_step_plan, priorPlan);
+      assert.equal(current.pending_decision, null);
+      assert.equal(current.response_receipt, null);
+      for (const section of [
+        "project_summary",
+        "council_chamber",
+        "data_facts",
+        "domain_knowledge",
+        "causal_facts",
+        "discovery_sidecar",
+        "report_assembly",
+        "artifact_records",
+      ]) {
+        assert.deepEqual(current[section], v2[section], `${section} changed during v2 migration`);
+      }
+
+      const migratedBytes = fs.readFileSync(statePath(projectRoot), "utf8");
+      const reopened = expectSuccess(
+        execute(projectRoot, "open"),
+        scenario.mode === "resume_worker"
+          ? "RESUME_WORKER"
+          : scenario.mode === "resume_lead"
+            ? "RESUME_LEAD"
+            : "OPENED",
+      );
+      assert.equal(reopened.mode, scenario.mode);
+      assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), migratedBytes);
+    });
+  }
+
+  await t.test("invalid v2 state fails closed", () => {
+    const projectRoot = temporaryProject(t);
+    expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const invalid = downgradeCurrentStateToV2(projectRoot);
+    invalid.next_step_plan = [{ id: "data_audit" }];
+    writeState(projectRoot, invalid);
+    const original = fs.readFileSync(statePath(projectRoot), "utf8");
+
+    expectFailure(execute(projectRoot, "open"), "PLAN_MISMATCH");
+    assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), original);
+  });
+
+  await t.test("artifact diagnostics fail before migration archives or replaces state", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+    const v2 = downgradeCurrentStateToV2(projectRoot);
+    v2.state_meta.active_operation.artifact_intent = {
+      kind: "file",
+      location: "output/../escape.csv",
+    };
+    writeState(projectRoot, v2);
+    const original = fs.readFileSync(statePath(projectRoot));
+    const archiveDirectory = path.join(projectRoot, "project_state.archives");
+
+    expectFailure(execute(projectRoot, "open"), "INVALID_ARTIFACT_PATH");
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), original);
+    assert.equal(fs.existsSync(archiveDirectory), false);
+  });
+});
+
+test("reset and cancellation handle pending choices without resurrection", async (t) => {
+  await t.test("reset archives the decision and clears it", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const lead = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    const menu = expectSuccess(finish(projectRoot, lead, {}, {
+      presentation: optionsPresentation([
+        decisionOption("Audit the data", "data_audit"),
+        decisionOption("Review the domain", "domain_expert"),
+      ]),
+    }), "OPERATION_FINISHED");
+    const original = fs.readFileSync(statePath(projectRoot), "utf8");
+
+    const reset = expectSuccess(execute(projectRoot, "open", { args: ["--fresh"] }), "RESET");
+    assert.equal(fs.readFileSync(reset.archive_path, "utf8"), original);
+    assert.notEqual(reset.project_id, menu.project_id);
+    assert.equal(readState(projectRoot).pending_decision, null);
+    assert.equal(readState(projectRoot).response_receipt, null);
+  });
+
+  await t.test("cancelling selected work does not restore the consumed decision", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const lead = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    const menu = expectSuccess(finish(projectRoot, lead, {}, {
+      presentation: optionsPresentation([
+        decisionOption("Audit the data", "data_audit"),
+        decisionOption("Review the domain", "domain_expert"),
+      ]),
+    }), "OPERATION_FINISHED");
+    const selected = expectSuccess(
+      beginSelection(projectRoot, menu, menu.pending_decision.decision_id, 1),
+      "BEGAN_WORKER",
+    );
+    const cancelled = expectSuccess(
+      finish(projectRoot, selected, {}, { cancel: true }),
+      "OPERATION_CANCELLED",
+    );
+    assert.equal(cancelled.pending_decision, null);
+    assert.equal(readState(projectRoot).pending_decision, null);
+  });
+
+  await t.test("cancellation may publish a new bounded decision", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const started = expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+    const presentation = optionsPresentation([
+      decisionOption("Review the domain", "domain_expert"),
+      decisionOption("Clarify the objective", "team_lead"),
+    ]);
+    const cancelled = expectSuccess(
+      finish(projectRoot, started, {}, { cancel: true, presentation }),
+      "OPERATION_CANCELLED",
+    );
+    assert.equal(cancelled.pending_decision.source_operation_id, started.operation_id);
+    assert.deepEqual(
+      cancelled.pending_decision.options.map((option) => option.number),
+      [1, 2],
+    );
+    assert.deepEqual(readState(projectRoot).pending_decision, cancelled.pending_decision);
+  });
+});
+
+test("strict validation rejects pending choices beside an active operation", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const lead = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+  const menu = expectSuccess(finish(projectRoot, lead, {}, {
+    presentation: optionsPresentation([
+      decisionOption("Audit the data", "data_audit"),
+      decisionOption("Review the domain", "domain_expert"),
+    ]),
+  }), "OPERATION_FINISHED");
+  const pending = readState(projectRoot).pending_decision;
+  const started = expectSuccess(begin(projectRoot, menu, "data_audit"), "BEGAN_WORKER");
+  const invalid = readState(projectRoot);
+  invalid.pending_decision = pending;
+  writeState(projectRoot, invalid);
+  const before = fs.readFileSync(statePath(projectRoot), "utf8");
+
+  expectFailure(execute(projectRoot, "validate"), "INVALID_STATE");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+  assert.equal(started.stage, "worker_pending");
+});
+
+test("strict validation rejects duplicate pending assignments", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const lead = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+  expectSuccess(finish(projectRoot, lead, {}, {
+    presentation: optionsPresentation([
+      decisionOption("Audit the data", "data_audit"),
+      decisionOption("Review the domain", "domain_expert"),
+    ]),
+  }), "OPERATION_FINISHED");
+
+  const invalid = readState(projectRoot);
+  invalid.pending_decision.options[1].assignment = structuredClone(
+    invalid.pending_decision.options[0].assignment,
+  );
+  writeState(projectRoot, invalid);
+  const before = fs.readFileSync(statePath(projectRoot), "utf8");
+
+  expectFailure(execute(projectRoot, "validate"), "INVALID_STATE");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
 });
