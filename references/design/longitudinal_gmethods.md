@@ -4,7 +4,7 @@ Use this file to plan or review a longitudinal causal analysis: repeated treatme
 
 This design route is the accountable owner for whether analysis execution remains consistent with the longitudinal study design. Support routes may add analytic tools, but they must stay inside this design scope.
 
-Work in this order: construct the time grid, order histories, define the strategy, verify time-varying confounding and censoring, audit support over histories, choose an estimator lane, run required diagnostics, then set the claim boundary. Do not collapse a longitudinal problem into a baseline contrast unless the target truly permits it.
+Work in this order: construct the time grid, order histories, define the strategy, verify time-varying confounding and censoring, audit support over histories, choose an estimator lane, specify required diagnostics, then set the claim boundary. Do not collapse a longitudinal problem into a baseline contrast unless the target truly permits it.
 
 Runtime contract: follow `references/design_execution_contract.md` using design
 id `longitudinal_gmethods`. Keep any named support route inside this
@@ -49,7 +49,7 @@ Facts that usually must be inspected, not merely assumed: time ordering, history
 - `implementation_twist`: use MSM/IPW, sequential g-formula, longitudinal TMLE, LMTP, sequential regression, or structural nested models only after the sequential data contract is clear.
 - `fallback_twist`: if histories, time ordering, support, or censoring cannot sustain g-methods, use trajectory audit, descriptive history summaries, simpler point-treatment target, or future-data plan.
 
-## Required Diagnostics
+## Diagnostics for Approved Execution
 
 Perform the analytic diagnostics relevant to the longitudinal design and chosen estimator lane:
 

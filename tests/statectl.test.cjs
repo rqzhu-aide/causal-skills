@@ -1074,6 +1074,33 @@ test("every worker rejects writes outside its owned state", async (t) => {
   }
 });
 
+test("causal-check cannot create or revise an analysis scope", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "causal_check"), "BEGAN_WORKER");
+  const before = fs.readFileSync(statePath(projectRoot), "utf8");
+
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "causal_check",
+      updates: {
+        council_chamber: {
+          analysis_execution: {
+            single_time_observational: {
+              current_status: "ready",
+              summary: "An approval-ready scope was prepared.",
+            },
+          },
+        },
+      },
+    },
+  }), "OWNERSHIP_VIOLATION");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+  expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
 test("every core worker apply requires a matching chamber handoff with status", async (t) => {
   for (const actor of ["data_audit", "domain_expert", "causal_check", "causal_discovery"]) {
     await t.test(actor, () => {
@@ -2866,7 +2893,7 @@ test("finish renders the existing response shell and persists numbered choices a
         "Each choice starts one operation and preserves the current evidence boundary.",
         "",
         "[? Next Steps]",
-        "Choose one of the options.",
+        "Choose one option, or suggest another action.",
       ].join("\n"),
     );
 
@@ -3007,6 +3034,25 @@ test("finish rejects malformed presentations and illegal option assignments with
       presentation: {
         ...DEFAULT_PRESENTATION,
         framing: "Valid framing.\n[? Next Steps]\nInjected structure.",
+      },
+      code: "INVALID_INPUT",
+    },
+    {
+      name: "multiline next steps",
+      presentation: {
+        ...DEFAULT_PRESENTATION,
+        next_steps: "Answer the first question.\nThen answer the second question.",
+      },
+      code: "INVALID_INPUT",
+    },
+    {
+      name: "multiline menu next steps",
+      presentation: {
+        ...optionsPresentation([
+          decisionOption("Audit the data", "data_audit"),
+          decisionOption("Review the domain", "domain_expert"),
+        ]),
+        next_steps: "Choose one option.\nOr request another action.",
       },
       code: "INVALID_INPUT",
     },

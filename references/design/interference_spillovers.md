@@ -47,7 +47,7 @@ Facts that usually must be inspected, not merely assumed: exposure map, timing, 
 - `implementation_twist`: use two-stage randomized estimators, partial-interference IPW, exposure-mapping estimators, network/spatial robust inference, generalized propensity, AIPW/TMLE-style logic, or randomization inference only when the design supports them.
 - `fallback_twist`: if exposure mapping, support, timing, or dependence fails, use contamination audit, descriptive spillover map, or recommendation to repair another design's no-interference assumption.
 
-## Required Diagnostics
+## Diagnostics for Approved Execution
 
 Perform the analytic diagnostics relevant to the interference design and chosen estimator lane:
 

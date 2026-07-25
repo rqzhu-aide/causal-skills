@@ -11,9 +11,13 @@ manager synthesis and the only user-facing response belong to
 `<skill-root>/scripts/statectl.cjs` for every state operation; never edit
 `project_state.yaml` directly.
 
-Only an approval-bound `analysis_execution` operation may compute a new result
-that estimates or tests the target analysis. Other routes may inspect inputs,
-assess route-owned readiness or support, and summarize completed artifacts.
+Only `analysis_execution` may prepare or revise an analysis scope. A target
+result is any new quantity, comparison, model-fit result, or test intended as
+an answer to an `analysis_execution` target or a refinement of it. Only an
+`analysis_execution` operation bound to an exact ready scope may compute one.
+Other routes may inspect inputs, assess route-owned readiness with input- or
+design-feasibility diagnostics, run only their expressly allowed non-target
+work, and summarize completed artifacts.
 
 ## Turn Protocol
 
@@ -72,7 +76,8 @@ assess route-owned readiness or support, and summarize completed artifacts.
 9. Each assistant turn handles at most one operation, whether newly begun or
    resumed. A rejected `begin` may be corrected or rerouted only before any
    `begin` succeeds. Once one succeeds, that operation consumes the turn. After
-   `finish` succeeds, emit its `response_markdown` exactly and stop; do not run
+   `finish` succeeds, use its `response_markdown` verbatim as the complete
+   assistant message and stop; do not rewrite or surround it, and do not run
    `open` or `begin` again until a new user message. The sole
    exception is a read-only preflight-failure response when no operation can be
    opened. An ordinary validation rejection from `reserve-artifact`, `apply`,

@@ -43,9 +43,9 @@ claim boundaries, and route implications.
 
 ## Readiness And Method Route Logic
 
-When the task requires method recommendation, analysis planning, or execution
-readiness, load `references/method_route_catalog.yaml` and use route IDs exactly
-as written in `route_index.yaml`.
+When the task requires causal readiness or a design/support recommendation,
+load `references/method_route_catalog.yaml` and use route IDs exactly as written
+in `route_index.yaml`.
 
 Do not recommend a method route merely because the user named it. Treat the
 latest explicit user target as current; intended use or a preferred alternative
@@ -81,10 +81,10 @@ empty, keep `analysis_readiness: not_ready`, and record the smallest fact or
 decision that would distinguish them. Do not recommend another `causal_check`
 turn without naming that missing discriminator.
 
-Presence in `recommended_method_routes` means the route is worth scope review,
-not that it is already approved or sufficient. Use `route_cautions` for
-non-obvious project-specific issues that could make the route wrong, narrower,
-or require special handling.
+`recommended_method_routes` identifies the design eligible for later scope
+review by `analysis_execution`; it is not a prepared scope, approval, or proof
+of sufficiency. Use `route_cautions` for non-obvious project-specific issues
+that could make the route wrong, narrower, or require special handling.
 
 Set `analysis_readiness: ready` or `limited`, and write mature
 `recommended_method_routes`, only when `data_facts.data_checked` and
@@ -115,7 +115,7 @@ Submit supported `causal_facts` fields when supported by the request:
 - `causal_checked`: `passing`, `limited`, or `blocked`; leave `not_checked`
   only if no causal check work occurred.
 - `analysis_readiness`: `ready`, `limited`, `not_ready`, or `blocked` when the
-  task involves analysis planning, execution, or method selection.
+  task requires causal readiness or design/support selection.
 - `causal_question`, `exposure_or_intervention`, `outcome`, `estimand`.
 - `assumptions`: compact bullets for assumptions that most affect the current
   claim or analysis path.
@@ -150,7 +150,7 @@ Set:
 
 Keep chamber feedback short, decision-facing, grounded in `causal_facts`,
 data/domain state, or current uncertainty, and free of schema labels. When
-analysis planning or execution was requested, summarize the recommended
+analysis readiness or method selection was requested, summarize the recommended
 design/support direction, why only a non-causal fallback is mature, or why no
 method reaches the limited threshold.
 
@@ -161,14 +161,15 @@ need plainly instead of implying a teammate can already review it.
 
 ## Boundaries
 
-This route may inspect data and completed evidence and compute only diagnostics
-whose output determines causal support or analysis readiness. A new calculation
-that estimates or tests the requested target, including a new subgroup or
-interaction contrast, is target analysis and requires approval-bound
-`analysis_execution`. Existing approved artifact results may be cited without
-recomputation or extension. Store identification, support, readiness, and claim
-boundaries in `causal_facts`, not target-analysis results. This route does not
-choose final report wording or create outputs.
+This route may inspect inputs, completed evidence, and input- or
+design-feasibility diagnostics. It must not compute a target result: any new
+quantity, comparison, model-fit result, or test intended as an answer to an
+`analysis_execution` target or a refinement of it, including a raw or adjusted
+association or a subgroup or interaction contrast. Existing approved artifact
+results may be cited without recomputation or extension. Store identification,
+support, readiness, and claim boundaries in `causal_facts`, not target-analysis
+results. This route does not choose final report wording, prepare analysis
+scopes, or create outputs.
 
 Do not create output folders or `artifact_records` entries from `causal_check`
 work. Do not let team-review suggestions crowd out a critical causal boundary,

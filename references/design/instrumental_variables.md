@@ -47,7 +47,7 @@ Facts that usually must be inspected, not merely assumed: instrument timing, fir
 - `implementation_twist`: use 2SLS, LIML, Fuller, weak-robust intervals, IV-DML, MR-Egger/median/mode, or multivariable MR only after the IV assumptions and target are clear.
 - `fallback_twist`: if relevance, timing, exclusion, monotonicity, or MR assumptions fail, use ITT/reduced form, sensitivity memo, descriptive association, or stronger-design recommendation.
 
-## Required Diagnostics
+## Diagnostics for Approved Execution
 
 Perform the analytic diagnostics relevant to the IV design and chosen estimator lane:
 

@@ -28,6 +28,11 @@ supplied scope identity. The design route decides whether the assignment
 prepares scope, revises scope, blocks, or executes; the controller never
 interprets approval.
 
+This scope decision governs every implementation, diagnostic, package, and
+output instruction in the selected design and support references. Without an
+exact bound ready `scope_ref`, treat those instructions as scope content only;
+do not run them or compute target results.
+
 - Execute only when `state_meta.active_operation.scope_ref` is present and
   exactly matches that ready slot's `scope_id` and `scope_revision`. The model
   made the approval decision before `begin`; the persisted binding carries that

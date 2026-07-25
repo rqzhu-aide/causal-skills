@@ -150,8 +150,10 @@ For exploration:
   rows, a data dictionary, or a concrete dataset description is provided. Also
   plan it for timing, leakage, missingness, dependence, support/positivity, data
   validity, or feasible restructuring questions.
-- Plan `causal_check` when the user gives a causal question, claim, exposure,
-  intervention, outcome, estimand, assumption, target analysis, or method idea.
+- Plan `causal_check` when the causal target, claim boundary, analysis
+  readiness, or current design/support recommendation must be established or
+  refreshed. When those are current and uniquely identify an eligible design,
+  use `analysis_routing_workflow.md` for scope work.
 - Plan `domain_expert` when the user gives a domain, setting, population,
   construct, measurement, endpoint, integration issue, field-practice question,
   common-practice question, precedent, reporting norm, or standard outcome.

@@ -1,8 +1,8 @@
 # Team Lead Analysis Flow
 
 Load this reference only when the plan includes `analysis_execution.<design_id>`,
-the user asks about analysis approval/execution, or analysis output changed this
-turn.
+the user asks about an analysis scope, approval/execution, or analysis output
+changed this turn.
 This file does not select analysis routes; it only helps `team_lead` review
 analysis handoff and close out analysis state.
 
@@ -24,12 +24,12 @@ When `next_step_plan` contains an `analysis_execution.<design_id>` entry, parse
 - any `analysis_execution` artifact record whose `operation_id` matches the
   active operation
 
-For a team-lead-only question about prior analysis, apply `team_lead.md`'s
-prior-work rule; do not claim that it belongs to the current operation.
-
-Null or `requested` is a pre-work or legacy marker, not a normal committed
-worker handoff. If a planned route observes either, no completed analysis
-handoff exists; explain the boundary using only visible state.
+Only a committed `analysis_execution.<design_id>` worker handoff establishes
+that the current operation prepared or revised an analysis scope. In a
+team-lead-only or core-route operation, an existing analysis handoff is prior
+work, not work completed this round. A missing handoff or null or `requested`
+status means no completed scope handoff exists; state that boundary and do not
+offer approval or execution.
 
 If the analysis scope status is `ready`, no output should have been created for
 this operation. Before offering approval, check that its target, design,
@@ -45,8 +45,7 @@ family, main diagnostics, main output, and claim boundary. Translate design and
 support into plain user-facing method language. Do not expose route IDs, state
 field names or values, scope IDs or revisions, or controller mechanics unless
 the user asks. Present the stored ready default faithfully; do not invent or
-negate a consequential scope choice. If the handoff or chamber slot is missing,
-do not imply hidden scope was shown; use only the visible plan entry.
+negate a consequential scope choice.
 
 If the analysis scope status is `blocked`, explain the blocker in the
 presentation and ask for the smallest useful clarification, data detail, design

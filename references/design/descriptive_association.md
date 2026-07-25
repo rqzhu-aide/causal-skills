@@ -61,7 +61,7 @@ Common choices:
 
 Report effect sizes and uncertainty next to p-values. Do not treat multiplicity-adjusted significance as causal evidence.
 
-## Required Diagnostics
+## Diagnostics for Approved Execution
 
 Run or request the diagnostics relevant to the approved lane:
 

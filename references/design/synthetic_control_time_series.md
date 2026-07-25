@@ -46,7 +46,7 @@ Facts that usually must be inspected, not merely assumed: pre-period fit, donor 
 - `implementation_twist`: use classic SCM, augmented SCM, generalized SCM, synthetic DiD, matrix completion, BSTS/CausalImpact, comparative ITS, or treated-only ITS only when the data structure fits.
 - `fallback_twist`: if donor pool, pre-period, intervention timing, measurement stability, or shocks fail, use descriptive time-series audit, donor feasibility memo, or DiD/ITS caveat.
 
-## Required Diagnostics
+## Diagnostics for Approved Execution
 
 Perform the analytic diagnostics relevant to the synthetic/time-series design and chosen estimator lane:
 

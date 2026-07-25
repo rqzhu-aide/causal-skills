@@ -15,6 +15,7 @@ const MAX_INTENT_LENGTH = 1000;
 const MAX_RESPONSE_TEXT_LENGTH = 1000;
 const MAX_ARTIFACT_SLUG_LENGTH = 80;
 const WELCOME_LINE = "[Causal-Consultant Loaded] This is a new project. Causal analysis team ready.";
+const MENU_NEXT_STEPS = "Choose one option, or suggest another action.";
 const RESPONSE_HEADINGS = new Set([
   "[OK Confirmed]",
   "[> Framing]",
@@ -2359,7 +2360,11 @@ function normalizePresentation(state, presentation) {
   }
   const framing = normalizeResponseText(presentation.framing, "finish presentation.framing");
   const boundary = normalizeResponseText(presentation.boundary, "finish presentation.boundary");
-  const nextSteps = normalizeResponseText(presentation.next_steps, "finish presentation.next_steps");
+  const suppliedNextSteps = normalizeResponseText(
+    presentation.next_steps,
+    "finish presentation.next_steps",
+    true,
+  );
   assertArray(presentation.options, "finish presentation.options", "INVALID_INPUT");
   if (presentation.options.length === 1 || presentation.options.length > 4) {
     fail("INVALID_INPUT", "finish presentation.options must contain 0 or 2-4 choices");
@@ -2404,7 +2409,7 @@ function normalizePresentation(state, presentation) {
     framing,
     options,
     boundary,
-    next_steps: nextSteps,
+    next_steps: options.length ? MENU_NEXT_STEPS : suppliedNextSteps,
   };
 }
 

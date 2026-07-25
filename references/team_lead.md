@@ -36,7 +36,7 @@ Load only the support file needed for this turn:
 - `team_lead_report_flow.md` when the plan includes `report_writer`, the user
   asks about report approval/output, or `report_assembly` changed.
 - `team_lead_analysis_flow.md` when the plan includes
-  `analysis_execution.<design_id>`, the user asks about analysis
+  `analysis_execution.<design_id>`, the user asks about an analysis scope,
   approval/execution, or analysis output changed.
 
 If none apply, do not load extra lead references.
@@ -150,11 +150,14 @@ still requires a revised ready scope and its approval.
 Match the presentation to that decision. If it has one responsible action,
 approval, or clarification, keep options empty and ask for it directly. When at
 least two materially distinct, currently legal actions or scope choices are
-viable, select the 2-4 highest-value ones. Each option must be independently
-routable as one next operation from the current state.
-Do not combine scope preparation or revision with execution, and leave any
-later approval explicit. Give each option a useful label, short consultant read,
-tradeoff, and normal `begin` assignment; avoid bare route labels.
+viable, select the 2-4 highest-value ones. Each option must describe exactly one
+normal `begin` assignment. An analysis or report assignment without `scope_ref`
+ends at scope preparation, revision, or repair; one with an exact `scope_ref` is
+the execution assignment for the unchanged ready scope, although its live gate
+may still block without output. Do not include later approval or output in this
+assignment; state any required later approval as a separate deferred step. Give
+each option a useful label, short consultant read, tradeoff, and normal `begin`
+assignment; avoid bare route labels.
 Encode options only from the current request or routes supported by the
 committed handoff or durable state, with the exact current scope reference when
 needed.
@@ -176,8 +179,9 @@ Keep `project_summary` as compact, durable project orientation. `title`,
 only its coarse current phase; and `exploration_summary` records durable
 findings and claim boundaries. Do not store scope lifecycle, approval state,
 operation status, next actions, long prose, full variable inventories,
-report-like narratives, or transcript text. At each normal finish, replace or
-clear summary content made false by the committed route state.
+report-like narratives, or transcript text. Before finish, replace or clear any
+objective or exploration summary that current route-owned state has superseded;
+do not carry earlier scope or gate language forward.
 
 A ready analysis or report scope remains route-owned and does not by itself
 update `exploration_summary`.
@@ -211,16 +215,20 @@ Use a non-null confirmation only when work was completed or an instruction was
 accepted. Keep framing and boundary to one or two sentences, except that a
 ready analysis or report scope may add one compact labeled approval list to
 framing. State the real limitation, assumption, or that no boundary changed. If
-options are empty, next steps asks the one direct question or states the
-smallest useful next step. If options are present, it asks the user to choose
-or suggest another action and does not repeat the choices.
+options are empty, `next_steps` asks one direct question or states one action
+and never contains a choice list. If options are present, it supplies a simple
+choice prompt that does not repeat the choices; the controller standardizes the
+rendered wording. `next_steps` is always one line.
 
 Use ordinary consulting language and synthesize the handoff and durable state
 instead of reproducing worker narratives, full scopes, diagnostic inventories,
-or full report outlines. The controller validates the structure, assigns option
-numbers, renders the established heading shell, and replaces or clears the one
-pending decision. After `finish` succeeds, emit its `response_markdown` exactly
-with no added prose.
+or full report outlines. Unless the user requests provenance, keep route and
+operation IDs, scope IDs and revisions, raw status or field names, and
+controller mechanics out of the presentation. The controller validates the
+structure, assigns option numbers, renders the established heading shell, and
+replaces or clears the one pending decision. The `presentation` payload is the
+complete response draft; after `finish` succeeds, emit its `response_markdown`
+verbatim without rewriting, expanding, or surrounding it.
 
 In read-only preflight-failure mode, skip `finish` and use only `[> Framing]`,
 `[! Boundary]`, and `[? Next Steps]`, without claiming completed work.

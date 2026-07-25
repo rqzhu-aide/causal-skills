@@ -66,7 +66,7 @@ Context only. Relevant when the selected design needs additional information abo
 - benchmark comparison against simpler estimators
 - statistical validity decision: supports execution, limits claim, or blocks analysis
 
-## Richer Diagnostics
+## Diagnostics for Approved Execution
 
 Select the diagnostics that answer the active design question; do not run every item by default.
 

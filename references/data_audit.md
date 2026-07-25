@@ -115,11 +115,13 @@ output.
 
 ## Boundaries
 
-This route may run bounded profiling or audit code only to evaluate data
-readiness. A calculation that estimates or tests the requested target is target
-analysis, even if described as profiling, exploration, or a diagnostic, and
-must wait for approval-bound `analysis_execution`. This route does not choose
-the final causal method, validate a causal claim, or execute causal analysis.
+This route may run bounded input and readiness profiling. It must not compute a
+target result: any new quantity, comparison, model-fit result, or test intended
+as an answer to an `analysis_execution` target or a refinement of it, including
+a raw or adjusted association or a subgroup or interaction contrast. Such work
+must wait for `analysis_execution` bound to an exact ready scope. This route
+does not choose the final causal method, validate a causal claim, prepare an
+analysis scope, or execute causal analysis.
 
 Do not let generic profiling crowd out causal-data risks: unit, timing, leakage,
 support, missingness, dependencies, and variable roles are the priority.

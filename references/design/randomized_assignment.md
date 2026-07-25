@@ -4,7 +4,7 @@ Use this file to plan or review a proper randomized-assignment analysis: randomi
 
 This design route is the accountable owner for whether analysis execution remains consistent with the randomized study design. Support routes may add analytic tools, but they must stay inside this design scope.
 
-Work in this order: verify assignment, define the assignment-based estimand, construct the analysis set, choose an estimator lane, run required diagnostics, then set the claim boundary. Prefer intention-to-treat unless the assigned contrast is not the analysis being requested; in that case, report the design constraint and let `causal_check` revise the design/support recommendation.
+Work in this order: verify assignment, define the assignment-based estimand, construct the analysis set, choose an estimator lane, specify required diagnostics, then set the claim boundary. Prefer intention-to-treat unless the assigned contrast is not the analysis being requested; in that case, report the design constraint and let `causal_check` revise the design/support recommendation.
 
 Runtime contract: follow `references/design_execution_contract.md` using design
 id `randomized_assignment`. Keep any named support route inside this
@@ -48,7 +48,7 @@ Facts that usually must be inspected, not merely assumed: assignment log or sour
 - `implementation_twist`: add ANCOVA, Lin adjustment, or CUPED for precision only with pre-assignment covariates; add cluster-aware/block-aware inference when design requires it; do not use flexible tools to repair broken assignment logic.
 - `fallback_twist`: if randomization cannot be verified or post-assignment selection breaks the target, use descriptive arm summaries, design audit, feasibility review, or future-experiment requirements instead of causal effect wording.
 
-## Required Diagnostics
+## Diagnostics for Approved Execution
 
 Perform the analytic diagnostics relevant to the randomized design and chosen estimator lane:
 

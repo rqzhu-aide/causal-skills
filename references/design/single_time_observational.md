@@ -4,7 +4,7 @@ Use this file to plan or review a point-treatment observational analysis: baseli
 
 This design route is the accountable owner for whether analysis execution remains consistent with the observational study design. Support routes may add analytic tools, but they must stay inside this design scope.
 
-Work in this order: emulate the target trial, align time zero, define exposure and comparator, build the analysis set, audit covariate timing and support, choose an estimator lane, run required diagnostics, then set the claim boundary. Do not let a flexible model compensate for bad timing, missing confounding, or positivity failure.
+Work in this order: emulate the target trial, align time zero, define exposure and comparator, build the analysis set, audit covariate timing and support, choose an estimator lane, specify required diagnostics, then set the claim boundary. Do not let a flexible model compensate for bad timing, missing confounding, or positivity failure.
 
 Runtime contract: follow `references/design_execution_contract.md` using design
 id `single_time_observational`. Keep any named support route inside this
@@ -49,7 +49,7 @@ Facts that usually must be inspected, not merely assumed: time zero, exposure ti
 - `implementation_twist`: use regression adjustment, standardization, g-computation, matching, weighting, trimming, AIPW, TMLE, DML, or sensitivity methods only after the design facts are coherent.
 - `fallback_twist`: if time zero, confounding, exposure meaning, or support fails, use descriptive association, design audit, sensitivity memo, or future-data plan instead of causal effect wording.
 
-## Required Diagnostics
+## Diagnostics for Approved Execution
 
 Perform the analytic diagnostics relevant to the observational design and chosen estimator lane:
 

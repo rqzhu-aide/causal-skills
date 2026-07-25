@@ -241,11 +241,12 @@ handles closeout synthesis through `finish`.
 When report text, a draft, HTML, or another report artifact is actually
 created:
 
-Before marking the handoff `done`, reconcile the rendered output with every
-bound-scope commitment, including purpose and audience, evidence basis,
-required structure or content, output format, and claim boundary. Repair any
-missing or materially substituted item, or return `ready` or `blocked` without
-an artifact; never submit `done`.
+Before marking the handoff `done`, validate the rendered text itself, not its
+outline or summary, against the bound evidence basis and narrowest claim
+boundary. Reconcile the remaining scope commitments, including purpose,
+audience, required structure or content, and output format. Repair any missing
+or materially substituted item, or return `ready` or `blocked` without an
+artifact; never submit `done`.
 
 1. Reserve, write, and validate one meaningful temporary report file or
    directory through `references/artifact_output_policy.md`; pooled reports

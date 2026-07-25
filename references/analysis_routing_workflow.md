@@ -47,9 +47,12 @@ Decision rules:
 - A support-only change does not make the current design stale. When that design
   remains eligible, route it with the current support selection to revise the
   scope.
-- If the relevant slot is missing, unknown, invalid, or method fit changed
-  without a clear design/support route, route `causal_check` or `team_lead`
-  instead of guessing.
+- A missing analysis slot is not unresolved method fit. If begin eligibility
+  and the current design recommendation identify an eligible route, route that
+  `analysis_execution` design without `scope_ref` and carry its current optional
+  support. Route `causal_check` only when the design, or a materially required
+  support choice, is missing, stale, or not unique; use `team_lead` only when
+  user input must resolve the ambiguity.
 - If no current analysis route can reasonably match the user's intent, plan
   only `team_lead`.
 

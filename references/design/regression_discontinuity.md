@@ -4,7 +4,7 @@ Use this file to plan or review a regression discontinuity analysis: sharp or fu
 
 This design route is the accountable owner for whether analysis execution remains consistent with the cutoff design. Support routes may add analytic tools, but they must stay inside this design scope.
 
-Work in this order: verify the cutoff rule, define the running variable, check the treatment jump, establish local support, choose the RD lane, run manipulation/continuity diagnostics, choose estimator settings, then set the local claim boundary. Do not treat an analyst-created split as RD.
+Work in this order: verify the cutoff rule, define the running variable, check the treatment jump, establish local support, choose the RD lane, specify manipulation/continuity diagnostics, choose estimator settings, then set the local claim boundary. Do not treat an analyst-created split as RD.
 
 Runtime contract: follow `references/design_execution_contract.md` using design
 id `regression_discontinuity`. Keep any named support route inside this RD
@@ -45,7 +45,7 @@ Facts that usually must be inspected, not merely assumed: cutoff rule, running-v
 - `implementation_twist`: use robust bias-corrected local polynomial, fuzzy local IV, local randomization, kink, geographic RD, or multiple-cutoff methods only when design facts fit.
 - `fallback_twist`: if the cutoff is artificial, manipulation is severe, support fails, or a date cutoff is trend-driven, use descriptive discontinuity audit, ITS/DiD review, or future-design requirements.
 
-## Required Diagnostics
+## Diagnostics for Approved Execution
 
 Perform the analytic diagnostics relevant to the RD design and chosen estimator lane:
 

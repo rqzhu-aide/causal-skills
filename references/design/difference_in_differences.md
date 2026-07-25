@@ -46,7 +46,7 @@ Facts that usually must be inspected, not merely assumed: treatment timing, comp
 - `implementation_twist`: use modern staggered-adoption estimators, DR-DiD, synthetic DiD, imputation, interaction-weighted event studies, or HonestDiD only when their comparison and estimand match the data.
 - `fallback_twist`: if comparison credibility fails, use descriptive trend audit, interrupted-time-series warning, synthetic-control review, or future-design requirements.
 
-## Required Diagnostics
+## Diagnostics for Approved Execution
 
 Perform the analytic diagnostics relevant to the DiD design and chosen estimator lane:
 
