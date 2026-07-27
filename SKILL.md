@@ -76,13 +76,17 @@ work, and summarize completed artifacts.
 9. Each assistant turn handles at most one operation, whether newly begun or
    resumed. A rejected `begin` may be corrected or rerouted only before any
    `begin` succeeds. Once one succeeds, that operation consumes the turn. After
-   `finish` returns `next_action: emit_response_markdown_verbatim_and_stop`,
-   discard any response draft and emit the decoded `response_markdown` string
-   exactly as the complete assistant message. Add nothing, then stop; do not run
-   `open` or `begin` again until a new user message. The sole
-   exception is a read-only preflight-failure response when no operation can be
-   opened. An ordinary validation rejection from `reserve-artifact`, `apply`,
-   or `finish` leaves the operation at its persisted stage; correct and retry
+   `finish` returns `next_action: deliver_response_and_stop`, deliver one
+   decision-equivalent response, then stop; do not run `open` or `begin` again
+   until a new user message. Preserve the completed action, all material terms,
+   claim and authorization boundaries, any direct question, and any numbered
+   choices in the same order and meaning, including their mapping to stored
+   assignments. Formatting and nonmaterial supporting detail may vary, but do
+   not add, omit, or change a material term, choice, operation, or authorization.
+   The sole exception is a read-only preflight-failure response when no
+   operation can be opened. An ordinary validation rejection from
+   `reserve-artifact`, `apply`, or `finish` leaves the operation at its persisted
+   stage; correct and retry
    it, or cancel only after an explicit user request. On any project, revision,
    operation, or stage mismatch, or when mutation JSON is missing or unusable,
    run `open` once and follow the persisted stage. Retry the same mutation only

@@ -2544,7 +2544,7 @@ test("ready scopes remain route-owned and do not become durable exploration summ
       const closed = expectSuccess(finish(projectRoot, applied, {
         project_summary: { exploration_summary: durableSummary },
       }), "OPERATION_FINISHED");
-      assert.equal(closed.next_action, "emit_response_markdown_verbatim_and_stop");
+      assert.equal(closed.next_action, "deliver_response_and_stop");
       const finished = readState(projectRoot);
       assert.equal(finished.project_summary.exploration_summary, durableSummary);
       assert.equal(finished.project_summary.last_updated, summaryTimestamp);
