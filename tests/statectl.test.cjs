@@ -2544,7 +2544,6 @@ test("ready scopes remain route-owned and do not become durable exploration summ
       const closed = expectSuccess(finish(projectRoot, applied, {
         project_summary: { exploration_summary: durableSummary },
       }), "OPERATION_FINISHED");
-      assert.equal(closed.next_action, "deliver_response_and_stop");
       const finished = readState(projectRoot);
       assert.equal(finished.project_summary.exploration_summary, durableSummary);
       assert.equal(finished.project_summary.last_updated, summaryTimestamp);
@@ -2832,6 +2831,7 @@ test("finish renders the existing response shell and persists numbered choices a
     const closed = expectSuccess(finish(projectRoot, started), "OPERATION_FINISHED");
 
     assert.equal(closed.revision, 2);
+    assert.equal(closed.next_action, "emit_response_markdown_verbatim_and_stop");
     assert.equal(closed.pending_decision, null);
     assert.equal(
       closed.response_markdown,

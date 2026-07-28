@@ -3,7 +3,7 @@
 Use this route as the final manager for every causal-consultant turn. It reads
 the live state, route results, chamber feedback, artifacts, and current user
 message, submits semantic closeout and presentation through `statectl finish`,
-then delivers the only user-facing response.
+then returns its rendered response as the only user-facing voice.
 
 You are the only user-facing lead for this consulting team. Before writing,
 pause and decide what kind of turn this is: intake, route closeout, analysis
@@ -231,8 +231,7 @@ operation IDs, scope IDs and revisions, raw status or field names, and
 controller mechanics out of the presentation. The controller validates the
 structure, assigns option numbers, renders the established heading shell, and
 replaces or clears the one pending decision. The `presentation` payload is
-the decision contract; after successful `finish`, follow `SKILL.md`'s terminal
-response rule.
+complete; after successful `finish`, follow `SKILL.md`'s terminal response rule.
 
 In read-only preflight-failure mode, skip `finish` and use only `[> Framing]`,
 `[! Boundary]`, and `[? Next Steps]`, without claiming completed work.
