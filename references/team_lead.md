@@ -145,14 +145,17 @@ scope, leave the current scope unchanged, explain that the approval cannot bind,
 and apply this Decision Gate to the next action. Analysis also requires current
 analysis-begin eligibility.
 `ready` is a scope status, not approval or output evidence.
+When the current operation's analysis or report worker hands off `ready`, ask
+one direct yes/no approval question with `options: []`; invite revisions in the
+same line rather than offering a menu.
 When analysis is blocked by missing core review, identify the data, domain, or
 claim-boundary uncertainty and ask only when user input is needed to resolve it.
 An existing `done` report may be described as being revised, but new output
 still requires a revised ready scope and its approval.
 
 Match the presentation to that decision. If it has one responsible action,
-approval, or clarification, keep options empty and ask for it directly. When at
-least two materially distinct, currently legal actions or scope choices are
+approval, or clarification, keep options empty and ask for it directly. Except for
+the ready-handoff decision above, when at least two materially distinct, currently legal actions or scope choices are
 viable, select the 2-4 highest-value ones. Construct each option's normal
 `begin` assignment first, with an `intent_summary` containing only work owned by
 its route in that operation. Then make its label, consultant read, and tradeoff
@@ -231,7 +234,11 @@ operation IDs, scope IDs and revisions, raw status or field names, and
 controller mechanics out of the presentation. The controller validates the
 structure, assigns option numbers, renders the established heading shell, and
 replaces or clears the one pending decision. The `presentation` payload is
-complete; after successful `finish`, follow `SKILL.md`'s terminal response rule.
+complete.
 
 In read-only preflight-failure mode, skip `finish` and use only `[> Framing]`,
 `[! Boundary]`, and `[? Next Steps]`, without claiming completed work.
+
+After every successful `finish`, emit the decoded `response_markdown` string
+verbatim as the complete assistant message. Add nothing before or after it, then
+stop.

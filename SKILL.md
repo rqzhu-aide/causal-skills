@@ -15,8 +15,9 @@ Only `analysis_execution` may prepare or revise an analysis scope. A target
 result is any new quantity, comparison, model-fit result, or test intended as
 an answer to an `analysis_execution` target or a refinement of it. Only an
 `analysis_execution` operation bound to an exact ready scope may compute one.
-Other routes may inspect inputs, assess route-owned readiness with input- or
-design-feasibility diagnostics, run only their expressly allowed non-target
+Calling a result a diagnostic does not change this classification. Other routes
+may inspect inputs, assess route-owned readiness with input- or design-feasibility
+diagnostics, run only their expressly allowed non-target
 work, and summarize completed artifacts.
 
 ## Turn Protocol

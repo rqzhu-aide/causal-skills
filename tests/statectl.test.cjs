@@ -3079,6 +3079,103 @@ test("finish rejects malformed presentations and illegal option assignments with
   }
 });
 
+test("ready analysis and report handoffs require direct approval without options", async (t) => {
+  function readyAnalysis(projectRoot) {
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    seedAnalysisEligibility(projectRoot);
+    const started = expectSuccess(
+      begin(projectRoot, opened, "analysis_execution.single_time_observational"),
+      "BEGAN_WORKER",
+    );
+    return expectSuccess(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(started),
+        operation_id: started.operation_id,
+        actor: "analysis_execution.single_time_observational",
+        scope_transition: "new",
+        updates: {
+          council_chamber: {
+            analysis_execution: {
+              single_time_observational: analysisSlot("ready", "Analysis scope is ready."),
+            },
+          },
+        },
+      },
+    }), "WORKER_APPLIED");
+  }
+
+  function readyReport(projectRoot) {
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const started = expectSuccess(begin(projectRoot, opened, "report_writer"), "BEGAN_WORKER");
+    return expectSuccess(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(started),
+        operation_id: started.operation_id,
+        actor: "report_writer",
+        scope_transition: "new",
+        updates: {
+          report_assembly: {
+            report_goal: "Report the completed evidence",
+            audience: "Decision makers",
+            target_section: "Results",
+            planned_structure: ["Findings", "Limitations"],
+          },
+          council_chamber: {
+            report_writer: {
+              current_status: "ready",
+              summary: "Report scope is ready.",
+              questions_for_user: [],
+              feedback_to_route: [],
+            },
+          },
+        },
+      },
+    }), "WORKER_APPLIED");
+  }
+
+  const menu = optionsPresentation([
+    decisionOption("Audit the data", "data_audit"),
+    decisionOption("Review the domain", "domain_expert"),
+  ]);
+  for (const [name, prepare] of [["analysis", readyAnalysis], ["report", readyReport]]) {
+    await t.test(name, () => {
+      const projectRoot = temporaryProject(t);
+      const applied = prepare(projectRoot);
+      const before = fs.readFileSync(statePath(projectRoot), "utf8");
+      const failure = expectFailure(
+        finish(projectRoot, applied, {}, { presentation: menu }),
+        "INVALID_INPUT",
+      );
+      assert.match(failure.message, /direct approval without options/);
+      assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+      const pending = readState(projectRoot);
+      assert.equal(pending.state_meta.revision, applied.revision);
+      assert.equal(pending.state_meta.active_operation.stage, "lead_pending");
+
+      const presentation = {
+        ...DEFAULT_PRESENTATION,
+        next_steps: "Do you approve this scope? If not, tell me what you would revise.",
+      };
+      const closed = expectSuccess(
+        finish(projectRoot, applied, {}, { presentation }),
+        "OPERATION_FINISHED",
+      );
+      assert.equal(closed.pending_decision, null);
+      assert.equal(closed.response_markdown.includes("[+ Consultant Options]"), false);
+    });
+  }
+
+  await t.test("explicit cancellation remains exempt", () => {
+    const projectRoot = temporaryProject(t);
+    const applied = readyAnalysis(projectRoot);
+    const cancelled = expectSuccess(
+      finish(projectRoot, applied, {}, { cancel: true, presentation: menu }),
+      "OPERATION_CANCELLED",
+    );
+    assert.ok(cancelled.pending_decision);
+  });
+});
+
 test("numbered selection derives one stored assignment and normal begin supersedes the menu", async (t) => {
   await t.test("selection and worker closeout keep the normal revision budget", () => {
     const projectRoot = temporaryProject(t);

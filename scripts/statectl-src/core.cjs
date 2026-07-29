@@ -2322,19 +2322,22 @@ function deriveSummaryAggregates(state) {
   return changed;
 }
 
+function plannedScopeStatus(state) {
+  const actor = validatePlan(state.next_step_plan).actor;
+  return actor && actor.startsWith("analysis_execution.")
+    ? state.council_chamber.analysis_execution[actor.slice("analysis_execution.".length)].current_status
+    : actor === "report_writer"
+      ? state.council_chamber.report_writer.current_status
+      : null;
+}
+
 function rejectReadyScopeSummaryUpdate(state, updates) {
   if (
     !updates.project_summary
     || !Object.prototype.hasOwnProperty.call(updates.project_summary, "exploration_summary")
   ) return;
-  const actor = validatePlan(state.next_step_plan).actor;
-  const status = actor && actor.startsWith("analysis_execution.")
-    ? state.council_chamber.analysis_execution[actor.slice("analysis_execution.".length)].current_status
-    : actor === "report_writer"
-      ? state.council_chamber.report_writer.current_status
-      : null;
   if (
-    status === "ready"
+    plannedScopeStatus(state) === "ready"
     && !deepEqual(updates.project_summary.exploration_summary, state.project_summary.exploration_summary)
   ) {
     fail(
@@ -2342,6 +2345,14 @@ function rejectReadyScopeSummaryUpdate(state, updates) {
       "a ready analysis or report scope remains route-owned and cannot update project_summary.exploration_summary",
     );
   }
+}
+
+function rejectReadyScopeMenu(state, presentation, cancel) {
+  if (cancel || presentation.options.length === 0 || plannedScopeStatus(state) !== "ready") return;
+  fail(
+    "INVALID_INPUT",
+    "a ready analysis or report handoff must request direct approval without options",
+  );
 }
 
 function normalizePresentation(state, presentation) {
@@ -2494,6 +2505,7 @@ function finishOperation({ projectRoot, payload, cancel = false }) {
   merged.state_meta.startup_notice = null;
   merged.pending_decision = null;
   const presentation = normalizePresentation(merged, payload.presentation);
+  rejectReadyScopeMenu(state, presentation, cancel);
   merged.pending_decision = decisionFromPresentation(presentation, operation.id);
   const responseMarkdown = renderPresentation(
     presentation,

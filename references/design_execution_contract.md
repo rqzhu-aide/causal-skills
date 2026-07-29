@@ -44,6 +44,10 @@ do not run them or compute target results.
   execute the old scope.
 - A practical refinement that changes none of those elements remains the same
   scope and revision.
+- Diagnostics may compute quantities needed to assess the bound target, estimator,
+  assumptions, or claim boundary. Adding a separately reportable estimand, policy
+  contrast, subgroup or interaction effect, or substantive hypothesis not already
+  in that scope requires a revision.
 - A repaired `blocked` scope may become `ready`; keep it blocked when the repair
   is insufficient.
 - A request after `done` returns to scope feedback; a completed handoff is never
