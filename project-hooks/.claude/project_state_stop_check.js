@@ -7397,13 +7397,23 @@ var require_core = __commonJS({
     var { isDeepStrictEqual } = require("node:util");
     var YAML = require_dist();
     var ROUTES = require_route_catalog();
-    var SCHEMA_VERSION = 3;
+    var SCHEMA_VERSION = 4;
     var MANIFEST_VERSION = 1;
     var STATE_FILE = "project_state.yaml";
     var ARCHIVE_DIR = "project_state.archives";
     var MAX_INTENT_LENGTH = 1e3;
     var MAX_RESPONSE_TEXT_LENGTH = 1e3;
     var MAX_ARTIFACT_SLUG_LENGTH = 80;
+    var DISCOVERY_CONTRACT_KEYS = /* @__PURE__ */ new Set([
+      "target",
+      "input_refs",
+      "variables",
+      "method_plan",
+      "constraints",
+      "diagnostic_requirements",
+      "output_type",
+      "claim_boundary"
+    ]);
     var WELCOME_LINE = "[Causal-Consultant Loaded] This is a new project. Causal analysis team ready.";
     var MENU_NEXT_STEPS = "Choose one option, or suggest another action.";
     var RESPONSE_HEADINGS = /* @__PURE__ */ new Set([
@@ -7511,6 +7521,9 @@ var require_core = __commonJS({
       ]),
       discovery_sidecar: /* @__PURE__ */ new Set([
         "last_updated",
+        "scope_id",
+        "scope_revision",
+        "execution_contract",
         "status",
         "goal",
         "scope",
@@ -7595,6 +7608,52 @@ var require_core = __commonJS({
       const unknown = Object.keys(value).filter((key) => !allowed.has(key));
       if (unknown.length) {
         fail(code, `${label} contains unsupported fields: ${unknown.join(", ")}`);
+      }
+    }
+    function normalizeRequiredString(value, label, code) {
+      if (typeof value !== "string" || !value.trim()) {
+        fail(code, `${label} must be a nonempty string`);
+      }
+      return value.trim();
+    }
+    function normalizeContractArray(value, label, code, requireItems = false) {
+      assertArray(value, label, code);
+      const normalized = value.map((item, index) => normalizeRequiredString(item, `${label}[${index}]`, code));
+      if (requireItems && normalized.length === 0) {
+        fail(code, `${label} must contain at least one item`);
+      }
+      if (new Set(normalized).size !== normalized.length) {
+        fail(code, `${label} must not contain duplicates`);
+      }
+      return normalized;
+    }
+    function normalizeDiscoveryContract(value, label, code = "INVALID_INPUT") {
+      assertKnownKeys(value, DISCOVERY_CONTRACT_KEYS, label, code);
+      const missing = [...DISCOVERY_CONTRACT_KEYS].filter(
+        (field) => !Object.prototype.hasOwnProperty.call(value, field)
+      );
+      if (missing.length) fail(code, `${label} is missing: ${missing.join(", ")}`);
+      const contract = {
+        target: normalizeRequiredString(value.target, `${label}.target`, code),
+        input_refs: normalizeContractArray(value.input_refs, `${label}.input_refs`, code, true),
+        variables: normalizeContractArray(value.variables, `${label}.variables`, code, true),
+        method_plan: normalizeRequiredString(value.method_plan, `${label}.method_plan`, code),
+        constraints: normalizeContractArray(value.constraints, `${label}.constraints`, code),
+        diagnostic_requirements: normalizeContractArray(
+          value.diagnostic_requirements,
+          `${label}.diagnostic_requirements`,
+          code
+        ),
+        output_type: normalizeRequiredString(value.output_type, `${label}.output_type`, code),
+        claim_boundary: value.claim_boundary
+      };
+      assertEnum(contract.claim_boundary, ["candidate_only"], `${label}.claim_boundary`, code);
+      return contract;
+    }
+    function validateDiscoveryContract(value, label, code = "INVALID_STATE") {
+      const normalized = normalizeDiscoveryContract(value, label, code);
+      if (!deepEqual(normalized, value)) {
+        fail(code, `${label} must use trimmed canonical strings`);
       }
     }
     function assertExactTopLevel(state, expected = REQUIRED_TOP_LEVEL) {
@@ -7777,7 +7836,7 @@ var require_core = __commonJS({
     function validateScopeRef(value, label = "scope_ref", code = "INVALID_STATE") {
       if (value === null) return;
       assertKnownKeys(value, /* @__PURE__ */ new Set(["kind", "id", "revision"]), label, code);
-      assertEnum(value.kind, ["analysis", "report"], `${label}.kind`, code);
+      assertEnum(value.kind, ["analysis", "report", "discovery"], `${label}.kind`, code);
       if (!isUuid(value.id)) fail(code, `${label}.id must be a UUID`);
       if (!Number.isInteger(value.revision) || value.revision < 1) {
         fail(code, `${label}.revision must be a positive integer`);
@@ -7805,6 +7864,26 @@ var require_core = __commonJS({
         fail("INVALID_STATE", `state_meta.startup_notice.archive_path must be a canonical path under ${ARCHIVE_DIR}/`);
       }
     }
+    function validateDiscoveryScopeSnapshot(value, label, code = "INVALID_STATE") {
+      if (value === null) return;
+      assertKnownKeys(value, /* @__PURE__ */ new Set(["transition", "base_ref", "contract"]), label, code);
+      const missing = ["transition", "base_ref", "contract"].filter(
+        (field) => !Object.prototype.hasOwnProperty.call(value, field)
+      );
+      if (missing.length) fail(code, `${label} is missing: ${missing.join(", ")}`);
+      assertEnum(value.transition, ["new", "revise", "preserve"], `${label}.transition`, code);
+      validateScopeRef(value.base_ref, `${label}.base_ref`, code);
+      if (value.base_ref !== null && value.base_ref.kind !== "discovery") {
+        fail(code, `${label}.base_ref must be a discovery scope reference`);
+      }
+      if (value.transition === "new" && value.base_ref !== null) {
+        fail(code, `${label}.base_ref must be null for a new scope`);
+      }
+      if (value.transition !== "new" && value.base_ref === null) {
+        fail(code, `${label}.base_ref is required for ${value.transition}`);
+      }
+      validateDiscoveryContract(value.contract, `${label}.contract`, code);
+    }
     function validateActiveOperation(meta, planInfo) {
       const operation = meta.active_operation;
       if (operation === null) {
@@ -7817,6 +7896,7 @@ var require_core = __commonJS({
         "intent_summary",
         "scope_ref",
         "artifact_intent",
+        "discovery_scope",
         "started_at"
       ]), "state_meta.active_operation");
       if (!isUuid(operation.id)) fail("INVALID_STATE", "active_operation.id must be a UUID");
@@ -7825,6 +7905,18 @@ var require_core = __commonJS({
         fail("INVALID_STATE", `active_operation.intent_summary must contain 1-${MAX_INTENT_LENGTH} characters`);
       }
       validateScopeRef(operation.scope_ref);
+      if (!Object.prototype.hasOwnProperty.call(operation, "discovery_scope")) {
+        fail("INVALID_STATE", "active_operation.discovery_scope is required");
+      }
+      validateDiscoveryScopeSnapshot(operation.discovery_scope, "active_operation.discovery_scope");
+      const isDiscovery = planInfo.actor === "causal_discovery";
+      if (operation.discovery_scope !== null) {
+        if (!isDiscovery || operation.scope_ref === null || operation.scope_ref.kind !== "discovery") {
+          fail("SCOPE_MISMATCH", "active discovery_scope requires the causal_discovery route and a discovery scope_ref");
+        }
+      } else if (operation.scope_ref !== null && operation.scope_ref.kind === "discovery") {
+        fail("SCOPE_MISMATCH", "an active discovery scope_ref requires discovery_scope");
+      }
       if (!isTimestamp(operation.started_at)) fail("INVALID_STATE", "active_operation.started_at must be an RFC3339 UTC timestamp");
       if (operation.artifact_intent !== null) {
         assertKnownKeys(operation.artifact_intent, /* @__PURE__ */ new Set(["kind", "location"]), "active_operation.artifact_intent");
@@ -7840,7 +7932,38 @@ var require_core = __commonJS({
     }
     function validateActiveScopeBinding(state, planInfo) {
       const operation = state.state_meta.active_operation;
-      if (!operation || operation.scope_ref === null) return;
+      if (!operation) return;
+      if (planInfo.actor === "causal_discovery") {
+        if (operation.scope_ref === null) return;
+        if (operation.scope_ref.kind !== "discovery" || operation.discovery_scope === null) {
+          fail("SCOPE_MISMATCH", "active causal_discovery scope binding is invalid");
+        }
+        const snapshot = operation.discovery_scope;
+        const current = state.discovery_sidecar;
+        if (operation.stage === "worker_pending") {
+          if (snapshot.transition === "new") {
+            if (operation.scope_ref.revision !== 1) {
+              fail("SCOPE_MISMATCH", "a new discovery scope must start at revision 1");
+            }
+            return;
+          }
+          if (current.scope_id !== snapshot.base_ref.id || current.scope_revision !== snapshot.base_ref.revision) {
+            fail("SCOPE_MISMATCH", "active discovery scope no longer matches its durable base");
+          }
+          if (snapshot.transition === "preserve" && (!deepEqual(operation.scope_ref, snapshot.base_ref) || !deepEqual(current.execution_contract, snapshot.contract))) {
+            fail("SCOPE_MISMATCH", "preserved discovery scope does not match its base");
+          }
+          if (snapshot.transition === "revise" && (operation.scope_ref.id !== snapshot.base_ref.id || operation.scope_ref.revision !== snapshot.base_ref.revision + 1)) {
+            fail("SCOPE_MISMATCH", "revised discovery scope_ref is not the next base revision");
+          }
+          return;
+        }
+        if (current.scope_id !== operation.scope_ref.id || current.scope_revision !== operation.scope_ref.revision || !deepEqual(current.execution_contract, snapshot.contract) || !["scoped", "artifact_created", "reviewed", "blocked"].includes(current.status)) {
+          fail("SCOPE_MISMATCH", "completed discovery handoff does not match its active scope");
+        }
+        return;
+      }
+      if (operation.scope_ref === null) return;
       let scope;
       let status;
       if (planInfo.actor && planInfo.actor.startsWith("analysis_execution.")) {
@@ -8120,6 +8243,25 @@ var require_core = __commonJS({
       }
       assertEnum(state.discovery_sidecar.status, ["not_started", "scoped", "artifact_created", "reviewed", "blocked"], "discovery_sidecar.status");
       assertStringOrNullFields(state.discovery_sidecar, ["goal", "scope", "method_summary"], "discovery_sidecar");
+      const missingDiscoveryControl = ["scope_id", "scope_revision", "execution_contract"].filter(
+        (field) => !Object.prototype.hasOwnProperty.call(state.discovery_sidecar, field)
+      );
+      if (missingDiscoveryControl.length) {
+        fail("INVALID_STATE", `discovery_sidecar is missing: ${missingDiscoveryControl.join(", ")}`);
+      }
+      const discoveryHasIdentity = isUuid(state.discovery_sidecar.scope_id) && Number.isInteger(state.discovery_sidecar.scope_revision) && state.discovery_sidecar.scope_revision >= 1;
+      const discoveryEmptyIdentity = state.discovery_sidecar.scope_id === null && state.discovery_sidecar.scope_revision === 0;
+      if (!discoveryHasIdentity && !discoveryEmptyIdentity) {
+        fail("INVALID_STATE", "discovery_sidecar has an invalid scope identity");
+      }
+      if (discoveryHasIdentity) {
+        validateDiscoveryContract(
+          state.discovery_sidecar.execution_contract,
+          "discovery_sidecar.execution_contract"
+        );
+      } else if (state.discovery_sidecar.execution_contract !== null) {
+        fail("INVALID_STATE", "an unbound discovery_sidecar must have a null execution_contract");
+      }
       assertStringArrayFields(state.discovery_sidecar, ["findings", "diagnostics", "limitations", "artifact_refs", "reviewer_requests"], "discovery_sidecar");
       assertEnum(state.report_assembly.current_format, [null, "md", "html"], "report_assembly.current_format");
       assertStringOrNullFields(state.report_assembly, ["report_goal", "audience", "target_section"], "report_assembly");
@@ -8229,6 +8371,21 @@ var require_core = __commonJS({
         return value !== null && value !== void 0;
       });
     }
+    function addDiscoveryControls(state) {
+      assertObject(state.discovery_sidecar, "discovery_sidecar");
+      if (!Object.prototype.hasOwnProperty.call(state.state_meta, "active_operation")) {
+        fail("INVALID_STATE", "state_meta is missing active_operation");
+      }
+      if (state.state_meta.active_operation !== null) {
+        assertObject(state.state_meta.active_operation, "state_meta.active_operation");
+      }
+      state.discovery_sidecar.scope_id = null;
+      state.discovery_sidecar.scope_revision = 0;
+      state.discovery_sidecar.execution_contract = null;
+      if (state.state_meta.active_operation !== null && !Object.prototype.hasOwnProperty.call(state.state_meta.active_operation, "discovery_scope")) {
+        state.state_meta.active_operation.discovery_scope = null;
+      }
+    }
     function migrateLegacyState(legacy, options = {}) {
       const { discardPlan = false } = options;
       validateLegacyShape(legacy);
@@ -8275,6 +8432,7 @@ var require_core = __commonJS({
         artifact_id: `legacy-${String(index + 1).padStart(4, "0")}`,
         operation_id: null
       }));
+      addDiscoveryControls(reordered);
       validateState(reordered);
       return reordered;
     }
@@ -8289,6 +8447,22 @@ var require_core = __commonJS({
       migrated.state_meta.startup_notice = null;
       migrated.pending_decision = null;
       migrated.response_receipt = null;
+      addDiscoveryControls(migrated);
+      validateState(migrated);
+      migrated.state_meta.revision += 1;
+      migrated.state_meta.updated_at = nowIso();
+      validateState(migrated);
+      return migrated;
+    }
+    function migrateV3State(v3) {
+      assertExactTopLevel(v3);
+      assertObject(v3.state_meta, "state_meta");
+      if (v3.state_meta.schema_version !== 3) {
+        fail("UNSUPPORTED_SCHEMA", `unsupported schema version: ${v3.state_meta.schema_version}`);
+      }
+      const migrated = clone(v3);
+      migrated.state_meta.schema_version = SCHEMA_VERSION;
+      addDiscoveryControls(migrated);
       validateState(migrated);
       migrated.state_meta.revision += 1;
       migrated.state_meta.updated_at = nowIso();
@@ -8371,19 +8545,7 @@ var require_core = __commonJS({
           });
           return;
         }
-        const manifestKeys = /* @__PURE__ */ new Set([
-          "schema_version",
-          "operation_id",
-          "route",
-          "scope_ref",
-          "files",
-          "completed_at",
-          "summary"
-        ]);
-        const expectedScopeKind = record.route === "analysis_execution" ? "analysis" : record.route === "report_writer" ? "report" : null;
-        const scopeRef = manifest && manifest.scope_ref;
-        const scopeRefValid = expectedScopeKind === null ? scopeRef === null : isObject(scopeRef) && Object.keys(scopeRef).length === 3 && Object.keys(scopeRef).every((key) => ["kind", "id", "revision"].includes(key)) && scopeRef.kind === expectedScopeKind && isUuid(scopeRef.id) && Number.isInteger(scopeRef.revision) && scopeRef.revision >= 1;
-        if (!isObject(manifest) || Object.keys(manifest).length !== manifestKeys.size || Object.keys(manifest).some((key) => !manifestKeys.has(key)) || manifest.schema_version !== MANIFEST_VERSION || manifest.operation_id !== record.operation_id || manifest.route !== record.route || !scopeRefValid || !Array.isArray(manifest.files) || !manifest.files.length || manifest.files.some((item) => typeof item !== "string" || !item.trim()) || !isTimestamp(manifest.completed_at) || typeof manifest.summary !== "string" || manifest.summary.trim() !== record.summary.trim()) {
+        if (!isObject(manifest)) {
           warnings.push({
             code: "INVALID_HISTORICAL_ARTIFACT_MANIFEST",
             artifact_id: record.artifact_id,
@@ -8391,6 +8553,59 @@ var require_core = __commonJS({
             manifest_path: relativeManifestPath
           });
           return;
+        }
+        const manifestKeys = /* @__PURE__ */ new Set([
+          "schema_version",
+          "operation_id",
+          "route",
+          "scope_ref",
+          "discovery_contract",
+          "files",
+          "completed_at",
+          "summary"
+        ]);
+        const expectedScopeKind = record.route === "analysis_execution" ? "analysis" : record.route === "report_writer" ? "report" : record.route === "causal_discovery" ? "discovery" : null;
+        const scopeRef = manifest.scope_ref;
+        const scopeRefShapeValid = isObject(scopeRef) && Object.keys(scopeRef).length === 3 && Object.keys(scopeRef).every((key) => ["kind", "id", "revision"].includes(key)) && isUuid(scopeRef.id) && Number.isInteger(scopeRef.revision) && scopeRef.revision >= 1;
+        const legacyDiscovery = record.route === "causal_discovery" && scopeRef === null;
+        const scopeRefValid = legacyDiscovery ? manifest.discovery_contract === void 0 : expectedScopeKind === null ? scopeRef === null : scopeRefShapeValid && scopeRef.kind === expectedScopeKind;
+        let discoveryContractValid = manifest.discovery_contract === void 0;
+        if (record.route === "causal_discovery" && !legacyDiscovery) {
+          try {
+            validateDiscoveryContract(
+              manifest.discovery_contract,
+              "historical artifact manifest.discovery_contract"
+            );
+            discoveryContractValid = true;
+          } catch (_error) {
+            discoveryContractValid = false;
+          }
+        }
+        const requiredManifestKeys = [
+          "schema_version",
+          "operation_id",
+          "route",
+          "scope_ref",
+          "files",
+          "completed_at",
+          "summary"
+        ];
+        if (Object.keys(manifest).some((key) => !manifestKeys.has(key)) || requiredManifestKeys.some((key) => !Object.prototype.hasOwnProperty.call(manifest, key)) || manifest.schema_version !== MANIFEST_VERSION || manifest.operation_id !== record.operation_id || manifest.route !== record.route || !scopeRefValid || !discoveryContractValid || !Array.isArray(manifest.files) || !manifest.files.length || manifest.files.some((item) => typeof item !== "string" || !item.trim()) || !isTimestamp(manifest.completed_at) || typeof manifest.summary !== "string" || manifest.summary.trim() !== record.summary.trim()) {
+          warnings.push({
+            code: "INVALID_HISTORICAL_ARTIFACT_MANIFEST",
+            artifact_id: record.artifact_id,
+            location: record.location,
+            manifest_path: relativeManifestPath
+          });
+          return;
+        }
+        if (legacyDiscovery) {
+          warnings.push({
+            code: "UNBOUND_LEGACY_DISCOVERY_ARTIFACT",
+            artifact_id: record.artifact_id,
+            location: record.location,
+            manifest_path: relativeManifestPath
+          });
         }
         let includesPrimary = false;
         let includesDeliverable = false;
@@ -8517,22 +8732,23 @@ var require_core = __commonJS({
           warnings
         };
       }
-      if (parsed.state_meta.schema_version === 2) {
+      if ([2, 3].includes(parsed.state_meta.schema_version)) {
         if (discardLegacyPlan) {
           fail("INVALID_INPUT", "--discard-legacy-plan applies only to a recognized unversioned v4.5 state");
         }
-        const migrated = migrateV2State(parsed);
+        const sourceVersion = parsed.state_meta.schema_version;
+        const migrated = sourceVersion === 2 ? migrateV2State(parsed) : migrateV3State(parsed);
         const { planInfo: planInfo2 } = validateState(migrated);
         const operation2 = migrated.state_meta.active_operation;
         const mode2 = operation2 === null ? "idle" : operation2.stage === "worker_pending" ? "resume_worker" : "resume_lead";
         const artifactStatus = operation2 && operation2.artifact_intent ? inspectReservedArtifact(root, operation2, planInfo2.actor) : null;
         const warnings = artifactWarnings(root, migrated);
         const serialized = stringifyYaml(migrated);
-        const archivePath = archiveBytes(root, original, "migration-v2-v3");
+        const archivePath = archiveBytes(root, original, `migration-v${sourceVersion}-v${SCHEMA_VERSION}`);
         atomicWrite(statePath, serialized);
         return {
           ok: true,
-          code: "MIGRATED_V2",
+          code: `MIGRATED_V${sourceVersion}`,
           state_path: statePath,
           archive_path: archivePath,
           project_id: migrated.state_meta.project_id,
@@ -8614,6 +8830,11 @@ var require_core = __commonJS({
         if (scopeRef.kind !== "report") fail("SCOPE_MISMATCH", "report_writer requires a report scope reference");
         current = state.report_assembly;
         status = state.council_chamber.report_writer.current_status;
+      } else if (route === "causal_discovery") {
+        if (scopeRef.kind !== "discovery") fail("SCOPE_MISMATCH", "causal_discovery requires a discovery scope reference");
+        current = state.discovery_sidecar;
+        if (current.scope_id !== scopeRef.id || current.scope_revision !== scopeRef.revision || current.execution_contract === null) fail("SCOPE_MISMATCH", "the requested discovery scope reference is not current");
+        return;
       } else {
         fail("SCOPE_MISMATCH", `${route} cannot use a scope reference`);
       }
@@ -8688,9 +8909,14 @@ var require_core = __commonJS({
         if (support !== null || scopeRef !== null) fail(inputCode, "team_lead cannot use support or scope_ref");
       } else if (CORE_WORKERS.has(route)) {
         if (support !== null) fail(inputCode, "core routes cannot use support");
-        if (scopeRef !== null && route !== "report_writer") fail(scopeCode, `${route} cannot use scope_ref`);
-        if (scopeRef !== null && scopeRef.kind !== "report") {
+        if (scopeRef !== null && !["report_writer", "causal_discovery"].includes(route)) {
+          fail(scopeCode, `${route} cannot use scope_ref`);
+        }
+        if (scopeRef !== null && route === "report_writer" && scopeRef.kind !== "report") {
           fail(scopeCode, "report_writer requires a report scope reference");
+        }
+        if (scopeRef !== null && route === "causal_discovery" && scopeRef.kind !== "discovery") {
+          fail(scopeCode, "causal_discovery requires a discovery scope reference");
         }
       } else if (typeof route === "string" && route.startsWith("analysis_execution.")) {
         const design = route.slice("analysis_execution.".length);
@@ -8780,8 +9006,16 @@ var require_core = __commonJS({
         intent_summary: assignment.intent_summary,
         scope_ref: assignment.scope_ref,
         artifact_intent: null,
+        discovery_scope: null,
         started_at: nowIso()
       };
+      if (assignment.route === "causal_discovery" && assignment.scope_ref !== null) {
+        operation.discovery_scope = {
+          transition: "preserve",
+          base_ref: clone(assignment.scope_ref),
+          contract: clone(state.discovery_sidecar.execution_contract)
+        };
+      }
       state.next_step_plan = plan;
       state.state_meta.active_operation = operation;
       state.pending_decision = null;
@@ -8806,6 +9040,51 @@ var require_core = __commonJS({
       }
       return operation;
     }
+    function bindDiscoveryScope(state, operation, value, label) {
+      if (operation.discovery_scope !== null || operation.scope_ref !== null) {
+        fail("SCOPE_MISMATCH", "the active discovery scope is already frozen");
+      }
+      assertKnownKeys(value, /* @__PURE__ */ new Set(["transition", "contract"]), label, "INVALID_INPUT");
+      const missing = ["transition", "contract"].filter(
+        (field) => !Object.prototype.hasOwnProperty.call(value, field)
+      );
+      if (missing.length) fail("INVALID_INPUT", `${label} is missing: ${missing.join(", ")}`);
+      assertEnum(value.transition, ["new", "revise"], `${label}.transition`, "INVALID_INPUT");
+      const contract = normalizeDiscoveryContract(
+        value.contract,
+        `${label}.contract`,
+        "INVALID_INPUT"
+      );
+      let baseRef = null;
+      let scopeRef;
+      if (value.transition === "new") {
+        scopeRef = {
+          kind: "discovery",
+          id: crypto.randomUUID(),
+          revision: 1
+        };
+      } else {
+        const current = state.discovery_sidecar;
+        if (!isUuid(current.scope_id) || !Number.isInteger(current.scope_revision) || current.scope_revision < 1 || current.execution_contract === null) {
+          fail("SCOPE_MISMATCH", "cannot revise a discovery scope that has no current contract");
+        }
+        baseRef = {
+          kind: "discovery",
+          id: current.scope_id,
+          revision: current.scope_revision
+        };
+        scopeRef = {
+          ...baseRef,
+          revision: baseRef.revision + 1
+        };
+      }
+      operation.scope_ref = scopeRef;
+      operation.discovery_scope = {
+        transition: value.transition,
+        base_ref: baseRef,
+        contract
+      };
+    }
     function normalizeExtension(value) {
       if (value === void 0 || value === null || value === "") return "";
       const extension = value.startsWith(".") ? value : `.${value}`;
@@ -8828,7 +9107,15 @@ var require_core = __commonJS({
     function reserveArtifact({ projectRoot, payload }) {
       const { statePath, state } = loadCurrentState(projectRoot);
       assertExpected(state, payload);
-      const allowedInput = /* @__PURE__ */ new Set(["expected_project_id", "expected_revision", "operation_id", "kind", "slug", "extension"]);
+      const allowedInput = /* @__PURE__ */ new Set([
+        "expected_project_id",
+        "expected_revision",
+        "operation_id",
+        "kind",
+        "slug",
+        "extension",
+        "discovery_scope"
+      ]);
       assertKnownKeys(payload, allowedInput, "reserve-artifact input", "INVALID_INPUT");
       const operation = assertOperation(state, payload, "worker_pending");
       const planInfo = validatePlan(state.next_step_plan);
@@ -8839,6 +9126,15 @@ var require_core = __commonJS({
       if ((actor === "report_writer" || actor.startsWith("analysis_execution.")) && operation.scope_ref === null) {
         fail("SCOPE_MISMATCH", `${actor} must begin with an exact ready scope_ref before reserving output`);
       }
+      if (payload.discovery_scope !== void 0) {
+        if (actor !== "causal_discovery") {
+          fail("OWNERSHIP_VIOLATION", `${actor} cannot set discovery_scope`);
+        }
+        bindDiscoveryScope(state, operation, payload.discovery_scope, "reserve-artifact discovery_scope");
+      }
+      if (actor === "causal_discovery" && operation.discovery_scope === null) {
+        fail("SCOPE_MISMATCH", "causal_discovery must freeze a discovery_scope before reserving output");
+      }
       if (operation.artifact_intent !== null) fail("ARTIFACT_ALREADY_RESERVED", "this operation already has an artifact reservation");
       assertEnum(payload.kind, ["file", "directory"], "kind", "INVALID_INPUT");
       if (typeof payload.slug !== "string" || payload.slug.length > MAX_ARTIFACT_SLUG_LENGTH || !/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(payload.slug)) {
@@ -8848,10 +9144,17 @@ var require_core = __commonJS({
       if (payload.kind === "file" && !extension) fail("INVALID_INPUT", "file artifacts require an extension");
       if (payload.kind === "directory" && payload.extension !== void 0) fail("INVALID_INPUT", "directory artifacts do not use extensions");
       const location = `output/${payload.slug}-${operation.id.slice(0, 8)}${extension}`;
+      const artifactIntent = { kind: payload.kind, location };
       const target = resolveOutputPath(projectRoot, location);
       const manifest = manifestPathFor(target, payload.kind);
-      if (fs2.existsSync(target) || fs2.existsSync(manifest)) fail("ARTIFACT_COLLISION", `reserved location already exists: ${location}`);
-      operation.artifact_intent = { kind: payload.kind, location };
+      const temporary = resolveOutputPath(
+        projectRoot,
+        temporaryArtifactLocation(artifactIntent, operation.id)
+      );
+      if (fs2.existsSync(target) || fs2.existsSync(manifest) || fs2.existsSync(temporary)) {
+        fail("ARTIFACT_COLLISION", `reserved artifact path already exists: ${location}`);
+      }
+      operation.artifact_intent = artifactIntent;
       const revision = commitMutation(statePath, state);
       return {
         ok: true,
@@ -8860,6 +9163,8 @@ var require_core = __commonJS({
         revision,
         operation_id: operation.id,
         artifact_intent: operation.artifact_intent,
+        scope_ref: operation.scope_ref,
+        discovery_scope: operation.discovery_scope,
         temporary_path: temporaryArtifactLocation(operation.artifact_intent, operation.id),
         manifest_path: normalizePath(path2.relative(path2.resolve(projectRoot), manifest))
       };
@@ -8898,6 +9203,7 @@ var require_core = __commonJS({
         "operation_id",
         "route",
         "scope_ref",
+        "discovery_contract",
         "files",
         "completed_at",
         "summary"
@@ -8906,6 +9212,13 @@ var require_core = __commonJS({
       if (manifest.operation_id !== operation.id) fail("INVALID_ARTIFACT_MANIFEST", "manifest operation_id does not match");
       if (manifest.route !== expectedArtifactRoute(actor)) fail("INVALID_ARTIFACT_MANIFEST", "manifest route does not match the active worker");
       if (!deepEqual(manifest.scope_ref ?? null, operation.scope_ref ?? null)) fail("INVALID_ARTIFACT_MANIFEST", "manifest scope_ref does not match");
+      if (actor === "causal_discovery") {
+        if (operation.discovery_scope === null || !deepEqual(manifest.discovery_contract, operation.discovery_scope.contract)) {
+          fail("INVALID_ARTIFACT_MANIFEST", "manifest discovery_contract does not match the frozen scope");
+        }
+      } else if (manifest.discovery_contract !== void 0) {
+        fail("INVALID_ARTIFACT_MANIFEST", "only causal_discovery manifests may contain discovery_contract");
+      }
       if (!isTimestamp(manifest.completed_at)) fail("INVALID_ARTIFACT_MANIFEST", "manifest completed_at must be RFC3339 UTC");
       if (typeof manifest.summary !== "string" || !manifest.summary.trim()) fail("INVALID_ARTIFACT_MANIFEST", "manifest summary must be nonempty");
       assertArray(manifest.files, "artifact manifest.files", "INVALID_ARTIFACT_MANIFEST");
@@ -8985,7 +9298,8 @@ var require_core = __commonJS({
         scope_ref: operation.scope_ref ?? null,
         files,
         completed_at: nowIso(),
-        summary
+        summary,
+        ...actor === "causal_discovery" ? { discovery_contract: clone(operation.discovery_scope.contract) } : {}
       };
     }
     function artifactSummary(artifactInput) {
@@ -9117,6 +9431,9 @@ var require_core = __commonJS({
       rejectControllerFields(patch, `updates.${section}`);
       if (section === "report_assembly") {
         rejectControllerFields(patch, "updates.report_assembly", ["scope_id", "scope_revision"]);
+      }
+      if (section === "discovery_sidecar") {
+        rejectControllerFields(patch, "updates.discovery_sidecar", ["scope_id", "scope_revision", "execution_contract"]);
       }
     }
     function validateChamberPatch(patch, route, analysis = false) {
@@ -9260,6 +9577,23 @@ var require_core = __commonJS({
         draft_notes: []
       };
     }
+    function emptyDiscoverySidecar() {
+      return {
+        last_updated: null,
+        scope_id: null,
+        scope_revision: 0,
+        execution_contract: null,
+        status: "not_started",
+        goal: null,
+        scope: null,
+        method_summary: null,
+        findings: [],
+        diagnostics: [],
+        limitations: [],
+        artifact_refs: [],
+        reviewer_requests: []
+      };
+    }
     function resetNewScopeState(state, actor, transition) {
       if (transition !== "new") return;
       if (actor.startsWith("analysis_execution.")) {
@@ -9268,6 +9602,84 @@ var require_core = __commonJS({
       } else if (actor === "report_writer") {
         state.report_assembly = emptyReportAssembly();
         state.council_chamber.report_writer = emptyChamberSlot();
+      }
+    }
+    function applyDiscoveryHandoff(state, operation, actor, updates, hasArtifact) {
+      if (actor !== "causal_discovery") return;
+      const snapshot = operation.discovery_scope;
+      const patch = updates.discovery_sidecar;
+      const currentBound = isUuid(state.discovery_sidecar.scope_id) && Number.isInteger(state.discovery_sidecar.scope_revision) && state.discovery_sidecar.scope_revision >= 1 && state.discovery_sidecar.execution_contract !== null;
+      const chamberPatch = updates.council_chamber.causal_discovery;
+      const legacyUncontractedReservation = snapshot === null && operation.scope_ref === null && operation.artifact_intent !== null;
+      if (!patch) {
+        if (legacyUncontractedReservation) {
+          if (chamberPatch.current_status !== "blocked") {
+            fail("SCOPE_MISMATCH", "an uncontracted legacy discovery reservation must close as chamber-only blocked");
+          }
+          return;
+        }
+        if (snapshot !== null || !currentBound) {
+          fail("INVALID_INPUT", "causal_discovery apply requires a discovery_sidecar update");
+        }
+        if (!["reviewed", "blocked"].includes(chamberPatch.current_status)) {
+          fail("SCOPE_MISMATCH", "an unbound discovery handoff against a current scope must be chamber-only reviewed or blocked");
+        }
+        return;
+      }
+      if (legacyUncontractedReservation) {
+        fail("SCOPE_MISMATCH", "an uncontracted legacy discovery reservation cannot alter the durable sidecar");
+      }
+      if (snapshot === null && currentBound) {
+        fail("SCOPE_MISMATCH", "unbound discovery work cannot alter the current bound sidecar");
+      }
+      if (!Object.prototype.hasOwnProperty.call(patch, "status")) {
+        fail("INVALID_INPUT", "causal_discovery apply requires discovery_sidecar.status");
+      }
+      assertEnum(
+        patch.status,
+        ["scoped", "artifact_created", "reviewed", "blocked"],
+        "updates.discovery_sidecar.status",
+        "INVALID_INPUT"
+      );
+      const hasReservation = operation.artifact_intent !== null;
+      if (hasArtifact) {
+        if (snapshot === null || operation.scope_ref === null) {
+          fail("SCOPE_MISMATCH", "a discovery artifact requires a frozen discovery scope");
+        }
+        if (patch.status !== "artifact_created") {
+          fail("SCOPE_MISMATCH", "a discovery artifact requires status artifact_created");
+        }
+      } else if (patch.status === "artifact_created") {
+        fail("SCOPE_MISMATCH", "status artifact_created requires a completed discovery artifact");
+      }
+      if (hasReservation && !hasArtifact && patch.status !== "blocked") {
+        fail("SCOPE_MISMATCH", "a reserved discovery run must publish its artifact or return blocked");
+      }
+      if (!hasReservation && snapshot !== null && snapshot.transition === "preserve" && !["reviewed", "blocked"].includes(patch.status)) {
+        fail("SCOPE_MISMATCH", "an exact-scope discovery handoff without output must be reviewed or blocked");
+      }
+      if (!hasReservation && snapshot !== null && ["new", "revise"].includes(snapshot.transition) && !["scoped", "blocked"].includes(patch.status)) {
+        fail("SCOPE_MISMATCH", "a no-output new or revised discovery handoff must be scoped or blocked");
+      }
+      if (patch.status === "scoped" && snapshot === null) {
+        fail("SCOPE_MISMATCH", "status scoped requires a complete discovery contract");
+      }
+      if (snapshot !== null) {
+        if (["new", "revise"].includes(snapshot.transition)) {
+          state.discovery_sidecar = emptyDiscoverySidecar();
+          state.council_chamber.causal_discovery = emptyChamberSlot();
+        }
+        patch.scope_id = operation.scope_ref.id;
+        patch.scope_revision = operation.scope_ref.revision;
+        patch.execution_contract = clone(snapshot.contract);
+      }
+      if (hasArtifact) {
+        const refs = [
+          ...state.discovery_sidecar.artifact_refs,
+          ...patch.artifact_refs ?? [],
+          operation.artifact_intent.location
+        ];
+        patch.artifact_refs = [...new Set(refs)];
       }
     }
     function validateScopeCompletion(state, actor, updates, hasArtifact) {
@@ -9389,6 +9801,7 @@ var require_core = __commonJS({
         "actor",
         "updates",
         "scope_transition",
+        "discovery_scope",
         "artifact"
       ]);
       assertKnownKeys(payload, allowedInput, "apply input", "INVALID_INPUT");
@@ -9397,8 +9810,21 @@ var require_core = __commonJS({
       if (payload.actor !== planInfo.actor) fail("PLAN_MISMATCH", `apply actor must be ${planInfo.actor}`);
       validateOwnedUpdates(payload.actor, payload.updates);
       const updates = clone(payload.updates);
+      const hasArtifact = payload.artifact !== void 0 && payload.artifact !== null;
+      if (payload.discovery_scope !== void 0) {
+        if (payload.actor !== "causal_discovery") {
+          fail("OWNERSHIP_VIOLATION", `${payload.actor} cannot set discovery_scope`);
+        }
+        if (hasArtifact || operation.artifact_intent !== null) {
+          fail(
+            "SCOPE_MISMATCH",
+            "apply may bind discovery_scope only before output is reserved and without an artifact"
+          );
+        }
+        bindDiscoveryScope(state, operation, payload.discovery_scope, "apply discovery_scope");
+      }
       const hadApprovedScope = operation.scope_ref !== null;
-      if (payload.artifact !== void 0 && payload.artifact !== null && (payload.actor === "report_writer" || payload.actor.startsWith("analysis_execution.")) && !hadApprovedScope) {
+      if (hasArtifact && (payload.actor === "report_writer" || payload.actor.startsWith("analysis_execution.")) && !hadApprovedScope) {
         fail("SCOPE_MISMATCH", `${payload.actor} cannot publish output without the scope_ref bound by begin`);
       }
       if (payload.actor.startsWith("analysis_execution.")) {
@@ -9425,15 +9851,16 @@ var require_core = __commonJS({
         payload.actor,
         updates,
         payload.scope_transition,
-        payload.artifact !== void 0 && payload.artifact !== null
+        hasArtifact
       );
       resetNewScopeState(state, payload.actor, payload.scope_transition);
+      applyDiscoveryHandoff(state, operation, payload.actor, updates, hasArtifact);
       normalizeCompletedHandoff(updates, payload.actor, payload.artifact);
       stampWorkerUpdates(updates, payload.actor, nowIso());
-      const hasArtifact = payload.artifact !== void 0 && payload.artifact !== null;
       const merged = deepMerge(state, updates);
       validateCausalCheckReadiness(merged, payload.actor, updates);
       validateScopeCompletion(merged, payload.actor, updates, hasArtifact);
+      const abandonedLegacyDiscoveryArtifact = payload.actor === "causal_discovery" && operation.discovery_scope === null && operation.scope_ref === null && !hasArtifact && updates.council_chamber.causal_discovery.current_status === "blocked";
       let artifactRecord = null;
       if (hasArtifact) {
         if (!operation.artifact_intent) fail("MISSING_ARTIFACT", "artifact output was not reserved");
@@ -9442,7 +9869,7 @@ var require_core = __commonJS({
         }
         publishReservedArtifact(projectRoot, operation, payload.actor, payload.artifact);
         artifactRecord = appendArtifactRecord(merged, projectRoot, operation, payload.actor, payload.artifact);
-      } else if (operation.artifact_intent) {
+      } else if (operation.artifact_intent && !abandonedLegacyDiscoveryArtifact) {
         const artifactStatus = inspectReservedArtifact(projectRoot, operation, payload.actor);
         if (!["absent", "temp-only"].includes(artifactStatus.location_state)) {
           if (artifactStatus.location_state === "collision") {
@@ -9695,7 +10122,14 @@ ${presentation.next_steps}`);
         current_status: state.council_chamber.report_writer.current_status,
         last_updated: state.council_chamber.report_writer.last_updated
       };
-      return { analysis, report };
+      const discovery = state.discovery_sidecar.scope_id === null ? null : {
+        scope_id: state.discovery_sidecar.scope_id,
+        scope_revision: state.discovery_sidecar.scope_revision,
+        status: state.discovery_sidecar.status,
+        execution_contract: clone(state.discovery_sidecar.execution_contract),
+        last_updated: state.discovery_sidecar.last_updated
+      };
+      return { analysis, report, discovery };
     }
     function validateProject2({ projectRoot }) {
       const root = path2.resolve(projectRoot);
@@ -9731,7 +10165,8 @@ ${presentation.next_steps}`);
           response_rendering: 1,
           pending_decision: 1,
           response_receipt: 1,
-          startup_notice: 1
+          startup_notice: 1,
+          discovery_contract: 1
         }
       };
     }

@@ -11,15 +11,18 @@ Use exactly one reserved artifact per output-producing operation:
    meaningful file or directory name tied to the work, never a timestamp-only
    name. The controller returns an operation-unique final location under
    `output/` and a project-relative `temporary_path`.
-2. Write only to `temporary_path`. Do not write into an unrelated output folder
-   or adopt an unreserved path.
+2. Resolve `temporary_path` against the project root and write only to that
+   absolute path. Do not write into an unrelated output folder or adopt an
+   unreserved path.
 3. Validate the output against the persisted assignment and, when present, the
-   approved scope before submission. Files must open or parse. Every promised
-   deliverable must exist in its promised rendered form before `done`; source
-   data does not substitute for a rendered figure, table, or document. Required
+   bound analysis/report scope or frozen discovery contract before submission.
+   Files must open or parse. Every promised deliverable must exist in its
+   promised rendered form before a completion handoff; source data does not
+   substitute for a rendered figure, table, or document. Required
    diagnostics must exist, and required code or notebooks must run.
-   Reports must render with their required content and boundary language; HTML reports
-   must also have valid fragment targets and resolvable project-local links.
+   Reports must render with their required content and boundary language; HTML
+   reports must also have valid fragment targets and resolvable project-local
+   links.
    If validation fails, correct the temporary output and revalidate within the
    same operation when possible. Do not submit the artifact or mark the route
    done unless validation passes. If validation cannot be completed, return the
@@ -27,10 +30,13 @@ Use exactly one reserved artifact per output-producing operation:
    requires it.
 4. Submit the owner-scoped state patch and `artifact: {summary}` through
    `statectl apply`. The controller derives the manifest identity, timestamp,
-   scope reference, and file inventory, atomically publishes the exact reserved
-   temporary output, and appends the artifact record.
-   Persist and link only the returned `artifact_intent.location`; never store
-   `temporary_path` or `manifest_path` in route-owned state.
+   scope reference, frozen discovery contract when applicable, and file
+   inventory, atomically publishes the exact reserved temporary output, and
+   appends the artifact record.
+   For the newly created output, persist and link only the returned
+   `artifact_intent.location`; separately identified input or historical paths
+   remain governed by the active route. Never store `temporary_path` or
+   `manifest_path` in route-owned state.
 
 If `apply` fails or is interrupted, reopen the state and follow its artifact
 status. Reuse valid output only at the exact reserved temporary or final path.

@@ -1,5 +1,5 @@
 state_meta:
-  schema_version: 3
+  schema_version: 4
   project_id: null
   revision: 0
   created_at: null
@@ -109,6 +109,9 @@ causal_facts:
 
 discovery_sidecar:
   last_updated: null
+  scope_id: null
+  scope_revision: 0
+  execution_contract: null
   status: not_started
   goal: null
   scope: null

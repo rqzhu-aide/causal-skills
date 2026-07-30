@@ -53,15 +53,19 @@ work, and summarize completed artifacts.
    queues active work. Finish it first; new work is outside its assignment.
    Persisted `intent_summary`, route, and `scope_ref` remain authoritative;
    do not expand them on resume. At `worker_pending`, only a non-null `scope_ref`
-   supplied to `begin` records exact scope approval. At `lead_pending`, a
-   `scope_ref` identifies the resulting scope handoff and is not approval
-   evidence by itself; use the planned route's authoritative handoff status and
-   required evidence for closeout.
+   for analysis or report work records exact scope approval. A discovery
+   `scope_ref` binds an exact discovery contract and is never approval
+   evidence. At `lead_pending`, a `scope_ref` identifies the resulting scope
+   handoff; use the planned route's authoritative state and required evidence
+   for closeout.
 5. For a new operation, read `references/route_index.yaml` and
    `references/route_selection_workflow.md`. Infer one dominant intention and
    prepare exactly one allowed assignment. Call `statectl begin` with a JSON
    payload; the controller constructs and commits `next_step_plan`. Do not load
    a worker until `begin` succeeds.
+   After this skill is explicitly activated, even synthesis, clarification,
+   thanks, or no-state-change replies use a team-lead operation; never answer
+   directly because no durable update appears necessary.
 6. If the plan has a non-`team_lead` route, load that route reference. For
    `analysis_execution.<design_id>`, load the matching design reference and its
    optional support reference; there is no separate analysis-execution route
@@ -109,13 +113,18 @@ latest successful controller result. Command-specific fields are:
 
 - `begin`: either `selection: {decision_id, option_number}` for the pending
   decision, or a normal `route`, `intent_summary`, optional `support`, and
-  optional exact `scope_ref`.
+  optional exact analysis, report, or discovery `scope_ref`.
 - `reserve-artifact`: `operation_id`, `kind` (`file` or `directory`), `slug`,
-  and `extension` when `kind` is `file`; omit `extension` for a directory.
+  and `extension` when `kind` is `file`; omit `extension` for a directory. An
+  unbound discovery run also supplies
+  `discovery_scope: {transition, contract}` as defined by
+  `references/causal_discovery.md`.
 - `apply`: `operation_id`, `actor`, owner-scoped `updates`, and optional
   completed `artifact: {summary}`. Analysis and report workers must also supply
-  `scope_transition` (`new`, `revise`, or `preserve`); other workers must omit
-  it.
+  `scope_transition` (`new`, `revise`, or `preserve`). An unbound
+  discovery scope-only or blocked handoff may instead supply
+  `discovery_scope` only when no artifact is reserved; it never accompanies
+  `artifact`. Other workers omit both fields.
 - `finish`: `operation_id`, optional semantic
   `updates: {project_summary: {...}}`, and `team_lead.md`'s structured
   `presentation`; add `--cancel` only after explicit cancellation and omit updates.

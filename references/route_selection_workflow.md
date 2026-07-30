@@ -30,8 +30,8 @@ needed.
 
 ## Conditional Routing References
 
-Load conditional routing references only after the intention check below selects
-that branch:
+After the intention check identifies report or analysis work, load its
+conditional routing reference before selecting the final route:
 
 - `references/report_routing_workflow.md`: report requests, report approval,
   reviewer-facing writing, limitations wording, report output, or recent
@@ -81,14 +81,25 @@ When a matching pending decision exists, submit an unmodified choice as
 `selection: {decision_id, option_number}`. The controller retrieves its
 assignment; do not reconstruct it.
 
-Include `scope_ref` only when routing approval of an existing ready analysis or
-report scope. A non-null `scope_ref` accepted by `begin` records that approval
-for worker resume; the worker does not re-decide it from a later message. Write
-`intent_summary` as a resumable assignment naming the requested action and only
-the essential target, material identifier or path, and output constraint needed
-to restart the route. Do not store transcript, detailed route payloads, scope
-cards, approval prose, mode flags, or route findings there; route-owned state
-holds the detail.
+For analysis or report execution, include the exact ready `scope_ref`; its
+acceptance records approval for worker resume. For unchanged execution or review
+of the current discovery contract, include its exact discovery `scope_ref` only
+when both scope identity and contract are present; legacy status alone is not
+runnable. This binds the work definition but is not approval. A materially
+changed or independent discovery exercise begins unbound, and its worker freezes
+`revise` or `new`. Existing-material review without new output remains unbound
+and cannot alter the current sidecar. Output-producing review follows the new or
+revised exercise rule; replacement of an occupied sidecar must be clear from the
+request or a prior option. If the message does not distinguish unchanged work
+from new or revised work, plan only `team_lead`. The worker does not re-decide a
+bound scope from a later message.
+
+Write `intent_summary` as a resumable assignment naming the requested action
+and only the essential target, material identifier or path, and output
+constraint needed to restart the route. For discovery, identify whether the
+assignment scopes, revises, reviews, or runs the exercise. Do not store
+transcript, detailed route payloads, scope cards, approval prose, mode flags,
+or route findings there; route-owned state holds the detail.
 
 ## Routing Priority
 
@@ -105,9 +116,10 @@ or clarification.
 A successful selection consumes the decision; any successful normal `begin`
 supersedes it.
 Analysis or report execution requires one uniquely identified ready scope whose
-identity and revision have not changed since presentation. If an approval or
-execution request names a noncurrent scope, treat it as stale approval and plan
-only `team_lead`; do not route restoration, revision, or execution.
+identity and revision have not changed since presentation. If the referenced
+scope was already noncurrent before this message, treat approval as stale and
+plan only `team_lead`. If the message itself changes the current scope, treat it
+as revision and route the owning worker without `scope_ref`.
 
 Apply these rules in order:
 
@@ -137,12 +149,12 @@ For in-scope work selection after the conversation match:
 - If a clear strong preference stays inside causal, data, discovery, or report
   boundaries, route that preference.
 - If user-provided information still lacks relevant core review, route the most
-  relevant unreviewed or stale core member.
+  relevant unreviewed or stale core member. For a discovery run, an already-known
+  missing review that would materially change execution or interpretation takes
+  precedence; discovery handles blockers first found during its own work.
 - If the intended action, target, claim boundary, output, or authorization
   remains materially ambiguous, plan only `team_lead`. Otherwise choose the
   most useful valid route; the user need not name it.
-- Load the report or analysis routing reference only when the selected branch is
-  report or analysis work.
 
 For exploration:
 
@@ -159,9 +171,17 @@ For exploration:
 - Plan `domain_expert` when the user gives a domain, setting, population,
   construct, measurement, endpoint, integration issue, field-practice question,
   common-practice question, precedent, reporting norm, or standard outcome.
-- Plan `causal_discovery` when the request is about graph structure, variable
-  neighborhoods, discovery artifacts, graph-informed feature work, local
-  screening, time-series graph exploration, or reviewing discovery output.
+- Plan `causal_discovery` when a sufficiently identified request is about graph
+  structure, variable neighborhoods, discovery artifacts, graph-informed
+  feature work, local screening, time-series graph exploration, or reviewing
+  discovery output. Technical uncertainty inside a clear discovery request
+  belongs to that route, which may scope or block. Plan only `team_lead` when
+  user input is needed to identify the discovery target or authorize output.
+  For a direct run, the target, inputs, variable set, output form, and output
+  authorization must be identifiable; the worker chooses method and diagnostic
+  details not fixed by the request. Otherwise route scope-only discovery when
+  requested,
+  or `team_lead` when user input is needed.
 - Prefer missing checks before improving limited checks.
 - If multiple checks are missing, choose the one most directly connected to the
   user's current request.

@@ -25,8 +25,10 @@ When `next_step_plan` contains an `analysis_execution.<design_id>` entry, parse
   active operation
 
 Only a committed `analysis_execution.<design_id>` worker handoff establishes
-that the current operation prepared or revised an analysis scope. In a
-team-lead-only or core-route operation, an existing analysis handoff is prior
+that the current operation prepared or revised an analysis scope. Allow
+necessary design details within that handoff, but do not offer approval for a
+distinct target or separately reportable result beyond the persisted assignment.
+In a team-lead-only or core-route operation, an existing analysis handoff is prior
 work, not work completed this round. A missing handoff or null or `requested`
 status means no completed scope handoff exists; state that boundary and do not
 offer approval or execution.

@@ -16,12 +16,58 @@ when the committed plan's worker route is exactly `causal_discovery`.
 
 Use `state_meta.active_operation.intent_summary`, live state, inspectable data,
 routed graph/data/artifact materials, and any consistent detail still available
-from the operation-opening message as the assignment. On resume, a new message
-does not change it. Submit one `statectl apply` JSON payload with
-`actor: causal_discovery`, `updates` containing only `discovery_sidecar` and
-`council_chamber.causal_discovery`, and optional top-level `artifact`. The
-controller owns timestamps, artifact records, and transition to `lead_pending`;
-never edit the YAML, plan, or project summary directly.
+from the operation-opening message as the assignment. A non-null
+`active_operation.discovery_scope` is the exact frozen work definition. On
+resume, neither a new message nor technical convenience changes it.
+
+Submit one `statectl apply` JSON payload with `actor: causal_discovery`,
+`updates` containing `council_chamber.causal_discovery` and, when allowed
+below, `discovery_sidecar`. Add an optional completed `artifact` or no-output
+`discovery_scope` when applicable. Never submit both together. The controller
+owns scope identity, the stored execution contract, timestamps, artifact
+records, and transition to `lead_pending`; never edit those fields or the YAML
+directly.
+
+## Mechanical Discovery Contract
+
+A discovery contract is a reproducible work definition, not an analysis scope,
+causal-validity gate, or approval requirement. It contains exactly:
+
+- `target`: a nonempty graph, neighborhood, ranking, or stability target;
+- `input_refs`: a nonempty array of unique data or artifact inputs;
+- `variables`: a nonempty array of unique variables;
+- `method_plan`: a nonempty exact named method or method sequence;
+- `constraints`: a unique string array, which may be empty;
+- `diagnostic_requirements`: a unique string array, which may be empty;
+- `output_type`: a nonempty promised discovery output;
+- `claim_boundary`: the literal `candidate_only`.
+
+All strings are trimmed and nonempty. Use `new` for an independent target,
+input, or output exercise; use `revise` only when materially updating the
+same exercise.
+
+Use the existing controller boundaries:
+
+- To scope or materially revise work without output, submit
+  `discovery_scope: {transition: new | revise, contract: {...}}` through
+  `apply` without reserving output.
+- For a direct new or revised run, submit that same object through
+  `reserve-artifact`; reservation freezes it before any output work.
+- To run or review the current contract, begin with its exact discovery
+  `scope_ref`; the controller copies and freezes the contract.
+- Existing-material review with no new output may remain unbound. Review that
+  creates output follows the `new` or `revise` rule. Do not replace an occupied
+  sidecar unless the request or selected option clearly authorized replacement.
+- If a resumed legacy reservation has no frozen discovery scope, preserve its
+  files and sidecar and return a chamber-only `blocked` handoff.
+
+A clear request to run discovery is sufficient authorization. No separate
+approval, `ready` status, causal review, or analysis eligibility is required.
+If a frozen target, input, variable, method plan, constraint, diagnostic,
+output, or boundary cannot be followed, return `blocked` without an artifact;
+never substitute a different run. A reserved run ends only as
+`artifact_created` with its artifact or `blocked` without one. The controller
+checks identity and exact contract equality, not scientific adequacy.
 
 ## Discovery Engineering Scope
 
@@ -49,28 +95,26 @@ approval-bound `analysis_execution` operation.
 
 Classify the route work before acting:
 
-- **Scope or review only**: define the graph/discovery target, variable set,
-  assumptions, missing prerequisites, diagnostics needed, or reviewer requests;
-  create no output folders or `artifact_records`.
-- **Existing artifact review**: inspect routed graph outputs, edge tables, code,
-  diagnostics, or report material; record inspected paths in
-  `discovery_sidecar.artifact_refs`; create a new artifact only if a useful
-  review note, table, or diagnostic output is produced.
-- **Bounded discovery run**: run discovery, local screening, graph diagnostics,
-  stability checks, or feature/neighborhood construction only when actual data
-  or routed artifacts exist and the scope is clear enough.
-- **Blocked**: stop with sidecar and chamber feedback when the variable set,
-  timing, graph target, data access, package/tool availability, or diagnostic
-  requirements are too unclear for responsible discovery work.
+- **Scope only**: define and persist a complete contract; create no output.
+- **Existing artifact review**: inspect routed output and remain unbound unless
+  the operation creates a new artifact under an authorized new or revised
+  contract. Record the path in the sidecar when that sidecar can be updated;
+  otherwise identify the material in the chamber handoff.
+- **Bounded discovery run**: execute only the frozen contract against actual
+  data or routed artifacts, including its required diagnostics.
+- **Blocked**: stop without output when the requested contract cannot be
+  stated or followed, including unavailable packages or inputs.
 
-If a missing data, domain, or causal review would materially change discovery
-interpretation, write a reviewer request instead of running or overinterpreting
-the discovery result.
+If route work reveals a missing data, domain, or causal review that would
+materially change interpretation, write a reviewer request instead of running
+or overinterpreting the discovery result.
 
 ## Method And Diagnostic Logic
 
-Use discovery packages as hypothesis tools, not authorities. Choose method lanes
-from the graph target, data structure, and assumptions:
+Use discovery packages as hypothesis tools, not authorities. Choose a method lane
+only while forming a new or revised contract. Once frozen, follow the declared
+method plan or block. Base a new lane on the graph target, data structure, and
+assumptions:
 
 - PC, stable-PC, GES, or score search for IID settings where causal sufficiency
   is plausible enough for CPDAG/DAG exploration.
@@ -112,8 +156,10 @@ If diagnostics are missing, label the finding as `candidate_only` or
 
 Submit supported `discovery_sidecar` fields when supported by the request:
 
-- `status`: `not_started`, `scoped`, `artifact_created`, `reviewed`, or
-  `blocked`.
+- `status`: `scoped` for a persisted contract without output;
+  `artifact_created` when this operation published output;
+  `reviewed` for existing-material review without new output; or `blocked` when
+  the requested lane could not complete.
 - `goal`: discovery purpose or graph question.
 - `scope`: compact graph target, focal variables, data/artifact inputs,
   assumptions, and limits.
@@ -151,28 +197,26 @@ wording.
 
 ## Discovery Artifacts
 
-Create discovery artifacts only when the current request clearly authorizes
-bounded discovery work with actual data or routed artifacts. Otherwise write
-scoped findings, limitations, reviewer requests, and chamber feedback only.
+Create discovery artifacts only when the current request authorizes output, actual
+data or routed artifacts exist, and the controller has frozen a contract.
+Otherwise return scoped, reviewed, or blocked state without new output.
 
 Valid discovery artifacts include graph objects, edge tables, local-neighborhood
 tables, stability tables, graph plots, diagnostic figures, source scripts,
 notebooks, and technical notes.
 
-When a graph object, table, figure, script, notebook, or technical note is
-created, follow `references/artifact_output_policy.md` and include compact
-`discovery_sidecar` references in the same `statectl apply` payload.
+When output is created, follow `references/artifact_output_policy.md`. The
+controller binds its manifest to the frozen contract and adds the final location
+to `discovery_sidecar.artifact_refs`; identify inspected historical paths
+separately when relevant.
 
 Do not reserve or submit an artifact for verbal discovery framing or for
 inspecting existing files without creating new durable output.
 
 ## Boundaries
 
-Discovery output is exploratory candidate evidence. It may suggest graph
-hypotheses, feature groups, local neighborhoods, edge uncertainty, diagnostic
-needs, and reviewer requests, but it cannot prove causal direction, validate
-adjustment, select the final causal method, estimate effects, open a validity
-gate, or strengthen report wording.
+The Discovery Engineering Scope boundary above controls every discovery handoff
+and artifact.
 
 If discovery output could affect adjustment, timing logic, estimand, method
 choice, claim feasibility, or report wording, write a reviewer request instead

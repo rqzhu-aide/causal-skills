@@ -78,11 +78,27 @@ function writeState(projectRoot, state) {
 
 function downgradeCurrentStateToV2(projectRoot) {
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 3);
+  assert.equal(state.state_meta.schema_version, 4);
   state.state_meta.schema_version = 2;
   delete state.state_meta.startup_notice;
   delete state.pending_decision;
   delete state.response_receipt;
+  delete state.discovery_sidecar.scope_id;
+  delete state.discovery_sidecar.scope_revision;
+  delete state.discovery_sidecar.execution_contract;
+  if (state.state_meta.active_operation !== null) delete state.state_meta.active_operation.discovery_scope;
+  writeState(projectRoot, state);
+  return state;
+}
+
+function downgradeCurrentStateToV3(projectRoot) {
+  const state = readState(projectRoot);
+  assert.equal(state.state_meta.schema_version, 4);
+  state.state_meta.schema_version = 3;
+  delete state.discovery_sidecar.scope_id;
+  delete state.discovery_sidecar.scope_revision;
+  delete state.discovery_sidecar.execution_contract;
+  if (state.state_meta.active_operation !== null) delete state.state_meta.active_operation.discovery_scope;
   writeState(projectRoot, state);
   return state;
 }
@@ -116,6 +132,21 @@ const DEFAULT_PRESENTATION = Object.freeze({
   boundary: "No additional boundary changed.",
   next_steps: "Continue with the next requested step.",
 });
+
+const DEFAULT_DISCOVERY_CONTRACT = Object.freeze({
+  target: "Candidate structure around treatment and outcome",
+  input_refs: ["data/study.csv"],
+  variables: ["treatment", "outcome", "age"],
+  method_plan: "stable-pc",
+  constraints: ["treatment precedes outcome"],
+  diagnostic_requirements: ["bootstrap edge stability"],
+  output_type: "CPDAG and edge-stability table",
+  claim_boundary: "candidate_only",
+});
+
+function discoveryScope(transition, contract = DEFAULT_DISCOVERY_CONTRACT) {
+  return { transition, contract: structuredClone(contract) };
+}
 
 function decisionOption(label, route, extras = {}) {
   return {
@@ -298,7 +329,7 @@ test("open creates a valid state and a normal open is a byte-preserving no-op", 
   const firstBytes = fs.readFileSync(statePath(projectRoot), "utf8");
   const state = readState(projectRoot);
 
-  assert.equal(state.state_meta.schema_version, 3);
+  assert.equal(state.state_meta.schema_version, 4);
   assert.equal(state.state_meta.project_id, created.project_id);
   assert.equal(state.state_meta.revision, 0);
   assert.equal(state.state_meta.active_operation, null);
@@ -377,6 +408,7 @@ test("validate exposes a deterministic scope snapshot without mutating state", (
       current_status: "ready",
       last_updated: null,
     },
+    discovery: null,
   });
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
 });
@@ -425,7 +457,7 @@ test("supported v4.5 migration preserves evidence, adds identities, and is idemp
   }]);
 
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 3);
+  assert.equal(state.state_meta.schema_version, 4);
   assert.equal(state.state_meta.startup_notice, null);
   assert.equal(state.pending_decision, null);
   assert.equal(state.response_receipt, null);
@@ -1159,7 +1191,7 @@ test("domain, causal-check, and discovery workers can update only their owned se
     {
       actor: "causal_discovery",
       root: "discovery_sidecar",
-      patch: { status: "scoped", goal: "Explore candidate structure" },
+      patch: { status: "reviewed", goal: "Review candidate structure" },
     },
   ];
   for (const scenario of cases) {
@@ -1189,6 +1221,560 @@ test("domain, causal-check, and discovery workers can update only their owned se
       expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
     });
   }
+});
+
+test("discovery scope-only work persists one exact contract and later begin binds it without approval", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "causal_discovery"), "BEGAN_WORKER");
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "causal_discovery",
+      discovery_scope: discoveryScope("new"),
+      updates: {
+        discovery_sidecar: {
+          status: "scoped",
+          goal: DEFAULT_DISCOVERY_CONTRACT.target,
+          scope: "Use the declared inputs, variables, constraints, and diagnostics.",
+          method_summary: "Scope only; no discovery run was performed.",
+        },
+        council_chamber: {
+          causal_discovery: {
+            current_status: "scoped",
+            summary: "The bounded discovery exercise is scoped but has not run.",
+            questions_for_user: [],
+            feedback_to_route: [],
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+
+  const scopedState = readState(projectRoot);
+  const scopeRef = scopedState.state_meta.active_operation.scope_ref;
+  assert.equal(scopeRef.kind, "discovery");
+  assert.equal(scopeRef.revision, 1);
+  assert.match(scopeRef.id, /^[0-9a-f-]{36}$/);
+  assert.equal(scopedState.discovery_sidecar.scope_id, scopeRef.id);
+  assert.equal(scopedState.discovery_sidecar.scope_revision, 1);
+  assert.deepEqual(scopedState.discovery_sidecar.execution_contract, DEFAULT_DISCOVERY_CONTRACT);
+  assert.equal(scopedState.discovery_sidecar.status, "scoped");
+  assert.deepEqual(scopedState.artifact_records, []);
+
+  const closed = expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+  const exact = { kind: "discovery", id: scopeRef.id, revision: 1 };
+  const bound = expectSuccess(begin(projectRoot, closed, "causal_discovery", {
+    scope_ref: exact,
+  }), "BEGAN_WORKER");
+  assert.deepEqual(readState(projectRoot).state_meta.active_operation.discovery_scope, {
+    transition: "preserve",
+    base_ref: exact,
+    contract: DEFAULT_DISCOVERY_CONTRACT,
+  });
+  expectSuccess(finish(projectRoot, bound, {}, { cancel: true }), "OPERATION_CANCELLED");
+
+  const idle = expectSuccess(execute(projectRoot, "open"), "OPENED");
+  const before = fs.readFileSync(statePath(projectRoot), "utf8");
+  expectFailure(begin(projectRoot, idle, "causal_discovery", {
+    scope_ref: { ...exact, revision: 2 },
+  }), "SCOPE_MISMATCH");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+});
+
+test("discovery contract revision is controller-owned and keeps or replaces identity correctly", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const first = expectSuccess(begin(projectRoot, opened, "causal_discovery"), "BEGAN_WORKER");
+  const firstApplied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(first),
+      operation_id: first.operation_id,
+      actor: "causal_discovery",
+      discovery_scope: discoveryScope("new"),
+      updates: {
+        discovery_sidecar: { status: "scoped" },
+        council_chamber: { causal_discovery: { current_status: "scoped" } },
+      },
+    },
+  }), "WORKER_APPLIED");
+  const original = readState(projectRoot).discovery_sidecar;
+  const closed = expectSuccess(finish(projectRoot, firstApplied), "OPERATION_FINISHED");
+
+  const revisedContract = {
+    ...DEFAULT_DISCOVERY_CONTRACT,
+    method_plan: "ges",
+  };
+  const revise = expectSuccess(begin(projectRoot, closed, "causal_discovery"), "BEGAN_WORKER");
+  const revised = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(revise),
+      operation_id: revise.operation_id,
+      actor: "causal_discovery",
+      discovery_scope: discoveryScope("revise", revisedContract),
+      updates: {
+        discovery_sidecar: { status: "scoped" },
+        council_chamber: { causal_discovery: { current_status: "scoped" } },
+      },
+    },
+  }), "WORKER_APPLIED");
+  const revisedState = readState(projectRoot);
+  assert.equal(revisedState.discovery_sidecar.scope_id, original.scope_id);
+  assert.equal(revisedState.discovery_sidecar.scope_revision, 2);
+  assert.deepEqual(revisedState.discovery_sidecar.execution_contract, revisedContract);
+  const revisedClosed = expectSuccess(finish(projectRoot, revised), "OPERATION_FINISHED");
+
+  const replacement = expectSuccess(begin(projectRoot, revisedClosed, "causal_discovery"), "BEGAN_WORKER");
+  const replaced = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(replacement),
+      operation_id: replacement.operation_id,
+      actor: "causal_discovery",
+      discovery_scope: discoveryScope("new"),
+      updates: {
+        discovery_sidecar: { status: "scoped" },
+        council_chamber: { causal_discovery: { current_status: "scoped" } },
+      },
+    },
+  }), "WORKER_APPLIED");
+  const replacedState = readState(projectRoot);
+  assert.notEqual(replacedState.discovery_sidecar.scope_id, original.scope_id);
+  assert.equal(replacedState.discovery_sidecar.scope_revision, 1);
+  const replacementClosed = expectSuccess(finish(projectRoot, replaced), "OPERATION_FINISHED");
+
+  const next = expectSuccess(begin(projectRoot, replacementClosed, "causal_discovery"), "BEGAN_WORKER");
+  const bytes = fs.readFileSync(statePath(projectRoot), "utf8");
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(next),
+      operation_id: next.operation_id,
+      actor: "causal_discovery",
+      updates: {
+        discovery_sidecar: {
+          status: "scoped",
+          execution_contract: structuredClone(DEFAULT_DISCOVERY_CONTRACT),
+        },
+        council_chamber: { causal_discovery: { current_status: "scoped" } },
+      },
+    },
+  }), "OWNERSHIP_VIOLATION");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), bytes);
+  expectSuccess(finish(projectRoot, next, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
+test("direct discovery output freezes its contract at reservation and records the exact scope", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "causal_discovery"), "BEGAN_WORKER");
+  const before = fs.readFileSync(statePath(projectRoot), "utf8");
+  expectFailure(execute(projectRoot, "reserve-artifact", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      kind: "file",
+      slug: "candidate-graph",
+      extension: "csv",
+    },
+  }), "SCOPE_MISMATCH");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+
+  const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      kind: "file",
+      slug: "candidate-graph",
+      extension: "csv",
+      discovery_scope: discoveryScope("new"),
+    },
+  }), "ARTIFACT_RESERVED");
+  assert.equal(reserved.scope_ref.kind, "discovery");
+  assert.deepEqual(reserved.discovery_scope.contract, DEFAULT_DISCOVERY_CONTRACT);
+  const resumed = expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER");
+  assert.deepEqual(resumed.active_operation.discovery_scope, reserved.discovery_scope);
+  const frozenBytes = fs.readFileSync(statePath(projectRoot), "utf8");
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: started.operation_id,
+      actor: "causal_discovery",
+      discovery_scope: discoveryScope("new", {
+        ...DEFAULT_DISCOVERY_CONTRACT,
+        method_plan: "tabu-search",
+      }),
+      updates: {
+        discovery_sidecar: { status: "blocked" },
+        council_chamber: { causal_discovery: { current_status: "blocked" } },
+      },
+    },
+  }), "SCOPE_MISMATCH");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), frozenBytes);
+
+  const temporary = path.join(projectRoot, ...reserved.temporary_path.split("/"));
+  fs.mkdirSync(path.dirname(temporary), { recursive: true });
+  fs.writeFileSync(temporary, "from,to,stability\ntreatment,outcome,0.72\n", "utf8");
+  const summary = "Candidate graph and stability output completed.";
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: started.operation_id,
+      actor: "causal_discovery",
+      updates: {
+        discovery_sidecar: {
+          status: "reviewed",
+          method_summary: "Stable-PC candidate discovery with bootstrap stability.",
+        },
+        council_chamber: {
+          causal_discovery: {
+            current_status: "reviewed",
+            summary,
+            questions_for_user: [],
+            feedback_to_route: [],
+          },
+        },
+      },
+      artifact: { summary },
+    },
+  }), "SCOPE_MISMATCH");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), frozenBytes);
+  assert.equal(fs.existsSync(temporary), true);
+
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: started.operation_id,
+      actor: "causal_discovery",
+      updates: {
+        discovery_sidecar: {
+          status: "artifact_created",
+          method_summary: "Stable-PC candidate discovery with bootstrap stability.",
+          findings: ["One candidate adjacency was retained."],
+          diagnostics: ["Bootstrap stability completed."],
+          limitations: ["Orientations remain candidate-only."],
+        },
+        council_chamber: {
+          causal_discovery: {
+            current_status: "artifact_created",
+            summary,
+            questions_for_user: [],
+            feedback_to_route: ["Ask causal_check to assess any downstream implication."],
+          },
+        },
+      },
+      artifact: { summary },
+    },
+  }), "WORKER_APPLIED");
+  const state = readState(projectRoot);
+  assert.deepEqual(state.discovery_sidecar.execution_contract, DEFAULT_DISCOVERY_CONTRACT);
+  assert.deepEqual(state.discovery_sidecar.artifact_refs, [reserved.artifact_intent.location]);
+  assert.equal(state.artifact_records.length, 1);
+  assert.equal(state.artifact_records[0].location, reserved.artifact_intent.location);
+  const manifestPath = path.join(
+    projectRoot,
+    `${reserved.artifact_intent.location}.manifest.json`,
+  );
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  assert.deepEqual(manifest.scope_ref, reserved.scope_ref);
+  assert.deepEqual(manifest.discovery_contract, DEFAULT_DISCOVERY_CONTRACT);
+  expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+
+  fs.writeFileSync(manifestPath, "null\n", "utf8");
+  const warnings = expectSuccess(execute(projectRoot, "open"), "OPENED").warnings;
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].code, "INVALID_HISTORICAL_ARTIFACT_MANIFEST");
+});
+
+test("discovery output and status mismatches fail atomically while review and blocking remain unbound", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const review = expectSuccess(begin(projectRoot, opened, "causal_discovery"), "BEGAN_WORKER");
+  const reviewed = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(review),
+      operation_id: review.operation_id,
+      actor: "causal_discovery",
+      updates: {
+        discovery_sidecar: { status: "reviewed", artifact_refs: ["input/graph.json"] },
+        council_chamber: { causal_discovery: { current_status: "reviewed" } },
+      },
+    },
+  }), "WORKER_APPLIED");
+  assert.equal(readState(projectRoot).discovery_sidecar.scope_id, null);
+  const closed = expectSuccess(finish(projectRoot, reviewed), "OPERATION_FINISHED");
+
+  const run = expectSuccess(begin(projectRoot, closed, "causal_discovery"), "BEGAN_WORKER");
+  const invalidContract = structuredClone(DEFAULT_DISCOVERY_CONTRACT);
+  invalidContract.claim_boundary = "causal";
+  const beforeInvalid = fs.readFileSync(statePath(projectRoot), "utf8");
+  expectFailure(execute(projectRoot, "reserve-artifact", {
+    payload: {
+      ...expected(run),
+      operation_id: run.operation_id,
+      kind: "file",
+      slug: "invalid-discovery",
+      extension: "csv",
+      discovery_scope: discoveryScope("new", invalidContract),
+    },
+  }), "INVALID_INPUT");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeInvalid);
+
+  const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+    payload: {
+      ...expected(run),
+      operation_id: run.operation_id,
+      kind: "file",
+      slug: "blocked-discovery",
+      extension: "csv",
+      discovery_scope: discoveryScope("new"),
+    },
+  }), "ARTIFACT_RESERVED");
+  const reservedBytes = fs.readFileSync(statePath(projectRoot), "utf8");
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: run.operation_id,
+      actor: "causal_discovery",
+      updates: {
+        discovery_sidecar: { status: "reviewed" },
+        council_chamber: { causal_discovery: { current_status: "reviewed" } },
+      },
+    },
+  }), "SCOPE_MISMATCH");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), reservedBytes);
+
+  const blocked = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: run.operation_id,
+      actor: "causal_discovery",
+      updates: {
+        discovery_sidecar: {
+          status: "blocked",
+          limitations: ["Required package is unavailable; no substitute method was used."],
+        },
+        council_chamber: { causal_discovery: { current_status: "blocked" } },
+      },
+    },
+  }), "WORKER_APPLIED");
+  const blockedState = readState(projectRoot);
+  assert.equal(blockedState.discovery_sidecar.status, "blocked");
+  assert.deepEqual(blockedState.discovery_sidecar.execution_contract, DEFAULT_DISCOVERY_CONTRACT);
+  assert.deepEqual(blockedState.artifact_records, []);
+  expectSuccess(finish(projectRoot, blocked), "OPERATION_FINISHED");
+});
+
+test("unbound discovery review cannot relabel a current bound sidecar", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const scopeWork = expectSuccess(begin(projectRoot, opened, "causal_discovery"), "BEGAN_WORKER");
+  const scoped = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(scopeWork),
+      operation_id: scopeWork.operation_id,
+      actor: "causal_discovery",
+      discovery_scope: discoveryScope("new"),
+      updates: {
+        discovery_sidecar: {
+          status: "scoped",
+          goal: "Current bounded discovery exercise",
+        },
+        council_chamber: {
+          causal_discovery: {
+            current_status: "scoped",
+            summary: "The current exercise is scoped.",
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+  const currentSidecar = structuredClone(readState(projectRoot).discovery_sidecar);
+  const exact = {
+    kind: "discovery",
+    id: currentSidecar.scope_id,
+    revision: currentSidecar.scope_revision,
+  };
+  const closed = expectSuccess(finish(projectRoot, scoped), "OPERATION_FINISHED");
+
+  const unbound = expectSuccess(begin(projectRoot, closed, "causal_discovery"), "BEGAN_WORKER");
+  const beforeRejected = fs.readFileSync(statePath(projectRoot), "utf8");
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(unbound),
+      operation_id: unbound.operation_id,
+      actor: "causal_discovery",
+      updates: {
+        discovery_sidecar: {
+          status: "reviewed",
+          findings: ["Unrelated reviewed material"],
+        },
+        council_chamber: {
+          causal_discovery: {
+            current_status: "reviewed",
+            summary: "Unrelated material was reviewed.",
+          },
+        },
+      },
+    },
+  }), "SCOPE_MISMATCH");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeRejected);
+
+  const chamberOnly = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(unbound),
+      operation_id: unbound.operation_id,
+      actor: "causal_discovery",
+      updates: {
+        council_chamber: {
+          causal_discovery: {
+            current_status: "reviewed",
+            summary: "Unrelated material was reviewed without changing the current scope.",
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+  assert.deepEqual(readState(projectRoot).discovery_sidecar, currentSidecar);
+  const chamberClosed = expectSuccess(finish(projectRoot, chamberOnly), "OPERATION_FINISHED");
+
+  const exactReview = expectSuccess(begin(projectRoot, chamberClosed, "causal_discovery", {
+    scope_ref: exact,
+  }), "BEGAN_WORKER");
+  const beforeScoped = fs.readFileSync(statePath(projectRoot), "utf8");
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(exactReview),
+      operation_id: exactReview.operation_id,
+      actor: "causal_discovery",
+      updates: {
+        discovery_sidecar: { status: "scoped" },
+        council_chamber: { causal_discovery: { current_status: "scoped" } },
+      },
+    },
+  }), "SCOPE_MISMATCH");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeScoped);
+
+  const reviewed = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(exactReview),
+      operation_id: exactReview.operation_id,
+      actor: "causal_discovery",
+      updates: {
+        discovery_sidecar: {
+          status: "reviewed",
+          findings: ["The current scoped material was reviewed."],
+        },
+        council_chamber: {
+          causal_discovery: {
+            current_status: "reviewed",
+            summary: "The current scope was reviewed.",
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+  const reviewedState = readState(projectRoot);
+  assert.equal(reviewedState.discovery_sidecar.scope_id, exact.id);
+  assert.equal(reviewedState.discovery_sidecar.scope_revision, exact.revision);
+  assert.deepEqual(reviewedState.discovery_sidecar.execution_contract, DEFAULT_DISCOVERY_CONTRACT);
+  expectSuccess(finish(projectRoot, reviewed), "OPERATION_FINISHED");
+});
+
+test("revising a discovery contract clears prior execution residue but preserves history", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "causal_discovery"), "BEGAN_WORKER");
+  const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      kind: "file",
+      slug: "revision-source",
+      extension: "csv",
+      discovery_scope: discoveryScope("new"),
+    },
+  }), "ARTIFACT_RESERVED");
+  const temporary = path.join(projectRoot, ...reserved.temporary_path.split("/"));
+  fs.mkdirSync(path.dirname(temporary), { recursive: true });
+  fs.writeFileSync(temporary, "from,to\ntreatment,outcome\n", "utf8");
+  const completed = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: started.operation_id,
+      actor: "causal_discovery",
+      updates: {
+        discovery_sidecar: {
+          status: "artifact_created",
+          goal: "Original goal",
+          scope: "Original scope",
+          method_summary: "Original method summary",
+          findings: ["Original finding"],
+          diagnostics: ["Original diagnostic"],
+          limitations: ["Original limitation"],
+          reviewer_requests: ["Original reviewer request"],
+        },
+        council_chamber: {
+          causal_discovery: {
+            current_status: "artifact_created",
+            summary: "Original discovery output.",
+            questions_for_user: ["Original question"],
+            feedback_to_route: ["Original feedback"],
+          },
+        },
+      },
+      artifact: { summary: "Original discovery output." },
+    },
+  }), "WORKER_APPLIED");
+  const completedState = readState(projectRoot);
+  const originalId = completedState.discovery_sidecar.scope_id;
+  const historicalRecords = structuredClone(completedState.artifact_records);
+  const closed = expectSuccess(finish(projectRoot, completed), "OPERATION_FINISHED");
+
+  const revisedContract = {
+    ...DEFAULT_DISCOVERY_CONTRACT,
+    method_plan: "ges",
+  };
+  const revision = expectSuccess(begin(projectRoot, closed, "causal_discovery"), "BEGAN_WORKER");
+  const revised = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(revision),
+      operation_id: revision.operation_id,
+      actor: "causal_discovery",
+      discovery_scope: discoveryScope("revise", revisedContract),
+      updates: {
+        discovery_sidecar: {
+          status: "scoped",
+          goal: "Revised goal",
+        },
+        council_chamber: {
+          causal_discovery: {
+            current_status: "scoped",
+            summary: "The revised exercise is scoped.",
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+  const revisedState = readState(projectRoot);
+  assert.equal(revisedState.discovery_sidecar.scope_id, originalId);
+  assert.equal(revisedState.discovery_sidecar.scope_revision, 2);
+  assert.deepEqual(revisedState.discovery_sidecar.execution_contract, revisedContract);
+  assert.equal(revisedState.discovery_sidecar.goal, "Revised goal");
+  assert.equal(revisedState.discovery_sidecar.scope, null);
+  assert.equal(revisedState.discovery_sidecar.method_summary, null);
+  for (const field of [
+    "findings",
+    "diagnostics",
+    "limitations",
+    "artifact_refs",
+    "reviewer_requests",
+  ]) {
+    assert.deepEqual(revisedState.discovery_sidecar[field], []);
+  }
+  assert.deepEqual(revisedState.artifact_records, historicalRecords);
+  assert.deepEqual(revisedState.council_chamber.causal_discovery.questions_for_user, []);
+  assert.deepEqual(revisedState.council_chamber.causal_discovery.feedback_to_route, []);
+  expectSuccess(finish(projectRoot, revised), "OPERATION_FINISHED");
 });
 
 test("causal-check actionable readiness requires a recommended design", async (t) => {
@@ -1562,6 +2148,34 @@ test("analysis and report done handoffs require an artifact in the same apply", 
     assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
     expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
   });
+});
+
+test("artifact reservation rejects a pre-existing temporary path without mutation", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+  const suffix = started.operation_id.slice(0, 8);
+  const temporary = path.join(
+    projectRoot,
+    "output",
+    `.audit-collision-${suffix}.csv.tmp-${suffix}`,
+  );
+  fs.mkdirSync(path.dirname(temporary), { recursive: true });
+  fs.writeFileSync(temporary, "unowned temporary output\n", "utf8");
+  const before = fs.readFileSync(statePath(projectRoot), "utf8");
+
+  expectFailure(execute(projectRoot, "reserve-artifact", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      kind: "file",
+      slug: "audit-collision",
+      extension: "csv",
+    },
+  }), "ARTIFACT_COLLISION");
+
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+  assert.equal(fs.readFileSync(temporary, "utf8"), "unowned temporary output\n");
 });
 
 test("artifact reservation, manifest verification, resume, and recording are one atomic protocol", (t) => {
@@ -2811,7 +3425,7 @@ test("--discard-legacy-plan is rejected when no legacy v4.5 state exists", async
     assert.equal(fs.existsSync(statePath(projectRoot)), false);
   });
 
-  await t.test("current v3 state", () => {
+  await t.test("current v4 state", () => {
     const projectRoot = temporaryProject(t);
     expectSuccess(execute(projectRoot, "open"), "CREATED");
     const before = fs.readFileSync(statePath(projectRoot), "utf8");
@@ -3319,6 +3933,41 @@ test("choice-based execution revalidates the exact current scope before binding 
   });
 });
 
+test("malformed discovery migration containers fail without mutation or archive", async (t) => {
+  const scenarios = [
+    {
+      name: "schema-2 null discovery sidecar",
+      prepare(projectRoot) {
+        const state = downgradeCurrentStateToV2(projectRoot);
+        state.discovery_sidecar = null;
+        writeState(projectRoot, state);
+      },
+    },
+    {
+      name: "schema-3 missing active operation",
+      prepare(projectRoot) {
+        const state = downgradeCurrentStateToV3(projectRoot);
+        delete state.state_meta.active_operation;
+        writeState(projectRoot, state);
+      },
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, () => {
+      const projectRoot = temporaryProject(t);
+      expectSuccess(execute(projectRoot, "open"), "CREATED");
+      scenario.prepare(projectRoot);
+      const original = fs.readFileSync(statePath(projectRoot));
+      const archiveDirectory = path.join(projectRoot, "project_state.archives");
+
+      expectFailure(execute(projectRoot, "open"), "INVALID_STATE");
+      assert.deepEqual(fs.readFileSync(statePath(projectRoot)), original);
+      assert.equal(fs.existsSync(archiveDirectory), false);
+    });
+  }
+});
+
 test("schema-2 migration preserves idle and active route boundaries", async (t) => {
   for (const scenario of [
     { name: "idle", route: null, mode: "idle" },
@@ -3334,9 +3983,9 @@ test("schema-2 migration preserves idle and active route boundaries", async (t) 
           scenario.route === "team_lead" ? "BEGAN_LEAD" : "BEGAN_WORKER",
         );
       }
-      const v3 = readState(projectRoot);
-      const priorOperation = v3.state_meta.active_operation;
-      const priorPlan = v3.next_step_plan;
+      const v4 = readState(projectRoot);
+      const priorOperation = v4.state_meta.active_operation;
+      const priorPlan = v4.next_step_plan;
       const v2 = downgradeCurrentStateToV2(projectRoot);
       const original = fs.readFileSync(statePath(projectRoot), "utf8");
 
@@ -3349,7 +3998,7 @@ test("schema-2 migration preserves idle and active route boundaries", async (t) 
       assert.deepEqual(migrated.plan, priorPlan);
 
       const current = readState(projectRoot);
-      assert.equal(current.state_meta.schema_version, 3);
+      assert.equal(current.state_meta.schema_version, 4);
       assert.equal(current.state_meta.project_id, v2.state_meta.project_id);
       assert.equal(current.state_meta.revision, v2.state_meta.revision + 1);
       assert.equal(current.state_meta.startup_notice, null);
@@ -3363,12 +4012,17 @@ test("schema-2 migration preserves idle and active route boundaries", async (t) 
         "data_facts",
         "domain_knowledge",
         "causal_facts",
-        "discovery_sidecar",
         "report_assembly",
         "artifact_records",
       ]) {
         assert.deepEqual(current[section], v2[section], `${section} changed during v2 migration`);
       }
+      assert.deepEqual(current.discovery_sidecar, {
+        ...v2.discovery_sidecar,
+        scope_id: null,
+        scope_revision: 0,
+        execution_contract: null,
+      });
 
       const migratedBytes = fs.readFileSync(statePath(projectRoot), "utf8");
       const reopened = expectSuccess(
@@ -3413,6 +4067,161 @@ test("schema-2 migration preserves idle and active route boundaries", async (t) 
     assert.deepEqual(fs.readFileSync(statePath(projectRoot)), original);
     assert.equal(fs.existsSync(archiveDirectory), false);
   });
+});
+
+test("schema-3 migration closes unbound discovery reservations without post-hoc binding", async (t) => {
+  const scenarios = [
+    { name: "temp-only", prepare: ({ temporary }) => fs.writeFileSync(temporary, "partial\n", "utf8") },
+    { name: "final-without-manifest", prepare: ({ final }) => fs.writeFileSync(final, "legacy\n", "utf8") },
+    {
+      name: "completed-legacy-manifest",
+      prepare: ({ final, manifest, location, operationId }) => {
+        fs.writeFileSync(final, "legacy\n", "utf8");
+        fs.writeFileSync(manifest, `${JSON.stringify({
+          schema_version: 1,
+          operation_id: operationId,
+          route: "causal_discovery",
+          scope_ref: null,
+          files: [location],
+          completed_at: "2026-01-01T00:00:00Z",
+          summary: "Legacy discovery output.",
+        }, null, 2)}\n`, "utf8");
+      },
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, () => {
+      const projectRoot = temporaryProject(t);
+      const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+      const started = expectSuccess(
+        begin(projectRoot, opened, "causal_discovery"),
+        "BEGAN_WORKER",
+      );
+      const location = `output/legacy-pending-${started.operation_id.slice(0, 8)}.csv`;
+      const pending = readState(projectRoot);
+      pending.state_meta.active_operation.artifact_intent = {
+        kind: "file",
+        location,
+      };
+      pending.discovery_sidecar.status = "reviewed";
+      pending.discovery_sidecar.goal = "Earlier legacy review";
+      pending.discovery_sidecar.findings = ["Earlier candidate adjacency"];
+      pending.discovery_sidecar.artifact_refs = ["input/earlier-graph.json"];
+      writeState(projectRoot, pending);
+      const v3 = downgradeCurrentStateToV3(projectRoot);
+      const final = path.join(projectRoot, ...location.split("/"));
+      const temporary = path.join(
+        path.dirname(final),
+        `.${path.basename(final)}.tmp-${started.operation_id.slice(0, 8)}`,
+      );
+      const manifest = `${final}.manifest.json`;
+      fs.mkdirSync(path.dirname(final), { recursive: true });
+      scenario.prepare({
+        final,
+        temporary,
+        manifest,
+        location,
+        operationId: started.operation_id,
+      });
+      const original = fs.readFileSync(statePath(projectRoot), "utf8");
+
+      const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V3");
+      assert.equal(fs.readFileSync(migrated.archive_path, "utf8"), original);
+      assert.equal(migrated.mode, "resume_worker");
+      assert.equal(migrated.revision, v3.state_meta.revision + 1);
+      assert.equal(migrated.active_operation.discovery_scope, null);
+      assert.deepEqual(
+        migrated.active_operation.artifact_intent,
+        v3.state_meta.active_operation.artifact_intent,
+      );
+
+      const migratedBytes = fs.readFileSync(statePath(projectRoot), "utf8");
+      const preservedSidecar = structuredClone(readState(projectRoot).discovery_sidecar);
+      expectFailure(execute(projectRoot, "apply", {
+        payload: {
+          ...expected(migrated),
+          operation_id: started.operation_id,
+          actor: "causal_discovery",
+          discovery_scope: discoveryScope("new"),
+          artifact: { summary: "Legacy discovery output." },
+          updates: {
+            discovery_sidecar: { status: "artifact_created" },
+            council_chamber: {
+              causal_discovery: { current_status: "artifact_created" },
+            },
+          },
+        },
+      }), "SCOPE_MISMATCH");
+      assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), migratedBytes);
+
+      const blocked = expectSuccess(execute(projectRoot, "apply", {
+        payload: {
+          ...expected(migrated),
+          operation_id: started.operation_id,
+          actor: "causal_discovery",
+          updates: {
+            council_chamber: {
+              causal_discovery: {
+                current_status: "blocked",
+                summary: "The legacy output was preserved but not adopted.",
+                questions_for_user: [],
+                feedback_to_route: [],
+              },
+            },
+          },
+        },
+      }), "WORKER_APPLIED");
+      const state = readState(projectRoot);
+      assert.deepEqual(state.discovery_sidecar, preservedSidecar);
+      assert.equal(
+        state.council_chamber.causal_discovery.current_status,
+        "blocked",
+      );
+      assert.deepEqual(state.artifact_records, []);
+      for (const existing of [temporary, final, manifest].filter(fs.existsSync)) {
+        assert.equal(fs.existsSync(existing), true);
+      }
+      expectSuccess(finish(projectRoot, blocked), "OPERATION_FINISHED");
+    });
+  }
+});
+
+test("schema-3 migration preserves populated discovery as unbound legacy context", () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "causal-statectl-populated-"));
+  try {
+    expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const state = readState(projectRoot);
+    state.discovery_sidecar.status = "artifact_created";
+    state.discovery_sidecar.goal = "Legacy neighborhood review";
+    state.discovery_sidecar.scope = "Treatment, outcome, and baseline variables";
+    state.discovery_sidecar.method_summary = "Legacy method description";
+    state.discovery_sidecar.findings = ["One candidate adjacency"];
+    state.discovery_sidecar.artifact_refs = ["output/legacy-discovery.csv"];
+    writeState(projectRoot, state);
+    const v3 = downgradeCurrentStateToV3(projectRoot);
+
+    const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V3");
+    const current = readState(projectRoot);
+    assert.equal(current.discovery_sidecar.scope_id, null);
+    assert.equal(current.discovery_sidecar.scope_revision, 0);
+    assert.equal(current.discovery_sidecar.execution_contract, null);
+    for (const field of [
+      "status",
+      "goal",
+      "scope",
+      "method_summary",
+      "findings",
+      "artifact_refs",
+    ]) {
+      assert.deepEqual(current.discovery_sidecar[field], v3.discovery_sidecar[field]);
+    }
+    const validated = expectSuccess(execute(projectRoot, "validate"), "VALID");
+    assert.equal(validated.scope_snapshot.discovery, null);
+    assert.equal(migrated.mode, "idle");
+  } finally {
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  }
 });
 
 test("reset and cancellation handle pending choices without resurrection", async (t) => {
