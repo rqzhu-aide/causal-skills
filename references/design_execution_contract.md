@@ -14,8 +14,9 @@ the committed plan contains exactly the matching design assignment:
   support: optional_support
 ```
 
-Use the persisted `intent_summary`, route, `scope_ref`, live state, selected
-design, and optional support as the authoritative assignment. Consistent detail
+Use the persisted `intent_summary`, route, `scope_ref`, `operation_packet`, live
+state, selected design, and optional support as the authoritative assignment.
+Consistent detail
 from the operation-opening message may refine the initial pass, but is not
 required for resume. A resumed worker does not reinterpret a newer message; it
 restarts from this route boundary and reuses any matching completed artifact
@@ -71,6 +72,10 @@ Use these analysis scope handoff fields:
 - `current_status`: a normal worker handoff is `ready`, `blocked`, or `done`.
   Null or `requested` is a pre-work or legacy marker, not a completed handoff.
 - `support`: selected support route ID or `null`.
+- `execution_contract`: `{target, input_refs, method_plan,
+  execution_requirements, output_type, claim_boundary}`. Use trimmed strings
+  and unique nonempty string arrays. New or revised `ready` scopes require a
+  complete contract.
 - `summary`: compact scope, blocker, or completed-output description.
 - `questions_for_user`: 0-3 current questions, choices, or approval points for
   `ready` or `blocked` handoffs. Use `[]` for `done`; team lead derives later
@@ -80,6 +85,11 @@ Use these analysis scope handoff fields:
 An approval-ready handoff contains one complete default covering design fit,
 support role, required inputs, target estimand or contrast, estimation strategy
 or model family, diagnostics, main output, and claim boundary.
+The structured contract carries these as minimum execution requirements;
+additional useful diagnostics or sensitivities are allowed when they do not add
+a new target or cross the claim boundary. A migrated ready slot may have a null
+contract and run under completion protocol 0; any later revision must add the
+structured contract.
 `questions_for_user` may offer revisions to that default, but must not leave a
 material scope element undecided. Do not store analysis scope in
 `discovery_sidecar`, `report_assembly`, pending artifact records, output
@@ -100,25 +110,27 @@ a scope-consistency check, not a repeat of the full begin gate.
 
 When the approved scope remains current:
 
-Before marking the handoff `done`, reconcile every required target, design or
-support choice, model or estimation strategy, diagnostic, main output, and
-claim boundary against the bound scope. If a required item is missing or
-materially substituted, repair it or return `ready` or `blocked` without an
-artifact; never submit `done`.
-
 1. Call `statectl reserve-artifact` for one meaningful directory directly under
    `output/`.
 2. Follow `references/artifact_output_policy.md` to write temporary output,
-   then validate it against the bound scope.
-3. Submit one `statectl apply` JSON payload with
+   then validate it against every requirement in the operation packet. These
+   are minimum coverage, not a ban on supplemental work that stays within the
+   approved target and claim boundary.
+3. For completion, submit one `statectl apply` payload with
    `actor: analysis_execution.<that_design_id>`, `scope_transition: preserve`,
-   updates only for the matching chamber slot, `current_status: done`, and the
-   completed `artifact: {summary}`. Include the selected design, optional
-   support, main result, limitations, and useful next analysis in that summary.
+   updates only for the matching chamber slot, `current_status: done`, and an
+   `artifact_role: completion` receipt covering every required item.
+4. If execution instead produces useful evidence that the exact bound scope
+   cannot yield its promised output, submit `scope_transition: preserve`,
+   `current_status: blocked`, and an `artifact_role: infeasibility_evidence`
+   receipt. This preserves proof that the plan needs revision without claiming
+   the promised result. A tool, package, or transient execution failure is not
+   infeasibility evidence; retry it or use the normal no-artifact blocked
+   handoff.
 
 Put a compact prose record in the artifact `summary`: design, support when used,
-target or estimand, main result, diagnostics completed or missing, claim
-boundary, and material limitations. Put detailed data contracts, settings,
+target or estimand, main result or infeasibility finding, completed diagnostics,
+claim boundary, and material limitations. Put detailed data contracts, settings,
 package versions, tables, and diagnostic inventories in the output files or
 chamber summary.
 

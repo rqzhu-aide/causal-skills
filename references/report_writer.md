@@ -7,8 +7,8 @@ This worker remains silent and submits internal findings or revised text for
 `team_lead` to synthesize.
 
 `project_summary.analysis_output` and `project_summary.report_output` indicate
-only that a historical artifact record exists. Results-focused report work also
-requires relevant, available analysis artifacts that match the current report
+only that a historical `completion` artifact exists. Results-focused report work
+also requires relevant, available analysis artifacts that match the current report
 scope. Without them, use this route only for planning report scope or
 claim-boundary language; do not draft results, invent results, or describe
 completed methods.
@@ -31,7 +31,7 @@ Use this vocabulary consistently:
 - `derivative communication artifact`: slide-style, memo-style, email-style,
   handout, or other communication output derived from existing report evidence;
   not new analysis.
-- `finished artifacts`: completed items in `artifact_records` and their existing
+- `finished artifacts`: `completion` items in `artifact_records` and their existing
   output files that can be used, cited, linked, omitted, or disclosed in the
   report scope.
 
@@ -41,7 +41,7 @@ Read the validated state before route work. Proceed only at `worker_pending`
 when the committed plan's worker route is exactly `report_writer`.
 
 Use the self-contained `state_meta.active_operation.intent_summary`, its
-`scope_ref`, `report_assembly`, `artifact_records`, and live state as the
+`scope_ref`, `operation_packet`, `report_assembly`, `artifact_records`, and live state as the
 assignment. On resume, a new message does not change it. A non-null `scope_ref`
 is the approval result recorded at `begin`; do not reinterpret approval from a
 later message. Submit one `statectl apply` JSON payload with
@@ -233,32 +233,36 @@ reason in `summary`.
 Report writer is a handoff route, not a consulting-opinion route.
 
 Do not update global output status or artifact records directly. Submit report
-scope, output facts, and optional completed artifact through `apply`; team lead
-handles closeout synthesis through `finish`.
+scope, output facts, and any output artifact through `apply`; team lead handles
+closeout synthesis through `finish`.
 
 ## Report Outputs
 
 When report text, a draft, HTML, or another report artifact is actually
 created:
 
-Before marking the handoff `done`, validate the rendered text itself, not its
-outline or summary, against the bound evidence basis and narrowest claim
-boundary. Reconcile the remaining scope commitments, including purpose,
-audience, required structure or content, and output format. Repair any missing
-or materially substituted item, or return `ready` or `blocked` without an
-artifact; never submit `done`.
+Treat the operation packet requirements as minimum coverage. Validate the
+rendered output against them, its evidence basis, and claim boundary;
+supplemental writing is allowed within the bound report scope.
 
 1. Reserve, write, and validate one meaningful temporary report file or
    directory through `references/artifact_output_policy.md`; pooled reports
    never live inside an analysis artifact folder.
-2. Set `report_assembly.current_format` to `html` and add one compact draft note
+2. For completion, set `report_assembly.current_format` to `html` and add one compact draft note
    stating output kind, source basis, whether new analysis was performed,
    inherited causal boundary, limitations, and reserved output location.
 3. Submit `scope_transition: preserve`, `current_status: done`, report state,
-   and the completed artifact summary through `statectl apply`. Use `report`,
+   and a `completion` artifact receipt through `statectl apply`. Use `report`,
    `revised report`, or `derivative communication artifact` accurately. Use
    "conversion" only for a literal format conversion that does not change
    content.
+4. If execution demonstrates that the exact bound report cannot produce its
+   promised output, keep `current_format: null` and submit
+   `scope_transition: preserve`, `current_status: blocked`, and an
+   `infeasibility_evidence` artifact receipt. This preserves the evidence but
+   does not count it as a completed report. A rendering, tool, or transient
+   execution failure alone is not infeasibility evidence; retry it or use the
+   normal no-artifact blocked handoff.
 
 Do not reserve or submit an artifact for purely verbal report-scope setup.
 

@@ -82,6 +82,13 @@ if (template.capabilities?.scope_snapshot !== 1) {
   throw new Error("state controller must advertise scope_snapshot capability 1");
 }
 if (
+  template.capabilities?.analysis_contract !== 1
+  || template.capabilities?.completion_protocol !== 1
+  || template.capabilities?.artifact_roles !== 1
+) {
+  throw new Error("state controller must advertise work-contract and artifact-role capabilities");
+}
+if (
   template.capabilities?.response_rendering !== 1
   || template.capabilities?.pending_decision !== 1
   || template.capabilities?.response_receipt !== 1

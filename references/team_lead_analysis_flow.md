@@ -18,6 +18,7 @@ When `next_step_plan` contains an `analysis_execution.<design_id>` entry, parse
 - `council_chamber.analysis_execution.<design_id>.scope_id`
 - `council_chamber.analysis_execution.<design_id>.scope_revision`
 - `council_chamber.analysis_execution.<design_id>.support`
+- `council_chamber.analysis_execution.<design_id>.execution_contract`
 - `council_chamber.analysis_execution.<design_id>.summary`
 - `council_chamber.analysis_execution.<design_id>.questions_for_user`
 - `council_chamber.analysis_execution.<design_id>.feedback_to_route`
@@ -40,8 +41,10 @@ Begin Eligibility in `analysis_routing_workflow.md`. If the scope no longer
 matches, describe it only as an earlier plan needing revision; do not offer it
 for approval or execution or revise it automatically. If eligibility fails for
 another reason, state that the analysis is not currently runnable, name the
-failed prerequisite, and do not revise the scope automatically. Otherwise
-summarize the proposed scope in the presentation with only the target or
+failed prerequisite, and do not revise the scope automatically. Otherwise,
+treat `execution_contract` as the authoritative minimum work definition when
+present; chamber prose cannot replace it. Summarize the proposed scope in the
+presentation with only the target or
 estimand, design and support, required inputs, estimation strategy or model
 family, main diagnostics, main output, and claim boundary. Translate design and
 support into plain user-facing method language. Do not expose route IDs, state
@@ -49,12 +52,14 @@ field names or values, scope IDs or revisions, or controller mechanics unless
 the user asks. Present the stored ready default faithfully; do not invent or
 negate a consequential scope choice.
 
-If the analysis scope status is `blocked`, explain the blocker in the
-presentation and ask for the smallest useful clarification, data detail, design
-revision, or fallback choice.
+If the analysis scope status is `blocked` with operation-matched
+`infeasibility_evidence`, explain what the approved scope could not produce and
+why the plan needs revision; do not claim completed analysis output. Otherwise
+explain the blocker. Ask for the smallest useful clarification, data detail,
+design revision, or fallback choice.
 
 If the analysis scope status is `done`, use the available operation-matched
-artifact record and summarize the output briefly. If it is absent or
+`completion` artifact record and summarize the output briefly. If it is absent or
 unavailable, treat this as a missing handoff and do not claim output. When
 several next moves are useful, prioritize analysis-facing choices: next
 contrast, diagnostic, sensitivity check, heterogeneity question, claim wording,

@@ -7,8 +7,9 @@ const { isDeepStrictEqual } = require("node:util");
 const YAML = require("yaml");
 const ROUTES = require("./route-catalog.json");
 
-const SCHEMA_VERSION = 4;
-const MANIFEST_VERSION = 1;
+const SCHEMA_VERSION = 5;
+const MANIFEST_VERSION = 2;
+const LEGACY_MANIFEST_VERSION = 1;
 const STATE_FILE = "project_state.yaml";
 const ARCHIVE_DIR = "project_state.archives";
 const MAX_INTENT_LENGTH = 1000;
@@ -23,6 +24,22 @@ const DISCOVERY_CONTRACT_KEYS = new Set([
   "diagnostic_requirements",
   "output_type",
   "claim_boundary",
+]);
+const ANALYSIS_CONTRACT_KEYS = new Set([
+  "target",
+  "input_refs",
+  "method_plan",
+  "execution_requirements",
+  "output_type",
+  "claim_boundary",
+]);
+const ARTIFACT_ROLES = ["completion", "infeasibility_evidence"];
+const EXECUTION_RECEIPT_KEYS = new Set([
+  "contract_hash",
+  "completed_requirements",
+  "unmet_requirements",
+  "supplemental_work",
+  "evidence_files",
 ]);
 const WELCOME_LINE = "[Causal-Consultant Loaded] This is a new project. Causal analysis team ready.";
 const MENU_NEXT_STEPS = "Choose one option, or suggest another action.";
@@ -174,6 +191,7 @@ const ANALYSIS_CHAMBER_KEYS = new Set([
   "scope_id",
   "scope_revision",
   "support",
+  "execution_contract",
 ]);
 
 class StateError extends Error {
@@ -285,6 +303,260 @@ function validateDiscoveryContract(value, label, code = "INVALID_STATE") {
   const normalized = normalizeDiscoveryContract(value, label, code);
   if (!deepEqual(normalized, value)) {
     fail(code, `${label} must use trimmed canonical strings`);
+  }
+}
+
+function normalizeAnalysisContract(value, label, code = "INVALID_INPUT") {
+  assertKnownKeys(value, ANALYSIS_CONTRACT_KEYS, label, code);
+  const missing = [...ANALYSIS_CONTRACT_KEYS].filter(
+    (field) => !Object.prototype.hasOwnProperty.call(value, field),
+  );
+  if (missing.length) fail(code, `${label} is missing: ${missing.join(", ")}`);
+  return {
+    target: normalizeRequiredString(value.target, `${label}.target`, code),
+    input_refs: normalizeContractArray(value.input_refs, `${label}.input_refs`, code, true),
+    method_plan: normalizeRequiredString(value.method_plan, `${label}.method_plan`, code),
+    execution_requirements: normalizeContractArray(
+      value.execution_requirements,
+      `${label}.execution_requirements`,
+      code,
+      true,
+    ),
+    output_type: normalizeRequiredString(value.output_type, `${label}.output_type`, code),
+    claim_boundary: normalizeRequiredString(value.claim_boundary, `${label}.claim_boundary`, code),
+  };
+}
+
+function validateAnalysisContract(value, label, code = "INVALID_STATE") {
+  const normalized = normalizeAnalysisContract(value, label, code);
+  if (!deepEqual(normalized, value)) {
+    fail(code, `${label} must use trimmed canonical strings`);
+  }
+}
+
+function sha256Hex(value) {
+  return crypto.createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function contractHash(scopeKind, contract) {
+  return sha256Hex(JSON.stringify({ scope_kind: scopeKind, contract }));
+}
+
+function reportContractCandidates(reportAssembly) {
+  const base = {};
+  for (const field of ["report_goal", "audience", "target_section"]) {
+    const value = reportAssembly[field];
+    if (typeof value === "string" && value.trim()) base[field] = value.trim();
+  }
+  for (const field of ["planned_structure", "key_points", "wording_constraints"]) {
+    const values = reportAssembly[field]
+      .filter((item) => typeof item === "string" && item.trim())
+      .map((item) => item.trim());
+    if (values.length) base[field] = values;
+  }
+  if (reportAssembly.current_format === null) return [base];
+  return [{ ...base, current_format: reportAssembly.current_format }, base];
+}
+
+function requirementDescriptions(scopeKind, contract) {
+  const requirements = [];
+  const add = (kind, description) => {
+    requirements.push({ kind, description });
+  };
+  const addMany = (kind, values) => values.forEach((value) => add(kind, value));
+  if (scopeKind === "analysis") {
+    add("target", contract.target);
+    addMany("input_ref", contract.input_refs);
+    add("method_plan", contract.method_plan);
+    addMany("execution_requirement", contract.execution_requirements);
+    add("output_type", contract.output_type);
+    add("claim_boundary", contract.claim_boundary);
+  } else if (scopeKind === "discovery") {
+    add("target", contract.target);
+    addMany("input_ref", contract.input_refs);
+    addMany("variable", contract.variables);
+    add("method_plan", contract.method_plan);
+    addMany("constraint", contract.constraints);
+    addMany("diagnostic_requirement", contract.diagnostic_requirements);
+    add("output_type", contract.output_type);
+    add("claim_boundary", contract.claim_boundary);
+  } else if (scopeKind === "report") {
+    for (const field of ["report_goal", "audience", "target_section"]) {
+      if (contract[field] !== undefined) add(field, contract[field]);
+    }
+    for (const field of ["planned_structure", "key_points", "wording_constraints"]) {
+      if (contract[field] !== undefined) addMany(field, contract[field]);
+    }
+    if (contract.current_format !== undefined) add("current_format", contract.current_format);
+  }
+  return requirements;
+}
+
+function contractBundle(scopeKind, contract) {
+  const hash = contractHash(scopeKind, contract);
+  const requirements = requirementDescriptions(scopeKind, contract).map((item, index) => ({
+    id: `req-${sha256Hex(JSON.stringify({
+      contract_hash: hash,
+      index,
+      kind: item.kind,
+      description: item.description,
+    })).slice(0, 16)}`,
+    kind: item.kind,
+    description: item.description,
+  }));
+  return { hash, requirements };
+}
+
+function operationContractBundles(state, operation, planInfo) {
+  if (operation.scope_ref === null) return [];
+  if (planInfo.actor === "causal_discovery") {
+    if (operation.discovery_scope === null) return [];
+    return [contractBundle("discovery", operation.discovery_scope.contract)];
+  }
+  if (planInfo.actor && planInfo.actor.startsWith("analysis_execution.")) {
+    const slot = state.council_chamber.analysis_execution[planInfo.design];
+    if (!slot || slot.execution_contract === null) return [];
+    return [contractBundle("analysis", slot.execution_contract)];
+  }
+  if (planInfo.actor === "report_writer") {
+    return reportContractCandidates(state.report_assembly)
+      .map((contract) => contractBundle("report", contract));
+  }
+  return [];
+}
+
+function setOperationProtocol(state, operation, planInfo) {
+  const bundle = operationContractBundles(state, operation, planInfo)[0] ?? null;
+  operation.completion_protocol = bundle === null ? 0 : 1;
+  operation.contract_hash = bundle === null ? null : bundle.hash;
+}
+
+function operationPacket(state, operation, planInfo) {
+  if (operation === null) return null;
+  let requirements = [];
+  if (operation.completion_protocol === 1) {
+    const bundle = operationContractBundles(state, operation, planInfo)
+      .find((candidate) => candidate.hash === operation.contract_hash);
+    if (!bundle) {
+      fail("SCOPE_MISMATCH", "active operation contract_hash does not match its bound scope");
+    }
+    requirements = bundle.requirements;
+  }
+  return {
+    operation_id: operation.id,
+    stage: operation.stage,
+    action: operation.stage === "worker_pending" ? "apply" : "finish",
+    actor: planInfo.actor,
+    support: planInfo.support,
+    intent_summary: operation.intent_summary,
+    scope_ref: operation.scope_ref === null ? null : clone(operation.scope_ref),
+    completion_protocol: operation.completion_protocol,
+    contract_hash: operation.contract_hash,
+    requirements,
+  };
+}
+
+function normalizeReceiptStringArray(value, label) {
+  return normalizeContractArray(value, label, "INVALID_ARTIFACT_RECEIPT");
+}
+
+function normalizeEvidenceFiles(value, label) {
+  const files = normalizeReceiptStringArray(value, label).map((item, index) => {
+    const normalized = normalizePath(item);
+    if (
+      normalized !== item
+      || path.posix.normalize(normalized) !== normalized
+      || !normalized.startsWith("output/")
+    ) {
+      fail("INVALID_ARTIFACT_RECEIPT", `${label}[${index}] must be a canonical project-relative output path`);
+    }
+    return normalized;
+  });
+  if (new Set(files).size !== files.length) {
+    fail("INVALID_ARTIFACT_RECEIPT", `${label} must not contain duplicates`);
+  }
+  return files;
+}
+
+function normalizeExecutionReceipt(value, label = "artifact.execution_receipt") {
+  assertKnownKeys(value, EXECUTION_RECEIPT_KEYS, label, "INVALID_ARTIFACT_RECEIPT");
+  const missing = [...EXECUTION_RECEIPT_KEYS].filter(
+    (field) => !Object.prototype.hasOwnProperty.call(value, field),
+  );
+  if (missing.length) {
+    fail("INVALID_ARTIFACT_RECEIPT", `${label} is missing: ${missing.join(", ")}`);
+  }
+  if (typeof value.contract_hash !== "string" || !/^[0-9a-f]{64}$/.test(value.contract_hash)) {
+    fail("INVALID_ARTIFACT_RECEIPT", `${label}.contract_hash must be a lowercase SHA-256 hex digest`);
+  }
+  return {
+    contract_hash: value.contract_hash,
+    completed_requirements: normalizeReceiptStringArray(
+      value.completed_requirements,
+      `${label}.completed_requirements`,
+    ),
+    unmet_requirements: normalizeReceiptStringArray(
+      value.unmet_requirements,
+      `${label}.unmet_requirements`,
+    ),
+    supplemental_work: normalizeReceiptStringArray(
+      value.supplemental_work,
+      `${label}.supplemental_work`,
+    ),
+    evidence_files: normalizeEvidenceFiles(value.evidence_files, `${label}.evidence_files`),
+  };
+}
+
+function validateReceiptAgainstPacket(receipt, packet, artifactRole, files = null) {
+  if (packet.completion_protocol === 0) {
+    if (receipt !== null) {
+      fail("INVALID_ARTIFACT_RECEIPT", "completion protocol 0 does not accept an execution_receipt");
+    }
+    if (artifactRole !== "completion") {
+      fail("SCOPE_MISMATCH", "infeasibility evidence requires completion protocol 1");
+    }
+    return;
+  }
+  if (receipt === null) {
+    fail("INVALID_ARTIFACT_RECEIPT", "completion protocol 1 requires an execution_receipt");
+  }
+  if (receipt.contract_hash !== packet.contract_hash) {
+    fail("SCOPE_MISMATCH", "execution_receipt.contract_hash does not match the bound contract");
+  }
+  const required = packet.requirements.map((item) => item.id);
+  const requiredSet = new Set(required);
+  const completed = new Set(receipt.completed_requirements);
+  const unmet = new Set(receipt.unmet_requirements);
+  if ([...completed].some((id) => unmet.has(id))) {
+    fail("INVALID_ARTIFACT_RECEIPT", "completed_requirements and unmet_requirements must not overlap");
+  }
+  if ([...completed, ...unmet].some((id) => !requiredSet.has(id))) {
+    fail("INVALID_ARTIFACT_RECEIPT", "requirement IDs outside the operation packet belong in supplemental_work");
+  }
+  if (!receipt.evidence_files.length) {
+    fail("INVALID_ARTIFACT_RECEIPT", "execution_receipt.evidence_files must identify at least one evidence file");
+  }
+  if (artifactRole === "completion") {
+    const missing = required.filter((id) => !completed.has(id));
+    if (missing.length || unmet.size) {
+      fail("INCOMPLETE_WORK", "completion requires every operation-packet requirement and no unmet requirements", {
+        missing_requirements: missing,
+        unmet_requirements: [...unmet],
+      });
+    }
+  } else {
+    if (!unmet.size) {
+      fail("INVALID_ARTIFACT_RECEIPT", "infeasibility evidence requires at least one unmet requirement");
+    }
+    if (required.some((id) => !completed.has(id) && !unmet.has(id))) {
+      fail("INVALID_ARTIFACT_RECEIPT", "infeasibility evidence requires full required-set accounting");
+    }
+  }
+  if (files !== null) {
+    const inventory = new Set(files.map(normalizePath));
+    if (receipt.evidence_files.some((file) => !inventory.has(file))) {
+      fail("INVALID_ARTIFACT_RECEIPT", "execution_receipt evidence_files must be listed in the artifact manifest");
+    }
   }
 }
 
@@ -550,6 +822,8 @@ function validateActiveOperation(meta, planInfo) {
     "scope_ref",
     "artifact_intent",
     "discovery_scope",
+    "completion_protocol",
+    "contract_hash",
     "started_at",
   ]), "state_meta.active_operation");
   if (!isUuid(operation.id)) fail("INVALID_STATE", "active_operation.id must be a UUID");
@@ -562,6 +836,18 @@ function validateActiveOperation(meta, planInfo) {
     fail("INVALID_STATE", "active_operation.discovery_scope is required");
   }
   validateDiscoveryScopeSnapshot(operation.discovery_scope, "active_operation.discovery_scope");
+  if (![0, 1].includes(operation.completion_protocol)) {
+    fail("INVALID_STATE", "active_operation.completion_protocol must be 0 or 1");
+  }
+  if (operation.completion_protocol === 0 && operation.contract_hash !== null) {
+    fail("INVALID_STATE", "completion protocol 0 requires a null contract_hash");
+  }
+  if (
+    operation.completion_protocol === 1
+    && (typeof operation.contract_hash !== "string" || !/^[0-9a-f]{64}$/.test(operation.contract_hash))
+  ) {
+    fail("INVALID_STATE", "completion protocol 1 requires a lowercase SHA-256 contract_hash");
+  }
   const isDiscovery = planInfo.actor === "causal_discovery";
   if (operation.discovery_scope !== null) {
     if (!isDiscovery || operation.scope_ref === null || operation.scope_ref.kind !== "discovery") {
@@ -679,6 +965,12 @@ function validateChamberSlot(slot, label, analysis = false, templateMode = false
     if (!templateMode && slot.current_status !== null && slot.current_status !== "requested" && !hasIdentity) {
       fail("INVALID_STATE", `${label} requires scope identity for status ${slot.current_status}`);
     }
+    if (!Object.prototype.hasOwnProperty.call(slot, "execution_contract")) {
+      fail("INVALID_STATE", `${label}.execution_contract is required`);
+    }
+    if (slot.execution_contract !== null) {
+      validateAnalysisContract(slot.execution_contract, `${label}.execution_contract`);
+    }
   } else {
     assertStringOrNull(slot.current_status, `${label}.current_status`);
   }
@@ -698,8 +990,9 @@ function validateArtifactRecord(record, index) {
     "summary",
     "design",
     "support",
+    "artifact_role",
   ]), label);
-  const required = ["artifact_id", "operation_id", "route", "location", "created_at", "summary"];
+  const required = ["artifact_id", "operation_id", "route", "location", "created_at", "summary", "artifact_role"];
   const missing = required.filter((key) => !(key in record));
   if (missing.length) fail("INVALID_STATE", `${label} is missing: ${missing.join(", ")}`);
   const legacy = typeof record.artifact_id === "string" && /^legacy-\d{4}$/.test(record.artifact_id);
@@ -716,6 +1009,7 @@ function validateArtifactRecord(record, index) {
   if (typeof record.created_at !== "string") fail("INVALID_STATE", `${label}.created_at must be a string`);
   if (!legacy && !isTimestamp(record.created_at)) fail("INVALID_STATE", `${label}.created_at must be an RFC3339 UTC timestamp`);
   if (typeof record.summary !== "string" || !record.summary.trim()) fail("INVALID_STATE", `${label}.summary must be nonempty`);
+  assertEnum(record.artifact_role, ARTIFACT_ROLES, `${label}.artifact_role`);
   if (record.design !== undefined && !DESIGN_IDS.has(record.design)) fail("INVALID_STATE", `${label}.design is invalid`);
   if (record.support !== undefined && record.support !== null && !SUPPORT_IDS.has(record.support)) fail("INVALID_STATE", `${label}.support is invalid`);
   if (record.route === "analysis_execution") {
@@ -968,6 +1262,7 @@ function validateState(state, options = {}) {
     fail("INVALID_STATE", "council_chamber.report_writer.current_status is invalid");
   }
   validateActiveScopeBinding(state, planInfo);
+  operationPacket(state, state.state_meta.active_operation, planInfo);
 
   assertArray(state.artifact_records, "artifact_records");
   state.artifact_records.forEach(validateArtifactRecord);
@@ -975,10 +1270,11 @@ function validateState(state, options = {}) {
   if (new Set(ids).size !== ids.length) fail("INVALID_STATE", "artifact_id values must be unique");
   const operationIds = state.artifact_records.map((item) => item.operation_id).filter(Boolean);
   if (new Set(operationIds).size !== operationIds.length) fail("INVALID_STATE", "operation_id may appear in only one artifact record");
+  const completionArtifacts = state.artifact_records.filter((record) => record.artifact_role === "completion");
 
   const activeOperation = state.state_meta.active_operation;
   const activeOperationHasArtifact = activeOperation !== null
-    && state.artifact_records.some((record) => record.operation_id === activeOperation.id);
+    && completionArtifacts.some((record) => record.operation_id === activeOperation.id);
   const pendingAnalysisCloseout = activeOperation !== null
     && activeOperation.stage === "lead_pending"
     && planInfo.actor !== null
@@ -1005,16 +1301,16 @@ function validateState(state, options = {}) {
   )) {
     fail("INVALID_STATE", "exploration_complete requires all three core completion flags");
   }
-  if (state.project_summary.analysis_output === "exist" && !state.artifact_records.some((record) => record.route === "analysis_execution")) {
+  if (state.project_summary.analysis_output === "exist" && !completionArtifacts.some((record) => record.route === "analysis_execution")) {
     fail("INVALID_STATE", "analysis_output exist requires an analysis_execution artifact record");
   }
-  if (state.project_summary.analysis_output === "non_exist" && state.artifact_records.some((record) => record.route === "analysis_execution")) {
+  if (state.project_summary.analysis_output === "non_exist" && completionArtifacts.some((record) => record.route === "analysis_execution")) {
     if (!pendingAnalysisCloseout) {
       fail("INVALID_STATE", "analysis_output non_exist conflicts with a completed analysis artifact");
     }
   }
   if (state.project_summary.report_output === "exist") {
-    if (!state.artifact_records.some((record) => record.route === "report_writer")) {
+    if (!completionArtifacts.some((record) => record.route === "report_writer")) {
       fail("INVALID_STATE", "report_output exist requires a report_writer artifact record");
     }
   }
@@ -1023,7 +1319,7 @@ function validateState(state, options = {}) {
       fail("INVALID_STATE", "report_output non_exist requires null report format outside a pending report closeout");
     }
   }
-  if (state.project_summary.report_output === "non_exist" && state.artifact_records.some((record) => record.route === "report_writer")) {
+  if (state.project_summary.report_output === "non_exist" && completionArtifacts.some((record) => record.route === "report_writer")) {
     if (!pendingReportCloseout) {
       fail("INVALID_STATE", "report_output non_exist conflicts with a completed report artifact");
     }
@@ -1103,6 +1399,21 @@ function addDiscoveryControls(state) {
   }
 }
 
+function addSchema5Controls(state) {
+  assertObject(state.council_chamber.analysis_execution, "council_chamber.analysis_execution");
+  for (const slot of Object.values(state.council_chamber.analysis_execution)) {
+    assertObject(slot, "analysis chamber slot");
+    slot.execution_contract = null;
+  }
+  state.artifact_records = state.artifact_records.map((record) => ({
+    ...record,
+    artifact_role: "completion",
+  }));
+  if (state.state_meta.active_operation !== null) {
+    state.state_meta.active_operation.completion_protocol = 0;
+    state.state_meta.active_operation.contract_hash = null;
+  }
+}
 function migrateLegacyState(legacy, options = {}) {
   const { discardPlan = false } = options;
   validateLegacyShape(legacy);
@@ -1150,6 +1461,7 @@ function migrateLegacyState(legacy, options = {}) {
     operation_id: null,
   }));
   addDiscoveryControls(reordered);
+  addSchema5Controls(reordered);
   validateState(reordered);
   return reordered;
 }
@@ -1167,6 +1479,7 @@ function migrateV2State(v2) {
   migrated.pending_decision = null;
   migrated.response_receipt = null;
   addDiscoveryControls(migrated);
+  addSchema5Controls(migrated);
   validateState(migrated);
   migrated.state_meta.revision += 1;
   migrated.state_meta.updated_at = nowIso();
@@ -1184,6 +1497,24 @@ function migrateV3State(v3) {
   const migrated = clone(v3);
   migrated.state_meta.schema_version = SCHEMA_VERSION;
   addDiscoveryControls(migrated);
+  addSchema5Controls(migrated);
+  validateState(migrated);
+  migrated.state_meta.revision += 1;
+  migrated.state_meta.updated_at = nowIso();
+  validateState(migrated);
+  return migrated;
+}
+
+function migrateV4State(v4) {
+  assertExactTopLevel(v4);
+  assertObject(v4.state_meta, "state_meta");
+  if (v4.state_meta.schema_version !== 4) {
+    fail("UNSUPPORTED_SCHEMA", `unsupported schema version: ${v4.state_meta.schema_version}`);
+  }
+
+  const migrated = clone(v4);
+  migrated.state_meta.schema_version = SCHEMA_VERSION;
+  addSchema5Controls(migrated);
   validateState(migrated);
   migrated.state_meta.revision += 1;
   migrated.state_meta.updated_at = nowIso();
@@ -1288,7 +1619,28 @@ function artifactWarnings(projectRoot, state) {
       "files",
       "completed_at",
       "summary",
+      "artifact_role",
+      "execution_receipt",
     ]);
+    const legacyManifest = manifest.schema_version === LEGACY_MANIFEST_VERSION;
+    const currentManifest = manifest.schema_version === MANIFEST_VERSION;
+    let manifestRole = null;
+    let normalizedReceipt = null;
+    let receiptValid = true;
+    if (legacyManifest) {
+      manifestRole = "completion";
+    } else if (currentManifest) {
+      manifestRole = manifest.artifact_role;
+      try {
+        assertEnum(manifestRole, ARTIFACT_ROLES, "historical artifact manifest.artifact_role", "INVALID_ARTIFACT_RECEIPT");
+        normalizedReceipt = manifest.execution_receipt === null
+          ? null
+          : normalizeExecutionReceipt(manifest.execution_receipt, "historical artifact manifest.execution_receipt");
+      } catch (_error) {
+        receiptValid = false;
+      }
+      if (manifestRole === "infeasibility_evidence" && normalizedReceipt === null) receiptValid = false;
+    }
     const expectedScopeKind = record.route === "analysis_execution"
       ? "analysis"
       : record.route === "report_writer"
@@ -1303,7 +1655,7 @@ function artifactWarnings(projectRoot, state) {
       && isUuid(scopeRef.id)
       && Number.isInteger(scopeRef.revision)
       && scopeRef.revision >= 1;
-    const legacyDiscovery = record.route === "causal_discovery" && scopeRef === null;
+    const legacyDiscovery = legacyManifest && record.route === "causal_discovery" && scopeRef === null;
     const scopeRefValid = legacyDiscovery
       ? manifest.discovery_contract === undefined
       : expectedScopeKind === null
@@ -1330,10 +1682,16 @@ function artifactWarnings(projectRoot, state) {
       "completed_at",
       "summary",
     ];
+    if (currentManifest) {
+      requiredManifestKeys.push("artifact_role", "execution_receipt");
+    }
     if (
       Object.keys(manifest).some((key) => !manifestKeys.has(key))
       || requiredManifestKeys.some((key) => !Object.prototype.hasOwnProperty.call(manifest, key))
-      || manifest.schema_version !== MANIFEST_VERSION
+      || (!legacyManifest && !currentManifest)
+      || (legacyManifest && ("artifact_role" in manifest || "execution_receipt" in manifest))
+      || manifestRole !== record.artifact_role
+      || !receiptValid
       || manifest.operation_id !== record.operation_id
       || manifest.route !== record.route
       || !scopeRefValid
@@ -1401,6 +1759,19 @@ function artifactWarnings(projectRoot, state) {
         });
       }
     }
+    if (
+      normalizedReceipt !== null
+      && normalizedReceipt.evidence_files.some(
+        (file) => !manifest.files.map(normalizePath).includes(file),
+      )
+    ) {
+      warnings.push({
+        code: "INVALID_HISTORICAL_ARTIFACT_MANIFEST",
+        artifact_id: record.artifact_id,
+        location: record.location,
+        manifest_path: relativeManifestPath,
+      });
+    }
     if ((kind === "file" && !includesPrimary) || !includesDeliverable) {
       warnings.push({
         code: "INVALID_HISTORICAL_ARTIFACT_MANIFEST",
@@ -1456,6 +1827,7 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
       project_id: state.state_meta.project_id,
       revision: state.state_meta.revision,
       mode: "idle",
+      operation_packet: null,
       warnings: [],
     };
   }
@@ -1473,6 +1845,7 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
       project_id: state.state_meta.project_id,
       revision: state.state_meta.revision,
       mode: "idle",
+      operation_packet: null,
       warnings: [],
     };
   }
@@ -1493,27 +1866,31 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
       project_id: migrated.state_meta.project_id,
       revision: migrated.state_meta.revision,
       mode: "idle",
+      operation_packet: null,
       warnings,
     };
   }
 
-  if ([2, 3].includes(parsed.state_meta.schema_version)) {
+  if ([2, 3, 4].includes(parsed.state_meta.schema_version)) {
     if (discardLegacyPlan) {
       fail("INVALID_INPUT", "--discard-legacy-plan applies only to a recognized unversioned v4.5 state");
     }
     const sourceVersion = parsed.state_meta.schema_version;
     const migrated = sourceVersion === 2
       ? migrateV2State(parsed)
-      : migrateV3State(parsed);
+      : sourceVersion === 3
+        ? migrateV3State(parsed)
+        : migrateV4State(parsed);
     const { planInfo } = validateState(migrated);
     const operation = migrated.state_meta.active_operation;
+    const packet = operationPacket(migrated, operation, planInfo);
     const mode = operation === null
       ? "idle"
       : operation.stage === "worker_pending"
         ? "resume_worker"
         : "resume_lead";
     const artifactStatus = operation && operation.artifact_intent
-      ? inspectReservedArtifact(root, operation, planInfo.actor)
+      ? inspectReservedArtifact(root, operation, planInfo.actor, packet)
       : null;
     const warnings = artifactWarnings(root, migrated);
     const serialized = stringifyYaml(migrated);
@@ -1530,6 +1907,7 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
       plan: migrated.next_step_plan,
       plan_actor: planInfo.actor,
       active_operation: operation,
+      operation_packet: packet,
       artifact_status: artifactStatus,
       warnings,
     };
@@ -1541,6 +1919,7 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
 
   const { planInfo } = validateState(parsed);
   const operation = parsed.state_meta.active_operation;
+  const packet = operationPacket(parsed, operation, planInfo);
   let mode = "idle";
   let code = "OPENED";
   if (operation) {
@@ -1557,8 +1936,9 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
     plan: parsed.next_step_plan,
     plan_actor: planInfo.actor,
     active_operation: operation,
+    operation_packet: packet,
     artifact_status: operation && operation.artifact_intent
-      ? inspectReservedArtifact(root, operation, planInfo.actor)
+      ? inspectReservedArtifact(root, operation, planInfo.actor, packet)
       : null,
     warnings: artifactWarnings(root, parsed),
   };
@@ -1817,6 +2197,8 @@ function beginOperation({ projectRoot, payload }) {
     scope_ref: assignment.scope_ref,
     artifact_intent: null,
     discovery_scope: null,
+    completion_protocol: 0,
+    contract_hash: null,
     started_at: nowIso(),
   };
   if (assignment.route === "causal_discovery" && assignment.scope_ref !== null) {
@@ -1826,6 +2208,8 @@ function beginOperation({ projectRoot, payload }) {
       contract: clone(state.discovery_sidecar.execution_contract),
     };
   }
+  const planInfo = validatePlan(plan);
+  setOperationProtocol(state, operation, planInfo);
   state.next_step_plan = plan;
   state.state_meta.active_operation = operation;
   state.pending_decision = null;
@@ -1839,6 +2223,7 @@ function beginOperation({ projectRoot, payload }) {
     operation_id: operation.id,
     stage,
     plan,
+    operation_packet: operationPacket(state, operation, planInfo),
   };
 }
 
@@ -1902,6 +2287,7 @@ function bindDiscoveryScope(state, operation, value, label) {
     base_ref: baseRef,
     contract,
   };
+  setOperationProtocol(state, operation, validatePlan(state.next_step_plan));
 }
 
 function normalizeExtension(value) {
@@ -1990,6 +2376,7 @@ function reserveArtifact({ projectRoot, payload }) {
     artifact_intent: operation.artifact_intent,
     scope_ref: operation.scope_ref,
     discovery_scope: operation.discovery_scope,
+    operation_packet: operationPacket(state, operation, planInfo),
     temporary_path: temporaryArtifactLocation(operation.artifact_intent, operation.id),
     manifest_path: normalizePath(path.relative(path.resolve(projectRoot), manifest)),
   };
@@ -2012,7 +2399,7 @@ function expectedArtifactRoute(actor) {
   return actor.startsWith("analysis_execution.") ? "analysis_execution" : actor;
 }
 
-function validateManifest(projectRoot, operation, actor) {
+function validateManifest(projectRoot, operation, actor, packet, expectedArtifact = null) {
   const intent = operation.artifact_intent;
   if (!intent) fail("MISSING_ARTIFACT", "no artifact is reserved for this operation");
   const target = resolveOutputPath(projectRoot, intent.location);
@@ -2029,6 +2416,12 @@ function validateManifest(projectRoot, operation, actor) {
   } catch (error) {
     fail("INVALID_ARTIFACT_MANIFEST", `completion manifest is invalid JSON: ${error.message}`);
   }
+  if (!isObject(manifest)) fail("INVALID_ARTIFACT_MANIFEST", "completion manifest must be a JSON object");
+  const legacyManifest = manifest.schema_version === LEGACY_MANIFEST_VERSION;
+  const currentManifest = manifest.schema_version === MANIFEST_VERSION;
+  if (!legacyManifest && !currentManifest) {
+    fail("INVALID_ARTIFACT_MANIFEST", "unsupported manifest schema version");
+  }
   assertKnownKeys(manifest, new Set([
     "schema_version",
     "operation_id",
@@ -2038,8 +2431,41 @@ function validateManifest(projectRoot, operation, actor) {
     "files",
     "completed_at",
     "summary",
+    "artifact_role",
+    "execution_receipt",
   ]), "artifact manifest", "INVALID_ARTIFACT_MANIFEST");
-  if (manifest.schema_version !== MANIFEST_VERSION) fail("INVALID_ARTIFACT_MANIFEST", "unsupported manifest schema version");
+  const requiredManifestKeys = [
+    "schema_version",
+    "operation_id",
+    "route",
+    "scope_ref",
+    "files",
+    "completed_at",
+    "summary",
+  ];
+  if (currentManifest) requiredManifestKeys.push("artifact_role", "execution_receipt");
+  const missingManifestKeys = requiredManifestKeys.filter(
+    (field) => !Object.prototype.hasOwnProperty.call(manifest, field),
+  );
+  if (missingManifestKeys.length) {
+    fail(
+      currentManifest && missingManifestKeys.some((field) => ["artifact_role", "execution_receipt"].includes(field))
+        ? "INVALID_ARTIFACT_RECEIPT"
+        : "INVALID_ARTIFACT_MANIFEST",
+      `artifact manifest is missing: ${missingManifestKeys.join(", ")}`,
+    );
+  }
+  if (legacyManifest && ("artifact_role" in manifest || "execution_receipt" in manifest)) {
+    fail("INVALID_ARTIFACT_MANIFEST", "schema-1 manifests cannot declare artifact_role or execution_receipt");
+  }
+  const artifactRole = legacyManifest ? "completion" : manifest.artifact_role;
+  assertEnum(artifactRole, ARTIFACT_ROLES, "artifact manifest.artifact_role", "INVALID_ARTIFACT_RECEIPT");
+  const executionReceipt = legacyManifest || manifest.execution_receipt === null
+    ? null
+    : normalizeExecutionReceipt(manifest.execution_receipt, "artifact manifest.execution_receipt");
+  if (currentManifest && executionReceipt !== null && !deepEqual(executionReceipt, manifest.execution_receipt)) {
+    fail("INVALID_ARTIFACT_RECEIPT", "artifact manifest execution_receipt must use canonical strings and paths");
+  }
   if (manifest.operation_id !== operation.id) fail("INVALID_ARTIFACT_MANIFEST", "manifest operation_id does not match");
   if (manifest.route !== expectedArtifactRoute(actor)) fail("INVALID_ARTIFACT_MANIFEST", "manifest route does not match the active worker");
   if (!deepEqual(manifest.scope_ref ?? null, operation.scope_ref ?? null)) fail("INVALID_ARTIFACT_MANIFEST", "manifest scope_ref does not match");
@@ -2084,7 +2510,21 @@ function validateManifest(projectRoot, operation, actor) {
   if (!includesDeliverable) {
     fail("INVALID_ARTIFACT_MANIFEST", "manifest must list at least one deliverable file, not only its own manifest");
   }
-  return { target, manifestPath, manifest };
+  validateReceiptAgainstPacket(executionReceipt, packet, artifactRole, manifest.files);
+  if (expectedArtifact !== null) {
+    if (
+      artifactRole !== expectedArtifact.artifact_role
+      || !deepEqual(executionReceipt, expectedArtifact.execution_receipt)
+    ) {
+      fail("INVALID_ARTIFACT_RECEIPT", "artifact role and receipt must match the frozen completion manifest");
+    }
+    if (manifest.summary.trim() !== expectedArtifact.summary) {
+      fail("INVALID_ARTIFACT_MANIFEST", "artifact summary must match the completion manifest summary");
+    }
+  }
+  return {
+    target, manifestPath, manifest, artifact_role: artifactRole, execution_receipt: executionReceipt,
+  };
 }
 
 function validateArtifactBody(projectRoot, operation, artifactPath, temporary = false) {
@@ -2127,15 +2567,17 @@ function validateArtifactBody(projectRoot, operation, artifactPath, temporary = 
   return files.sort().map((relative) => `${normalizePath(intent.location)}/${relative}`);
 }
 
-function generatedManifest(operation, actor, files, summary) {
+function generatedManifest(operation, actor, files, artifact) {
   return {
     schema_version: MANIFEST_VERSION,
     operation_id: operation.id,
     route: expectedArtifactRoute(actor),
     scope_ref: operation.scope_ref ?? null,
+    artifact_role: artifact.artifact_role,
+    execution_receipt: clone(artifact.execution_receipt),
     files,
     completed_at: nowIso(),
-    summary,
+    summary: artifact.summary,
     ...(actor === "causal_discovery"
       ? { discovery_contract: clone(operation.discovery_scope.contract) }
       : {}),
@@ -2143,24 +2585,42 @@ function generatedManifest(operation, actor, files, summary) {
 }
 
 function artifactSummary(artifactInput) {
-  if (!isObject(artifactInput) || Object.keys(artifactInput).some((key) => key !== "summary")) {
-    fail("INVALID_INPUT", "artifact input must contain only summary");
-  }
+  if (!isObject(artifactInput)) fail("INVALID_INPUT", "artifact input must be a mapping");
   if (typeof artifactInput.summary !== "string" || !artifactInput.summary.trim()) {
     fail("INVALID_INPUT", "artifact summary must be nonempty");
   }
   return artifactInput.summary.trim();
 }
 
-function publishReservedArtifact(projectRoot, operation, actor, artifactInput) {
-  const summary = artifactSummary(artifactInput);
+function normalizeArtifactInput(artifactInput, packet) {
+  assertKnownKeys(
+    artifactInput,
+    new Set(["summary", "artifact_role", "execution_receipt"]),
+    "artifact input",
+    "INVALID_INPUT",
+  );
+  const artifactRole = Object.prototype.hasOwnProperty.call(artifactInput, "artifact_role")
+    ? artifactInput.artifact_role
+    : "completion";
+  assertEnum(artifactRole, ARTIFACT_ROLES, "artifact.artifact_role", "INVALID_INPUT");
+  const receipt = artifactInput.execution_receipt === undefined || artifactInput.execution_receipt === null
+    ? null
+    : normalizeExecutionReceipt(artifactInput.execution_receipt);
+  return {
+    summary: artifactSummary(artifactInput),
+    artifact_role: artifactRole,
+
+    execution_receipt: receipt,
+  };
+}
+function publishReservedArtifact(projectRoot, operation, actor, artifact, packet) {
   const intent = operation.artifact_intent;
   if (!intent) fail("MISSING_ARTIFACT", "no artifact is reserved for this operation");
   const target = resolveOutputPath(projectRoot, intent.location);
   const temporaryLocation = temporaryArtifactLocation(intent, operation.id);
   const temporary = resolveOutputPath(projectRoot, temporaryLocation);
   const manifestPath = manifestPathFor(target, intent.kind);
-  const artifactStatus = inspectReservedArtifact(projectRoot, operation, actor);
+  const artifactStatus = inspectReservedArtifact(projectRoot, operation, actor, packet);
 
   if (artifactStatus.location_state === "collision") {
     fail("ARTIFACT_COLLISION", "the reserved artifact locations are in conflict");
@@ -2169,24 +2629,24 @@ function publishReservedArtifact(projectRoot, operation, actor, artifactInput) {
     fail("MISSING_ARTIFACT", `reserved temporary artifact does not exist: ${temporaryLocation}`);
   }
   if (artifactStatus.location_state === "complete") {
-    const completed = validateManifest(projectRoot, operation, actor);
-    if (completed.manifest.summary.trim() !== summary) {
-      fail("INVALID_ARTIFACT_MANIFEST", "artifact summary must match the completion manifest summary");
-    }
-    return completed;
+    return validateManifest(projectRoot, operation, actor, packet, artifact);
   }
   if (artifactStatus.location_state === "invalid") {
-    if (artifactEntryExists(manifestPath)) validateManifest(projectRoot, operation, actor);
+    if (artifactEntryExists(manifestPath)) {
+      validateManifest(projectRoot, operation, actor, packet, artifact);
+    }
     validateArtifactBody(projectRoot, operation, target);
     fail(artifactStatus.reason_code, "reserved artifact is invalid");
   }
 
   if (artifactStatus.location_state === "final-awaiting-manifest") {
     const files = validateArtifactBody(projectRoot, operation, target);
-    atomicWrite(manifestPath, `${JSON.stringify(generatedManifest(operation, actor, files, summary), null, 2)}\n`);
+    validateReceiptAgainstPacket(artifact.execution_receipt, packet, artifact.artifact_role, files);
+    atomicWrite(manifestPath, `${JSON.stringify(generatedManifest(operation, actor, files, artifact), null, 2)}\n`);
   } else if (artifactStatus.location_state === "temp-only") {
     const files = validateArtifactBody(projectRoot, operation, temporary, true);
-    const manifest = generatedManifest(operation, actor, files, summary);
+    validateReceiptAgainstPacket(artifact.execution_receipt, packet, artifact.artifact_role, files);
+    const manifest = generatedManifest(operation, actor, files, artifact);
     try {
       fs.renameSync(temporary, target);
     } catch (error) {
@@ -2197,11 +2657,7 @@ function publishReservedArtifact(projectRoot, operation, actor, artifactInput) {
     fail("INTERNAL_ERROR", `unsupported artifact location state: ${artifactStatus.location_state}`);
   }
 
-  const completed = validateManifest(projectRoot, operation, actor);
-  if (completed.manifest.summary.trim() !== summary) {
-    fail("INVALID_ARTIFACT_MANIFEST", "artifact summary must match the completion manifest summary");
-  }
-  return completed;
+  return validateManifest(projectRoot, operation, actor, packet, artifact);
 }
 
 function artifactEntryExists(filePath) {
@@ -2214,7 +2670,7 @@ function artifactEntryExists(filePath) {
   }
 }
 
-function inspectReservedArtifact(projectRoot, operation, actor) {
+function inspectReservedArtifact(projectRoot, operation, actor, packet) {
   const target = resolveOutputPath(projectRoot, operation.artifact_intent.location);
   const temporary = resolveOutputPath(
     projectRoot,
@@ -2227,11 +2683,12 @@ function inspectReservedArtifact(projectRoot, operation, actor) {
     temporary_path: temporaryArtifactLocation(operation.artifact_intent, operation.id),
     manifest_path: relativeManifestPath,
   };
-  const describe = (locationState, reasonCode = null) => ({
+  const describe = (locationState, reasonCode = null, details = {}) => ({
     status: locationState === "complete" ? "complete" : "incomplete",
     location_state: locationState,
     ...base,
     ...(reasonCode === null ? {} : { reason_code: reasonCode }),
+    ...details,
   });
   const targetExists = artifactEntryExists(target);
   const temporaryExists = artifactEntryExists(temporary);
@@ -2257,12 +2714,22 @@ function inspectReservedArtifact(projectRoot, operation, actor) {
     }
   }
   try {
-    validateManifest(projectRoot, operation, actor);
-    return describe("complete");
+    const completed = validateManifest(projectRoot, operation, actor, packet);
+    return describe("complete", null, {
+      artifact_role: completed.artifact_role,
+      execution_receipt: completed.execution_receipt,
+    });
   } catch (error) {
     if (
       error instanceof StateError
-      && ["MISSING_ARTIFACT", "INVALID_ARTIFACT_MANIFEST", "INVALID_ARTIFACT_PATH"].includes(error.code)
+      && [
+        "MISSING_ARTIFACT",
+        "INVALID_ARTIFACT_MANIFEST",
+        "INVALID_ARTIFACT_PATH",
+        "INVALID_ARTIFACT_RECEIPT",
+        "INCOMPLETE_WORK",
+        "SCOPE_MISMATCH",
+      ].includes(error.code)
     ) {
       return describe("invalid", error.code);
     }
@@ -2343,9 +2810,10 @@ function validateOwnedUpdates(actor, updates) {
   }
 }
 
-function applyScopeTransition(state, operation, actor, updates, transition, hasArtifact) {
+function applyScopeTransition(state, operation, actor, updates, transition, artifactRole) {
   const isAnalysis = actor.startsWith("analysis_execution.");
   const isReport = actor === "report_writer";
+  const hasArtifact = artifactRole !== null;
   if (!isAnalysis && !isReport) {
     if (transition !== undefined && transition !== null) fail("INVALID_INPUT", `${actor} cannot use scope_transition`);
     return;
@@ -2370,6 +2838,16 @@ function applyScopeTransition(state, operation, actor, updates, transition, hasA
     patch = updates.report_assembly;
     if (!patch) fail("INVALID_INPUT", "report scope transition requires a report_assembly patch");
   }
+  let submittedAnalysisContract;
+  if (isAnalysis && Object.prototype.hasOwnProperty.call(patch, "execution_contract")) {
+    submittedAnalysisContract = patch.execution_contract === null
+      ? null
+      : normalizeAnalysisContract(
+        patch.execution_contract,
+        `updates.council_chamber.${actor}.execution_contract`,
+      );
+    patch.execution_contract = submittedAnalysisContract;
+  }
   const hasCurrentIdentity = isUuid(current.scope_id)
     && Number.isInteger(current.scope_revision)
     && current.scope_revision >= 1;
@@ -2393,6 +2871,30 @@ function applyScopeTransition(state, operation, actor, updates, transition, hasA
         fail("SCOPE_MISMATCH", "a material scope change must return a ready or blocked handoff without output");
       }
     }
+  }
+  if (isAnalysis) {
+    if (transition === "preserve") {
+      if (
+        submittedAnalysisContract !== undefined
+        && !deepEqual(submittedAnalysisContract, current.execution_contract)
+      ) {
+        fail("SCOPE_MISMATCH", "preserved analysis execution_contract must match the approved scope");
+      }
+      patch.execution_contract = clone(current.execution_contract);
+    } else if (patch.current_status === "ready" && submittedAnalysisContract === undefined) {
+      fail("INVALID_INPUT", "new or revised ready analysis scope requires execution_contract");
+    } else if (submittedAnalysisContract === undefined) {
+      patch.execution_contract = null;
+    }
+  }
+  if (
+    isReport
+    && artifactRole === "infeasibility_evidence"
+    && transition === "preserve"
+    && Object.prototype.hasOwnProperty.call(patch, "current_format")
+    && patch.current_format !== current.current_format
+  ) {
+    fail("SCOPE_MISMATCH", "report infeasibility evidence cannot change the approved report format");
   }
   if (transition === "new") {
     patch.scope_id = crypto.randomUUID();
@@ -2427,6 +2929,7 @@ function emptyAnalysisSlot() {
     scope_id: null,
     scope_revision: 0,
     support: null,
+    execution_contract: null,
   };
 }
 
@@ -2475,8 +2978,9 @@ function resetNewScopeState(state, actor, transition) {
   }
 }
 
-function applyDiscoveryHandoff(state, operation, actor, updates, hasArtifact) {
+function applyDiscoveryHandoff(state, operation, actor, updates, artifactRole) {
   if (actor !== "causal_discovery") return;
+  const hasArtifact = artifactRole !== null;
   const snapshot = operation.discovery_scope;
   const patch = updates.discovery_sidecar;
   const currentBound = isUuid(state.discovery_sidecar.scope_id)
@@ -2524,8 +3028,12 @@ function applyDiscoveryHandoff(state, operation, actor, updates, hasArtifact) {
     if (snapshot === null || operation.scope_ref === null) {
       fail("SCOPE_MISMATCH", "a discovery artifact requires a frozen discovery scope");
     }
-    if (patch.status !== "artifact_created") {
-      fail("SCOPE_MISMATCH", "a discovery artifact requires status artifact_created");
+    const requiredStatus = artifactRole === "completion" ? "artifact_created" : "blocked";
+    if (patch.status !== requiredStatus || chamberPatch.current_status !== requiredStatus) {
+      fail(
+        "SCOPE_MISMATCH",
+        `a discovery ${artifactRole} artifact requires sidecar and chamber status ${requiredStatus}`,
+      );
     }
   } else if (patch.status === "artifact_created") {
     fail("SCOPE_MISMATCH", "status artifact_created requires a completed discovery artifact");
@@ -2572,25 +3080,33 @@ function applyDiscoveryHandoff(state, operation, actor, updates, hasArtifact) {
   }
 }
 
-function validateScopeCompletion(state, actor, updates, hasArtifact) {
+function validateScopeCompletion(state, actor, updates, artifactRole) {
   const isAnalysis = actor.startsWith("analysis_execution.");
   const isReport = actor === "report_writer";
   if (!isAnalysis && !isReport) return;
   const status = isAnalysis
     ? state.council_chamber.analysis_execution[actor.slice("analysis_execution.".length)].current_status
     : state.council_chamber.report_writer.current_status;
-  if ((status === "done") !== hasArtifact) {
-    fail("SCOPE_MISMATCH", hasArtifact
-      ? `${actor} artifact completion requires current_status done`
-      : `${actor} current_status done requires a completed artifact`);
-  }
-  if (isReport && hasArtifact) {
-    const chamberPatch = updates.council_chamber && updates.council_chamber.report_writer;
-    if (!chamberPatch || chamberPatch.current_status !== "done") {
-      fail("SCOPE_MISMATCH", "report output requires an explicit report_writer transition to done");
+  if (artifactRole === null) {
+    if (status === "done") {
+      fail("SCOPE_MISMATCH", `${actor} current_status done requires a completion artifact`);
     }
-    if (state.report_assembly.current_format !== "html") {
-      fail("SCOPE_MISMATCH", "report output requires report_assembly.current_format html");
+    return;
+  }
+  const requiredStatus = artifactRole === "completion" ? "done" : "blocked";
+  if (status !== requiredStatus) {
+    fail(
+      "SCOPE_MISMATCH",
+      `${actor} ${artifactRole} artifact requires current_status ${requiredStatus}`,
+    );
+  }
+  if (isReport) {
+    const chamberPatch = updates.council_chamber && updates.council_chamber.report_writer;
+    if (!chamberPatch || chamberPatch.current_status !== requiredStatus) {
+      fail("SCOPE_MISMATCH", `report output requires an explicit transition to ${requiredStatus}`);
+    }
+    if (artifactRole === "completion" && state.report_assembly.current_format !== "html") {
+      fail("SCOPE_MISMATCH", "report completion requires report_assembly.current_format html");
     }
   }
 }
@@ -2650,9 +3166,9 @@ function stampWorkerUpdates(updates, actor, timestamp) {
   }
 }
 
-function normalizeCompletedHandoff(updates, actor, artifactInput) {
-  if (artifactInput === undefined || artifactInput === null) return;
-  const summary = artifactSummary(artifactInput);
+function normalizeCompletedHandoff(updates, actor, artifact) {
+  if (artifact === null || artifact.artifact_role !== "completion") return;
+  const summary = artifact.summary;
   if (actor.startsWith("analysis_execution.")) {
     const design = actor.slice("analysis_execution.".length);
     const patch = updates.council_chamber.analysis_execution[design];
@@ -2665,9 +3181,9 @@ function normalizeCompletedHandoff(updates, actor, artifactInput) {
   }
 }
 
-function appendArtifactRecord(state, projectRoot, operation, actor, artifactInput) {
-  const summary = artifactSummary(artifactInput);
-  const { manifest } = validateManifest(projectRoot, operation, actor);
+function appendArtifactRecord(state, projectRoot, operation, actor, artifact, packet) {
+  const summary = artifact.summary;
+  const { manifest, artifact_role: artifactRole } = validateManifest(projectRoot, operation, actor, packet, artifact);
   if ((actor === "report_writer" || actor.startsWith("analysis_execution.")) && operation.scope_ref === null) {
     fail("SCOPE_MISMATCH", `${actor} output requires an exact approved scope_ref`);
   }
@@ -2685,6 +3201,7 @@ function appendArtifactRecord(state, projectRoot, operation, actor, artifactInpu
     location: operation.artifact_intent.location,
     created_at: nowIso(),
     summary,
+    artifact_role: artifactRole,
   };
   if (actor.startsWith("analysis_execution.")) {
     record.design = planInfo.design;
@@ -2727,6 +3244,17 @@ function applyWorker({ projectRoot, payload }) {
     bindDiscoveryScope(state, operation, payload.discovery_scope, "apply discovery_scope");
   }
   const hadApprovedScope = operation.scope_ref !== null;
+  const workerPacket = operationPacket(state, operation, planInfo);
+  const artifact = hasArtifact ? normalizeArtifactInput(payload.artifact, workerPacket) : null;
+  const artifactRole = artifact === null ? null : artifact.artifact_role;
+  if (hasArtifact && operation.artifact_intent !== null) {
+    const frozenStatus = inspectReservedArtifact(projectRoot, operation, payload.actor, workerPacket);
+    if (frozenStatus.location_state === "complete") {
+      validateManifest(projectRoot, operation, payload.actor, workerPacket, artifact);
+    }
+  }
+
+
   if (
     hasArtifact
     && (payload.actor === "report_writer" || payload.actor.startsWith("analysis_execution."))
@@ -2760,16 +3288,25 @@ function applyWorker({ projectRoot, payload }) {
     payload.actor,
     updates,
     payload.scope_transition,
-    hasArtifact,
+    artifactRole,
   );
   resetNewScopeState(state, payload.actor, payload.scope_transition);
-  applyDiscoveryHandoff(state, operation, payload.actor, updates, hasArtifact);
-  normalizeCompletedHandoff(updates, payload.actor, payload.artifact);
+  applyDiscoveryHandoff(state, operation, payload.actor, updates, artifactRole);
+  normalizeCompletedHandoff(updates, payload.actor, artifact);
   stampWorkerUpdates(updates, payload.actor, nowIso());
 
   const merged = deepMerge(state, updates);
+  const mergedOperation = merged.state_meta.active_operation;
+  if (
+    !hasArtifact
+    && ["new", "revise"].includes(payload.scope_transition)
+    && (payload.actor === "report_writer" || payload.actor.startsWith("analysis_execution."))
+  ) {
+    setOperationProtocol(merged, mergedOperation, planInfo);
+  }
+  const completionPacket = operationPacket(merged, mergedOperation, planInfo);
   validateCausalCheckReadiness(merged, payload.actor, updates);
-  validateScopeCompletion(merged, payload.actor, updates, hasArtifact);
+  validateScopeCompletion(merged, payload.actor, updates, artifactRole);
 
   const abandonedLegacyDiscoveryArtifact = (
     payload.actor === "causal_discovery"
@@ -2784,10 +3321,17 @@ function applyWorker({ projectRoot, payload }) {
     if (merged.artifact_records.some((record) => record.operation_id === operation.id)) {
       fail("DUPLICATE_ARTIFACT", "this operation already has an artifact record");
     }
-    publishReservedArtifact(projectRoot, operation, payload.actor, payload.artifact);
-    artifactRecord = appendArtifactRecord(merged, projectRoot, operation, payload.actor, payload.artifact);
+    publishReservedArtifact(projectRoot, mergedOperation, payload.actor, artifact, completionPacket);
+    artifactRecord = appendArtifactRecord(
+      merged,
+      projectRoot,
+      mergedOperation,
+      payload.actor,
+      artifact,
+      completionPacket,
+    );
   } else if (operation.artifact_intent && !abandonedLegacyDiscoveryArtifact) {
-    const artifactStatus = inspectReservedArtifact(projectRoot, operation, payload.actor);
+    const artifactStatus = inspectReservedArtifact(projectRoot, mergedOperation, payload.actor, completionPacket);
     if (!["absent", "temp-only"].includes(artifactStatus.location_state)) {
       if (artifactStatus.location_state === "collision") {
         fail("ARTIFACT_COLLISION", "the reserved artifact locations are in conflict and cannot be left unrecorded");
@@ -2801,6 +3345,7 @@ function applyWorker({ projectRoot, payload }) {
 
   if (deriveSummaryAggregates(merged)) merged.project_summary.last_updated = nowIso();
   merged.state_meta.active_operation.stage = "lead_pending";
+  const leadPacket = operationPacket(merged, merged.state_meta.active_operation, planInfo);
   const revision = commitMutation(statePath, merged);
   return {
     ok: true,
@@ -2810,11 +3355,14 @@ function applyWorker({ projectRoot, payload }) {
     operation_id: operation.id,
     stage: "lead_pending",
     artifact_record: artifactRecord,
+    operation_packet: leadPacket,
   };
 }
 
 function deriveSummaryAggregates(state) {
-  const hasArtifact = (route) => state.artifact_records.some((record) => record.route === route);
+  const hasArtifact = (route) => state.artifact_records.some(
+    (record) => record.route === route && record.artifact_role === "completion",
+  );
   const coreComplete = {
     data_audit_complete: ["passing", "limited"].includes(state.data_facts.data_checked),
     domain_knowledge_complete: ["passing", "limited"].includes(state.domain_knowledge.domain_checked),
@@ -3034,6 +3582,7 @@ function finishOperation({ projectRoot, payload, cancel = false }) {
     revision,
     operation_id: operation.id,
     mode: "idle",
+    operation_packet: null,
     next_action: "emit_response_markdown_verbatim_and_stop",
     pending_decision: merged.pending_decision,
     response_markdown: responseMarkdown,
@@ -3088,6 +3637,7 @@ function validateProject({ projectRoot }) {
     project_id: state.state_meta.project_id,
     revision: state.state_meta.revision,
     active_operation: state.state_meta.active_operation,
+    operation_packet: operationPacket(state, state.state_meta.active_operation, planInfo),
     plan: state.next_step_plan,
     plan_actor: planInfo.actor,
     pending_decision: state.pending_decision,
@@ -3110,6 +3660,9 @@ function validateTemplate({ skillRoot }) {
       response_receipt: 1,
       startup_notice: 1,
       discovery_contract: 1,
+      analysis_contract: 1,
+      completion_protocol: 1,
+      artifact_roles: 1,
     },
   };
 }

@@ -14,15 +14,16 @@ artifacts that may support later causal review.
 Read the validated state before route work. Proceed only at `worker_pending`
 when the committed plan's worker route is exactly `causal_discovery`.
 
-Use `state_meta.active_operation.intent_summary`, live state, inspectable data,
-routed graph/data/artifact materials, and any consistent detail still available
-from the operation-opening message as the assignment. A non-null
+Use `state_meta.active_operation.intent_summary`, the `operation_packet`, live
+state, inspectable data, routed graph/data/artifact materials, and any consistent
+detail still available from the operation-opening message as the assignment. A
+non-null
 `active_operation.discovery_scope` is the exact frozen work definition. On
 resume, neither a new message nor technical convenience changes it.
 
 Submit one `statectl apply` JSON payload with `actor: causal_discovery`,
 `updates` containing `council_chamber.causal_discovery` and, when allowed
-below, `discovery_sidecar`. Add an optional completed `artifact` or no-output
+below, `discovery_sidecar`. Add an optional output `artifact` or no-output
 `discovery_scope` when applicable. Never submit both together. The controller
 owns scope identity, the stored execution contract, timestamps, artifact
 records, and transition to `lead_pending`; never edit those fields or the YAML
@@ -63,11 +64,16 @@ Use the existing controller boundaries:
 
 A clear request to run discovery is sufficient authorization. No separate
 approval, `ready` status, causal review, or analysis eligibility is required.
-If a frozen target, input, variable, method plan, constraint, diagnostic,
-output, or boundary cannot be followed, return `blocked` without an artifact;
-never substitute a different run. A reserved run ends only as
-`artifact_created` with its artifact or `blocked` without one. The controller
-checks identity and exact contract equality, not scientific adequacy.
+For a bounded run, the operation packet requirements are minimum coverage;
+supplemental discovery work is allowed within the frozen target and
+`candidate_only` boundary. Never substitute a different run. If the contract
+cannot be followed before useful output exists, return `blocked` without an
+artifact. If work on the exact contract produces evidence that its promised
+output is infeasible, it may instead return `blocked` with an
+`infeasibility_evidence` artifact and a complete receipt. A completed run uses
+`artifact_created` with a `completion` artifact. Package, tool, or transient
+execution failure alone remains a no-artifact block. The controller checks
+identity and coverage, not scientific adequacy.
 
 ## Discovery Engineering Scope
 
@@ -102,8 +108,9 @@ Classify the route work before acting:
   otherwise identify the material in the chamber handoff.
 - **Bounded discovery run**: execute only the frozen contract against actual
   data or routed artifacts, including its required diagnostics.
-- **Blocked**: stop without output when the requested contract cannot be
-  stated or followed, including unavailable packages or inputs.
+- **Blocked**: an ordinary scoping, input, package, or transient execution block
+  stops without output. If the exact bound run produces infeasibility evidence,
+  follow the Mechanical Discovery Contract exception above.
 
 If route work reveals a missing data, domain, or causal review that would
 materially change interpretation, write a reviewer request instead of running
@@ -157,7 +164,7 @@ If diagnostics are missing, label the finding as `candidate_only` or
 Submit supported `discovery_sidecar` fields when supported by the request:
 
 - `status`: `scoped` for a persisted contract without output;
-  `artifact_created` when this operation published output;
+  `artifact_created` when this operation published completion output;
   `reviewed` for existing-material review without new output; or `blocked` when
   the requested lane could not complete.
 - `goal`: discovery purpose or graph question.
@@ -207,8 +214,9 @@ notebooks, and technical notes.
 
 When output is created, follow `references/artifact_output_policy.md`. The
 controller binds its manifest to the frozen contract and adds the final location
-to `discovery_sidecar.artifact_refs`; identify inspected historical paths
-separately when relevant.
+to `discovery_sidecar.artifact_refs`. Use the artifact role and receipt to
+distinguish completed output from infeasibility evidence; identify historical
+paths separately.
 
 Do not reserve or submit an artifact for verbal discovery framing or for
 inspecting existing files without creating new durable output.

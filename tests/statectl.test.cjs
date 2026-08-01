@@ -78,7 +78,7 @@ function writeState(projectRoot, state) {
 
 function downgradeCurrentStateToV2(projectRoot) {
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 4);
+  assert.equal(state.state_meta.schema_version, 5);
   state.state_meta.schema_version = 2;
   delete state.state_meta.startup_notice;
   delete state.pending_decision;
@@ -86,19 +86,60 @@ function downgradeCurrentStateToV2(projectRoot) {
   delete state.discovery_sidecar.scope_id;
   delete state.discovery_sidecar.scope_revision;
   delete state.discovery_sidecar.execution_contract;
-  if (state.state_meta.active_operation !== null) delete state.state_meta.active_operation.discovery_scope;
+  for (const slot of Object.values(state.council_chamber.analysis_execution)) {
+    delete slot.execution_contract;
+  }
+  if (state.state_meta.active_operation !== null) {
+    delete state.state_meta.active_operation.discovery_scope;
+    delete state.state_meta.active_operation.completion_protocol;
+    delete state.state_meta.active_operation.contract_hash;
+  }
+  for (const record of state.artifact_records) {
+    delete record.artifact_role;
+    delete record.execution_receipt;
+  }
   writeState(projectRoot, state);
   return state;
 }
 
 function downgradeCurrentStateToV3(projectRoot) {
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 4);
+  assert.equal(state.state_meta.schema_version, 5);
   state.state_meta.schema_version = 3;
   delete state.discovery_sidecar.scope_id;
   delete state.discovery_sidecar.scope_revision;
   delete state.discovery_sidecar.execution_contract;
-  if (state.state_meta.active_operation !== null) delete state.state_meta.active_operation.discovery_scope;
+  for (const slot of Object.values(state.council_chamber.analysis_execution)) {
+    delete slot.execution_contract;
+  }
+  if (state.state_meta.active_operation !== null) {
+    delete state.state_meta.active_operation.discovery_scope;
+    delete state.state_meta.active_operation.completion_protocol;
+    delete state.state_meta.active_operation.contract_hash;
+  }
+  for (const record of state.artifact_records) {
+    delete record.artifact_role;
+    delete record.execution_receipt;
+  }
+  writeState(projectRoot, state);
+  return state;
+}
+
+function downgradeCurrentStateToV4(projectRoot) {
+  const state = readState(projectRoot);
+  assert.equal(state.state_meta.schema_version, 5);
+  state.state_meta.schema_version = 4;
+  for (const slot of Object.values(state.council_chamber.analysis_execution)) {
+    delete slot.execution_contract;
+  }
+  if (state.state_meta.active_operation !== null) {
+    delete state.state_meta.active_operation.completion_protocol;
+    delete state.state_meta.active_operation.contract_hash;
+  }
+  for (const record of state.artifact_records) {
+    delete record.artifact_role;
+    delete record.execution_receipt;
+  }
   writeState(projectRoot, state);
   return state;
 }
@@ -142,6 +183,18 @@ const DEFAULT_DISCOVERY_CONTRACT = Object.freeze({
   diagnostic_requirements: ["bootstrap edge stability"],
   output_type: "CPDAG and edge-stability table",
   claim_boundary: "candidate_only",
+});
+
+const DEFAULT_ANALYSIS_EXECUTION_CONTRACT = Object.freeze({
+  target: "Estimate the approved treatment-outcome contrast",
+  input_refs: ["data/study.csv"],
+  method_plan: "Fit the approved design and report uncertainty",
+  execution_requirements: [
+    "Estimate the approved contrast using the bound design.",
+    "Report the required diagnostics and uncertainty.",
+  ],
+  output_type: "Estimate table with diagnostics",
+  claim_boundary: "Interpret only within the approved causal scope.",
 });
 
 function discoveryScope(transition, contract = DEFAULT_DISCOVERY_CONTRACT) {
@@ -197,14 +250,57 @@ function finish(projectRoot, prior, updates = {}, options = {}) {
   });
 }
 
-function analysisSlot(status, summary, support = null) {
-  return {
+function analysisSlot(status, summary, support = null, executionContract = DEFAULT_ANALYSIS_EXECUTION_CONTRACT) {
+  const slot = {
     current_status: status,
     summary,
     questions_for_user: [],
     feedback_to_route: [],
     support,
   };
+  if (status === "ready") slot.execution_contract = structuredClone(executionContract);
+  return slot;
+}
+
+function packetRequirementIds(result) {
+  assert.ok(result.operation_packet, "result must expose operation_packet");
+  assert.ok(Array.isArray(result.operation_packet.requirements));
+  return result.operation_packet.requirements.map((item) => item.id);
+}
+
+function executionReceipt(result, options = {}) {
+  const requirementIds = packetRequirementIds(result);
+  const unmetRequirements = options.unmet_requirements ?? [];
+  const completedRequirements = options.completed_requirements
+    ?? requirementIds.filter((id) => !unmetRequirements.includes(id));
+  return {
+    contract_hash: options.contract_hash ?? result.operation_packet.contract_hash,
+    completed_requirements: [...completedRequirements],
+    unmet_requirements: [...unmetRequirements],
+    supplemental_work: [...(options.supplemental_work ?? [])],
+    evidence_files: [...(
+      options.evidence_files
+      ?? (result.artifact_intent ? [result.artifact_intent.location] : [])
+    )],
+  };
+}
+
+function scopedArtifact(result, summary, options = {}) {
+  const artifactRole = options.artifact_role ?? "completion";
+  const receiptOptions = { ...options };
+  delete receiptOptions.artifact_role;
+  return {
+    summary,
+    artifact_role: artifactRole,
+    execution_receipt: executionReceipt(result, receiptOptions),
+  };
+}
+
+function writeReservedTemporary(projectRoot, reserved, contents = "diagnostic,value\nstatus,1\n") {
+  const temporary = path.join(projectRoot, ...reserved.temporary_path.split("/"));
+  fs.mkdirSync(path.dirname(temporary), { recursive: true });
+  fs.writeFileSync(temporary, contents, "utf8");
+  return temporary;
 }
 
 function causalCheckUpdates(causalFacts, summary = "Causal review completed.") {
@@ -329,7 +425,7 @@ test("open creates a valid state and a normal open is a byte-preserving no-op", 
   const firstBytes = fs.readFileSync(statePath(projectRoot), "utf8");
   const state = readState(projectRoot);
 
-  assert.equal(state.state_meta.schema_version, 4);
+  assert.equal(state.state_meta.schema_version, 5);
   assert.equal(state.state_meta.project_id, created.project_id);
   assert.equal(state.state_meta.revision, 0);
   assert.equal(state.state_meta.active_operation, null);
@@ -364,12 +460,14 @@ test("validate exposes a deterministic scope snapshot without mutating state", (
   };
   state.council_chamber.analysis_execution.difference_in_differences = {
     ...analysisSlot("blocked", "Difference-in-differences scope.", "statistical-validity"),
+    execution_contract: null,
     last_updated: null,
     scope_id: differenceId,
     scope_revision: 1,
   };
   state.council_chamber.analysis_execution.randomized_assignment = {
     ...analysisSlot("requested", "No scope identity yet."),
+    execution_contract: null,
     last_updated: null,
     scope_id: null,
     scope_revision: 0,
@@ -457,7 +555,7 @@ test("supported v4.5 migration preserves evidence, adds identities, and is idemp
   }]);
 
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 4);
+  assert.equal(state.state_meta.schema_version, 5);
   assert.equal(state.state_meta.startup_notice, null);
   assert.equal(state.pending_decision, null);
   assert.equal(state.response_receipt, null);
@@ -469,6 +567,7 @@ test("supported v4.5 migration preserves evidence, adds identities, and is idemp
   assert.equal(state.report_assembly.scope_revision, 1);
   assert.equal(state.artifact_records[0].artifact_id, "legacy-0001");
   assert.equal(state.artifact_records[0].operation_id, null);
+  assert.equal(state.artifact_records[0].artifact_role, "completion");
   assert.equal(state.artifact_records[0].created_at, "23:14:59");
 
   const migratedBytes = fs.readFileSync(statePath(projectRoot), "utf8");
@@ -512,6 +611,7 @@ test("migration recognizes feedback-only scopes and owns legacy artifact identit
   assert.match(state.report_assembly.scope_id, /^[0-9a-f-]{36}$/);
   assert.equal(state.artifact_records[0].artifact_id, "legacy-0001");
   assert.equal(state.artifact_records[0].operation_id, null);
+  assert.equal(state.artifact_records[0].artifact_role, "completion");
 });
 
 test("legacy active plans and opinions-era states fail closed without byte changes", async (t) => {
@@ -1434,7 +1534,7 @@ test("direct discovery output freezes its contract at reservation and records th
           },
         },
       },
-      artifact: { summary },
+      artifact: scopedArtifact(reserved, summary),
     },
   }), "SCOPE_MISMATCH");
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), frozenBytes);
@@ -1462,7 +1562,7 @@ test("direct discovery output freezes its contract at reservation and records th
           },
         },
       },
-      artifact: { summary },
+      artifact: scopedArtifact(reserved, summary),
     },
   }), "WORKER_APPLIED");
   const state = readState(projectRoot);
@@ -1722,7 +1822,7 @@ test("revising a discovery contract clears prior execution residue but preserves
           },
         },
       },
-      artifact: { summary: "Original discovery output." },
+      artifact: scopedArtifact(reserved, "Original discovery output."),
     },
   }), "WORKER_APPLIED");
   const completedState = readState(projectRoot);
@@ -1967,6 +2067,113 @@ test("causal-check descriptive fallback is limited and nondecision updates remai
   expectSuccess(finish(projectRoot, independent), "OPERATION_FINISHED");
 });
 
+
+test("new ready analysis scopes require one canonical execution contract", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  seedAnalysisEligibility(projectRoot);
+  const actor = "analysis_execution.single_time_observational";
+  const started = expectSuccess(begin(projectRoot, opened, actor), "BEGAN_WORKER");
+  const withoutContract = {
+    council_chamber: {
+      analysis_execution: {
+        single_time_observational: {
+          current_status: "ready",
+          summary: "This scope is missing its execution contract.",
+          questions_for_user: [],
+          feedback_to_route: [],
+        },
+      },
+    },
+  };
+  const before = fs.readFileSync(statePath(projectRoot));
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor,
+      scope_transition: "new",
+      updates: withoutContract,
+    },
+  }), "INVALID_INPUT");
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+
+  const invalidContracts = [
+    {
+      name: "empty input refs",
+      contract: { ...DEFAULT_ANALYSIS_EXECUTION_CONTRACT, input_refs: [] },
+    },
+    {
+      name: "duplicate input refs",
+      contract: {
+        ...DEFAULT_ANALYSIS_EXECUTION_CONTRACT,
+        input_refs: ["data/study.csv", "data/study.csv"],
+      },
+    },
+    {
+      name: "empty execution requirements",
+      contract: { ...DEFAULT_ANALYSIS_EXECUTION_CONTRACT, execution_requirements: [] },
+    },
+    {
+      name: "duplicate execution requirements",
+      contract: {
+        ...DEFAULT_ANALYSIS_EXECUTION_CONTRACT,
+        execution_requirements: ["Fit the approved design.", "Fit the approved design."],
+      },
+    },
+    {
+      name: "unsupported field",
+      contract: { ...DEFAULT_ANALYSIS_EXECUTION_CONTRACT, unsupported: "extra" },
+    },
+  ];
+  for (const scenario of invalidContracts) {
+    expectFailure(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(started),
+        operation_id: started.operation_id,
+        actor,
+        scope_transition: "new",
+        updates: {
+          council_chamber: {
+            analysis_execution: {
+              single_time_observational: analysisSlot(
+                "ready",
+                `Invalid contract: ${scenario.name}.`,
+                null,
+                scenario.contract,
+              ),
+            },
+          },
+        },
+      },
+    }), "INVALID_INPUT");
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before, scenario.name);
+  }
+
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor,
+      scope_transition: "new",
+      updates: {
+        council_chamber: {
+          analysis_execution: {
+            single_time_observational: analysisSlot(
+              "ready",
+              "The bounded analysis scope is ready.",
+            ),
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+  const slot = readState(projectRoot).council_chamber.analysis_execution.single_time_observational;
+  assert.deepEqual(slot.execution_contract, DEFAULT_ANALYSIS_EXECUTION_CONTRACT);
+  assert.match(slot.scope_id, /^[0-9a-f-]{36}$/);
+  assert.equal(slot.scope_revision, 1);
+  expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+});
 test("analysis and report workers require an explicit completed scope handoff status", async (t) => {
   const invalidStatuses = [
     { name: "omitted" },
@@ -2150,6 +2357,681 @@ test("analysis and report done handoffs require an artifact in the same apply", 
   });
 });
 
+
+test("operation packets stay contract-stable across begin, open, reserve, and apply", (t) => {
+  const projectRoot = temporaryProject(t);
+  const prepared = prepareAnalysisScope(projectRoot);
+  const actor = "analysis_execution." + prepared.design;
+  const idle = expectSuccess(execute(projectRoot, "open"), "OPENED");
+  assert.equal(idle.operation_packet, null);
+  const started = expectSuccess(begin(projectRoot, idle, actor, {
+    scope_ref: prepared.scope_ref,
+  }), "BEGAN_WORKER");
+  const workerPacket = structuredClone(started.operation_packet);
+  assert.deepEqual(Object.keys(workerPacket).sort(), [
+    "action",
+    "actor",
+    "completion_protocol",
+    "contract_hash",
+    "intent_summary",
+    "operation_id",
+    "requirements",
+    "scope_ref",
+    "stage",
+    "support",
+  ]);
+  assert.equal(workerPacket.operation_id, started.operation_id);
+  assert.equal(workerPacket.stage, "worker_pending");
+  assert.equal(workerPacket.action, "apply");
+  assert.equal(workerPacket.actor, actor);
+  assert.equal(workerPacket.support, prepared.support);
+  assert.deepEqual(workerPacket.scope_ref, prepared.scope_ref);
+  assert.equal(workerPacket.completion_protocol, 1);
+  assert.match(workerPacket.contract_hash, /^[0-9a-f]{64}$/);
+  assert.ok(workerPacket.requirements.length > 0);
+  assert.equal(
+    new Set(workerPacket.requirements.map((item) => item.id)).size,
+    workerPacket.requirements.length,
+  );
+  for (const item of workerPacket.requirements) {
+    assert.deepEqual(Object.keys(item).sort(), ["description", "id", "kind"]);
+    assert.match(item.id, /^[a-z0-9][a-z0-9._-]*$/);
+    assert.equal(typeof item.kind, "string");
+    assert.ok(item.kind.length > 0);
+    assert.equal(typeof item.description, "string");
+    assert.ok(item.description.length > 0);
+  }
+
+  const durableOperation = readState(projectRoot).state_meta.active_operation;
+  assert.equal(durableOperation.completion_protocol, 1);
+  assert.equal(durableOperation.contract_hash, workerPacket.contract_hash);
+  assert.deepEqual(
+    expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER").operation_packet,
+    workerPacket,
+  );
+
+  const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      kind: "file",
+      slug: "packet-stability",
+      extension: "csv",
+    },
+  }), "ARTIFACT_RESERVED");
+  assert.deepEqual(reserved.operation_packet, workerPacket);
+  writeReservedTemporary(projectRoot, reserved, "estimate,se\n1.5,0.2\n");
+
+  const artifact = scopedArtifact(reserved, "Bound analysis with supplemental diagnostics.", {
+    supplemental_work: ["Produced a supplemental influence diagnostic."],
+  });
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: started.operation_id,
+      actor,
+      scope_transition: "preserve",
+      updates: {
+        council_chamber: {
+          analysis_execution: {
+            [prepared.design]: {
+              current_status: "done",
+            },
+          },
+        },
+      },
+      artifact,
+    },
+  }), "WORKER_APPLIED");
+  const leadPacket = applied.operation_packet;
+  assert.equal(leadPacket.stage, "lead_pending");
+  assert.equal(leadPacket.action, "finish");
+  for (const field of [
+    "operation_id",
+    "actor",
+    "support",
+    "intent_summary",
+    "scope_ref",
+    "completion_protocol",
+    "contract_hash",
+    "requirements",
+  ]) {
+    assert.deepEqual(leadPacket[field], workerPacket[field], field + " changed across apply");
+  }
+  assert.deepEqual(
+    expectSuccess(execute(projectRoot, "open"), "RESUME_LEAD").operation_packet,
+    leadPacket,
+  );
+
+  const manifest = JSON.parse(fs.readFileSync(
+    path.join(projectRoot, ...reserved.manifest_path.split("/")),
+    "utf8",
+  ));
+  assert.equal(manifest.schema_version, 2);
+  assert.equal(manifest.artifact_role, "completion");
+  assert.deepEqual(manifest.execution_receipt, artifact.execution_receipt);
+  assert.deepEqual(manifest.execution_receipt.supplemental_work, [
+    "Produced a supplemental influence diagnostic.",
+  ]);
+  assert.equal(applied.artifact_record.artifact_role, "completion");
+  const closed = expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+  assert.equal(closed.operation_packet, null);
+});
+
+test("scoped completion rejects incomplete, inconsistent, or uninventoried receipts atomically", (t) => {
+  const projectRoot = temporaryProject(t);
+  const prepared = prepareAnalysisScope(projectRoot);
+  const actor = "analysis_execution." + prepared.design;
+  const started = expectSuccess(begin(projectRoot, prepared, actor, {
+    scope_ref: prepared.scope_ref,
+  }), "BEGAN_WORKER");
+  const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      kind: "file",
+      slug: "receipt-guard",
+      extension: "csv",
+    },
+  }), "ARTIFACT_RESERVED");
+  const temporary = writeReservedTemporary(projectRoot, reserved, "estimate,se\n1.2,0.3\n");
+  const finalPath = path.join(projectRoot, ...reserved.artifact_intent.location.split("/"));
+  const requirements = packetRequirementIds(reserved);
+  assert.ok(requirements.length > 1);
+
+  const doneUpdates = {
+    council_chamber: {
+      analysis_execution: {
+        [prepared.design]: {
+          current_status: "done",
+        },
+      },
+    },
+  };
+  const blockedUpdates = {
+    council_chamber: {
+      analysis_execution: {
+        [prepared.design]: {
+          current_status: "blocked",
+          summary: "The bound execution is infeasible.",
+          questions_for_user: ["Revise the scope?"],
+        },
+      },
+    },
+  };
+  const applyWith = (artifact, updates = doneUpdates, scopeTransition = "preserve") => execute(
+    projectRoot,
+    "apply",
+    {
+      payload: {
+        ...expected(reserved),
+        operation_id: started.operation_id,
+        actor,
+        scope_transition: scopeTransition,
+        updates,
+        artifact,
+      },
+    },
+  );
+  const before = fs.readFileSync(statePath(projectRoot));
+  const revision = readState(projectRoot).state_meta.revision;
+  const expectAtomicFailure = (execution, code) => {
+    expectFailure(execution, code);
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+    assert.equal(readState(projectRoot).state_meta.revision, revision);
+    assert.equal(fs.existsSync(temporary), true);
+    assert.equal(fs.existsSync(finalPath), false);
+  };
+
+  expectAtomicFailure(applyWith(scopedArtifact(reserved, "Incomplete completion.", {
+    completed_requirements: requirements.slice(0, -1),
+  })), "INCOMPLETE_WORK");
+
+  expectAtomicFailure(applyWith(scopedArtifact(reserved, "Unknown requirement.", {
+    completed_requirements: [...requirements, "unknown.requirement"],
+  })), "INVALID_ARTIFACT_RECEIPT");
+
+  const unsupportedReceipt = scopedArtifact(reserved, "Unsupported receipt field.");
+  unsupportedReceipt.execution_receipt.unsupported = true;
+  expectAtomicFailure(applyWith(unsupportedReceipt), "INVALID_ARTIFACT_RECEIPT");
+
+  const contractHash = reserved.operation_packet.contract_hash;
+  const mismatchedHash = (contractHash[0] === "0" ? "1" : "0") + contractHash.slice(1);
+  expectAtomicFailure(applyWith(scopedArtifact(reserved, "Hash mismatch.", {
+    contract_hash: mismatchedHash,
+  })), "SCOPE_MISMATCH");
+
+  expectAtomicFailure(applyWith(scopedArtifact(reserved, "Missing evidence file.", {
+    evidence_files: ["output/missing-evidence.csv"],
+  })), "INVALID_ARTIFACT_RECEIPT");
+
+  const uninventoriedLocation = "output/uninventoried-evidence.csv";
+  fs.writeFileSync(
+    path.join(projectRoot, ...uninventoriedLocation.split("/")),
+    "diagnostic,value\nextra,1\n",
+    "utf8",
+  );
+  expectAtomicFailure(applyWith(scopedArtifact(reserved, "Uninventoried evidence.", {
+    evidence_files: [uninventoriedLocation],
+  })), "INVALID_ARTIFACT_RECEIPT");
+
+  expectAtomicFailure(applyWith(scopedArtifact(reserved, "Overlapping accounting.", {
+    completed_requirements: requirements,
+    unmet_requirements: [requirements[0]],
+  })), "INVALID_ARTIFACT_RECEIPT");
+
+  expectAtomicFailure(applyWith(
+    scopedArtifact(reserved, "Completion cannot accompany blocked.", {
+      artifact_role: "completion",
+    }),
+    blockedUpdates,
+  ), "SCOPE_MISMATCH");
+
+  expectAtomicFailure(applyWith(scopedArtifact(reserved, "No unmet requirement named.", {
+    artifact_role: "infeasibility_evidence",
+  }), blockedUpdates), "INVALID_ARTIFACT_RECEIPT");
+
+  expectAtomicFailure(applyWith(scopedArtifact(reserved, "Incomplete infeasibility accounting.", {
+    artifact_role: "infeasibility_evidence",
+    completed_requirements: requirements.slice(1, -1),
+    unmet_requirements: [requirements[0]],
+  }), blockedUpdates), "INVALID_ARTIFACT_RECEIPT");
+
+  const infeasibilityArtifact = scopedArtifact(reserved, "Evidence of infeasibility.", {
+    artifact_role: "infeasibility_evidence",
+    unmet_requirements: [requirements[0]],
+  });
+  expectAtomicFailure(
+    applyWith(infeasibilityArtifact, doneUpdates),
+    "SCOPE_MISMATCH",
+  );
+  expectAtomicFailure(
+    applyWith(infeasibilityArtifact, blockedUpdates, "revise"),
+    "SCOPE_MISMATCH",
+  );
+
+  const applied = expectSuccess(applyWith(
+    scopedArtifact(reserved, "All required work completed."),
+  ), "WORKER_APPLIED");
+  assert.equal(applied.artifact_record.artifact_role, "completion");
+  expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+});
+
+test("bound analysis, report, and discovery scopes preserve infeasibility evidence as blocked", async (t) => {
+  await t.test("analysis", () => {
+    const projectRoot = temporaryProject(t);
+    const prepared = prepareAnalysisScope(projectRoot);
+    const actor = "analysis_execution." + prepared.design;
+    const started = expectSuccess(begin(projectRoot, prepared, actor, {
+      scope_ref: prepared.scope_ref,
+    }), "BEGAN_WORKER");
+    const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+      payload: {
+        ...expected(started),
+        operation_id: started.operation_id,
+        kind: "file",
+        slug: "analysis-infeasibility",
+        extension: "csv",
+      },
+    }), "ARTIFACT_RESERVED");
+    writeReservedTemporary(projectRoot, reserved, "check,value\nsupport,failed\n");
+    const requirements = packetRequirementIds(reserved);
+    const artifact = scopedArtifact(reserved, "Diagnostics showing analysis infeasibility.", {
+      artifact_role: "infeasibility_evidence",
+      unmet_requirements: [requirements[0]],
+      supplemental_work: ["Checked empirical support beyond the failed requirement."],
+    });
+    const applied = expectSuccess(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(reserved),
+        operation_id: started.operation_id,
+        actor,
+        scope_transition: "preserve",
+        updates: {
+          council_chamber: {
+            analysis_execution: {
+              [prepared.design]: {
+                current_status: "blocked",
+                summary: "The exact approved analysis is infeasible.",
+                questions_for_user: ["Revise the estimand or inputs?"],
+                feedback_to_route: ["Preserve the diagnostic evidence for rerouting."],
+              },
+            },
+          },
+        },
+        artifact,
+      },
+    }), "WORKER_APPLIED");
+
+    const state = readState(projectRoot);
+    const slot = state.council_chamber.analysis_execution[prepared.design];
+    assert.equal(slot.current_status, "blocked");
+    assert.equal(slot.summary, "The exact approved analysis is infeasible.");
+    assert.deepEqual(slot.questions_for_user, ["Revise the estimand or inputs?"]);
+    assert.equal(state.project_summary.analysis_output, "non_exist");
+    assert.equal(state.artifact_records.length, 1);
+    assert.equal(state.artifact_records[0].artifact_role, "infeasibility_evidence");
+    const manifest = JSON.parse(fs.readFileSync(
+      path.join(projectRoot, ...reserved.manifest_path.split("/")),
+      "utf8",
+    ));
+    assert.equal(manifest.schema_version, 2);
+    assert.equal(manifest.artifact_role, "infeasibility_evidence");
+    assert.deepEqual(manifest.execution_receipt, artifact.execution_receipt);
+    assert.deepEqual(manifest.scope_ref, prepared.scope_ref);
+
+    const closed = expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+    assert.equal(readState(projectRoot).project_summary.analysis_output, "non_exist");
+    expectSuccess(execute(projectRoot, "validate"), "VALID");
+    assert.equal(closed.mode, "idle");
+  });
+
+  await t.test("report", () => {
+    const projectRoot = temporaryProject(t);
+    const prepared = prepareReportScope(projectRoot);
+    const started = expectSuccess(begin(projectRoot, prepared, "report_writer", {
+      scope_ref: prepared.scope_ref,
+    }), "BEGAN_WORKER");
+    const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+      payload: {
+        ...expected(started),
+        operation_id: started.operation_id,
+        kind: "file",
+        slug: "report-infeasibility",
+        extension: "md",
+      },
+    }), "ARTIFACT_RESERVED");
+    const temporary = writeReservedTemporary(
+      projectRoot,
+      reserved,
+      "# Report rendering diagnostic\n\nA required source was unavailable.\n",
+    );
+    const requirements = packetRequirementIds(reserved);
+    const artifact = scopedArtifact(reserved, "Evidence that the bound report is infeasible.", {
+      artifact_role: "infeasibility_evidence",
+      unmet_requirements: [requirements[0]],
+    });
+    const beforeMismatch = fs.readFileSync(statePath(projectRoot));
+    expectFailure(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(reserved),
+        operation_id: started.operation_id,
+        actor: "report_writer",
+        scope_transition: "preserve",
+        updates: {
+          report_assembly: {
+            current_format: "html",
+          },
+          council_chamber: {
+            report_writer: {
+              current_status: "done",
+            },
+          },
+        },
+        artifact,
+      },
+    }), "SCOPE_MISMATCH");
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), beforeMismatch);
+    assert.equal(fs.existsSync(temporary), true);
+
+    const applied = expectSuccess(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(reserved),
+        operation_id: started.operation_id,
+        actor: "report_writer",
+        scope_transition: "preserve",
+        updates: {
+          report_assembly: {
+            draft_notes: ["The required source could not be resolved."],
+          },
+          council_chamber: {
+            report_writer: {
+              current_status: "blocked",
+              summary: "The exact approved report is infeasible.",
+              questions_for_user: ["Supply the missing source or revise coverage?"],
+              feedback_to_route: [],
+            },
+          },
+        },
+        artifact,
+      },
+    }), "WORKER_APPLIED");
+
+    const state = readState(projectRoot);
+    assert.equal(state.council_chamber.report_writer.current_status, "blocked");
+    assert.equal(state.council_chamber.report_writer.summary, "The exact approved report is infeasible.");
+    assert.equal(state.report_assembly.current_format, null);
+    assert.equal(state.project_summary.report_output, "non_exist");
+    assert.equal(state.artifact_records.length, 1);
+    assert.equal(state.artifact_records[0].artifact_role, "infeasibility_evidence");
+    const manifest = JSON.parse(fs.readFileSync(
+      path.join(projectRoot, ...reserved.manifest_path.split("/")),
+      "utf8",
+    ));
+    assert.equal(manifest.schema_version, 2);
+    assert.equal(manifest.artifact_role, "infeasibility_evidence");
+    assert.deepEqual(manifest.execution_receipt, artifact.execution_receipt);
+    assert.deepEqual(manifest.scope_ref, prepared.scope_ref);
+
+    expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+    assert.equal(readState(projectRoot).project_summary.report_output, "non_exist");
+    expectSuccess(execute(projectRoot, "validate"), "VALID");
+  });
+
+  await t.test("discovery", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const started = expectSuccess(begin(projectRoot, opened, "causal_discovery"), "BEGAN_WORKER");
+    const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+      payload: {
+        ...expected(started),
+        operation_id: started.operation_id,
+        kind: "file",
+        slug: "discovery-infeasibility",
+        extension: "csv",
+        discovery_scope: discoveryScope("new"),
+      },
+    }), "ARTIFACT_RESERVED");
+    const temporary = writeReservedTemporary(
+      projectRoot,
+      reserved,
+      "diagnostic,value\nbootstrap_runs,0\n",
+    );
+    assert.equal(reserved.operation_packet.completion_protocol, 1);
+    assert.deepEqual(reserved.operation_packet.scope_ref, reserved.scope_ref);
+    const requirements = packetRequirementIds(reserved);
+    const artifact = scopedArtifact(reserved, "Evidence that the frozen discovery run is infeasible.", {
+      artifact_role: "infeasibility_evidence",
+      unmet_requirements: [requirements[0]],
+    });
+    const beforeMismatch = fs.readFileSync(statePath(projectRoot));
+    expectFailure(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(reserved),
+        operation_id: started.operation_id,
+        actor: "causal_discovery",
+        updates: {
+          discovery_sidecar: {
+            status: "artifact_created",
+          },
+          council_chamber: {
+            causal_discovery: {
+              current_status: "artifact_created",
+            },
+          },
+        },
+        artifact,
+      },
+    }), "SCOPE_MISMATCH");
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), beforeMismatch);
+    assert.equal(fs.existsSync(temporary), true);
+
+    const applied = expectSuccess(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(reserved),
+        operation_id: started.operation_id,
+        actor: "causal_discovery",
+        updates: {
+          discovery_sidecar: {
+            status: "blocked",
+            diagnostics: ["Bootstrap stability could not be run."],
+            limitations: ["The frozen diagnostic requirement is infeasible."],
+          },
+          council_chamber: {
+            causal_discovery: {
+              current_status: "blocked",
+              summary: "The exact frozen discovery run is infeasible.",
+              questions_for_user: ["Revise the diagnostic requirement?"],
+              feedback_to_route: [],
+            },
+          },
+        },
+        artifact,
+      },
+    }), "WORKER_APPLIED");
+
+    const state = readState(projectRoot);
+    assert.equal(state.discovery_sidecar.status, "blocked");
+    assert.deepEqual(state.discovery_sidecar.execution_contract, DEFAULT_DISCOVERY_CONTRACT);
+    assert.deepEqual(state.discovery_sidecar.artifact_refs, [reserved.artifact_intent.location]);
+    assert.equal(state.council_chamber.causal_discovery.current_status, "blocked");
+    assert.equal(state.artifact_records.length, 1);
+    assert.equal(state.artifact_records[0].artifact_role, "infeasibility_evidence");
+    const manifest = JSON.parse(fs.readFileSync(
+      path.join(projectRoot, ...reserved.manifest_path.split("/")),
+      "utf8",
+    ));
+    assert.equal(manifest.schema_version, 2);
+    assert.equal(manifest.artifact_role, "infeasibility_evidence");
+    assert.deepEqual(manifest.execution_receipt, artifact.execution_receipt);
+    assert.deepEqual(manifest.scope_ref, reserved.scope_ref);
+    assert.deepEqual(manifest.discovery_contract, DEFAULT_DISCOVERY_CONTRACT);
+
+    expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+    expectSuccess(execute(projectRoot, "validate"), "VALID");
+  });
+});
+
+test("completed infeasibility manifest retries preserve role and receipt and record once", (t) => {
+  const projectRoot = temporaryProject(t);
+  const prepared = prepareAnalysisScope(projectRoot);
+  const actor = "analysis_execution." + prepared.design;
+  const started = expectSuccess(begin(projectRoot, prepared, actor, {
+    scope_ref: prepared.scope_ref,
+  }), "BEGAN_WORKER");
+  const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      kind: "file",
+      slug: "retry-infeasibility",
+      extension: "csv",
+    },
+  }), "ARTIFACT_RESERVED");
+  const temporary = writeReservedTemporary(
+    projectRoot,
+    reserved,
+    "diagnostic,value\npositivity,failed\n",
+  );
+  const finalPath = path.join(projectRoot, ...reserved.artifact_intent.location.split("/"));
+  const manifestPath = path.join(projectRoot, ...reserved.manifest_path.split("/"));
+  const requirementIds = packetRequirementIds(reserved);
+  const artifact = scopedArtifact(reserved, "Positivity evidence blocks the bound analysis.", {
+    artifact_role: "infeasibility_evidence",
+    unmet_requirements: [requirementIds[0]],
+  });
+  const updates = {
+    council_chamber: {
+      analysis_execution: {
+        [prepared.design]: {
+          current_status: "blocked",
+          summary: "The exact approved analysis is infeasible.",
+          questions_for_user: ["Revise the population or estimand?"],
+          feedback_to_route: [],
+        },
+      },
+    },
+  };
+  const applyWith = (submittedArtifact, env = undefined) => execute(projectRoot, "apply", {
+    env,
+    payload: {
+      ...expected(reserved),
+      operation_id: started.operation_id,
+      actor,
+      scope_transition: "preserve",
+      updates,
+      artifact: submittedArtifact,
+    },
+  });
+
+  const before = fs.readFileSync(statePath(projectRoot));
+  expectFailure(
+    applyWith(artifact, { STATECTL_FAIL_BEFORE_RENAME: "1" }),
+    "INJECTED_WRITE_FAILURE",
+  );
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+  assert.equal(fs.existsSync(temporary), false);
+  assert.equal(fs.existsSync(finalPath), true);
+  assert.equal(fs.existsSync(manifestPath), true);
+
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  assert.equal(manifest.schema_version, 2);
+  assert.equal(manifest.artifact_role, "infeasibility_evidence");
+  assert.deepEqual(manifest.execution_receipt, artifact.execution_receipt);
+
+  const resumed = expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER");
+  assert.equal(resumed.artifact_status.status, "complete");
+  assert.equal(resumed.artifact_status.artifact_role, "infeasibility_evidence");
+  assert.deepEqual(resumed.artifact_status.execution_receipt, artifact.execution_receipt);
+  assert.deepEqual(resumed.operation_packet, reserved.operation_packet);
+
+  const roleMismatch = structuredClone(artifact);
+  roleMismatch.artifact_role = "completion";
+  expectFailure(applyWith(roleMismatch), "INVALID_ARTIFACT_RECEIPT");
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+
+  const receiptMismatch = structuredClone(artifact);
+  receiptMismatch.execution_receipt.supplemental_work = ["A different retry claim."];
+  expectFailure(applyWith(receiptMismatch), "INVALID_ARTIFACT_RECEIPT");
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+
+  const applied = expectSuccess(applyWith(artifact), "WORKER_APPLIED");
+  assert.equal(applied.artifact_record.artifact_role, "infeasibility_evidence");
+  const leadState = readState(projectRoot);
+  assert.equal(leadState.artifact_records.length, 1);
+  assert.equal(leadState.artifact_records[0].operation_id, started.operation_id);
+  assert.equal(leadState.project_summary.analysis_output, "non_exist");
+
+  expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+  const finalState = readState(projectRoot);
+  assert.equal(finalState.artifact_records.length, 1);
+  assert.equal(finalState.project_summary.analysis_output, "non_exist");
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(manifestPath, "utf8")),
+    manifest,
+  );
+});
+
+test("historical manifest schema 1 remains an implicit completion artifact", (t) => {
+  const projectRoot = temporaryProject(t);
+  const prepared = prepareAnalysisScope(projectRoot);
+  const actor = "analysis_execution." + prepared.design;
+  const started = expectSuccess(begin(projectRoot, prepared, actor, {
+    scope_ref: prepared.scope_ref,
+  }), "BEGAN_WORKER");
+  const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      kind: "file",
+      slug: "historical-v1",
+      extension: "csv",
+    },
+  }), "ARTIFACT_RESERVED");
+  writeReservedTemporary(projectRoot, reserved, "estimate,se\n0.8,0.1\n");
+  const artifact = scopedArtifact(reserved, "Historical completion output.");
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: started.operation_id,
+      actor,
+      scope_transition: "preserve",
+      updates: {
+        council_chamber: {
+          analysis_execution: {
+            [prepared.design]: {
+              current_status: "done",
+            },
+          },
+        },
+      },
+      artifact,
+    },
+  }), "WORKER_APPLIED");
+  expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+
+  const manifestPath = path.join(projectRoot, ...reserved.manifest_path.split("/"));
+  const schema2 = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  assert.equal(schema2.schema_version, 2);
+  assert.equal(schema2.artifact_role, "completion");
+  assert.deepEqual(schema2.execution_receipt, artifact.execution_receipt);
+  const schema1 = {
+    schema_version: 1,
+    operation_id: schema2.operation_id,
+    route: schema2.route,
+    scope_ref: schema2.scope_ref,
+    files: schema2.files,
+    completed_at: schema2.completed_at,
+    summary: schema2.summary,
+  };
+  fs.writeFileSync(manifestPath, JSON.stringify(schema1, null, 2) + "\n", "utf8");
+
+  const opened = expectSuccess(execute(projectRoot, "open"), "OPENED");
+  assert.deepEqual(opened.warnings, []);
+  assert.equal(readState(projectRoot).artifact_records[0].artifact_role, "completion");
+  assert.equal(readState(projectRoot).project_summary.analysis_output, "exist");
+  assert.deepEqual(expectSuccess(execute(projectRoot, "validate"), "VALID").warnings, []);
+});
 test("artifact reservation rejects a pre-existing temporary path without mutation", (t) => {
   const projectRoot = temporaryProject(t);
   const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
@@ -2230,7 +3112,7 @@ test("artifact reservation, manifest verification, resume, and recording are one
       actor: `analysis_execution.${prepared.design}`,
       scope_transition: "preserve",
       updates: workerPatch,
-      artifact: { summary: "Treatment-effect estimates." },
+      artifact: scopedArtifact(reserved, "Treatment-effect estimates."),
     },
   }), "MISSING_ARTIFACT");
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeMissing);
@@ -2252,7 +3134,7 @@ test("artifact reservation, manifest verification, resume, and recording are one
       actor: `analysis_execution.${prepared.design}`,
       scope_transition: "preserve",
       updates: workerPatch,
-      artifact: { summary: "Treatment-effect estimates." },
+      artifact: scopedArtifact(reserved, "Treatment-effect estimates."),
     },
   }), "ARTIFACT_COLLISION");
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeCollision);
@@ -2272,7 +3154,7 @@ test("artifact reservation, manifest verification, resume, and recording are one
           },
         },
       },
-      artifact: { summary: "Treatment-effect estimates." },
+      artifact: scopedArtifact(reserved, "Treatment-effect estimates."),
     },
   }), "SCOPE_MISMATCH");
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeStatusMismatch);
@@ -2288,7 +3170,7 @@ test("artifact reservation, manifest verification, resume, and recording are one
       actor: `analysis_execution.${prepared.design}`,
       scope_transition: "preserve",
       updates: workerPatch,
-      artifact: { summary: "Treatment-effect estimates." },
+      artifact: scopedArtifact(reserved, "Treatment-effect estimates."),
     },
   }), "INJECTED_WRITE_FAILURE");
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeInterruptedApply);
@@ -2298,10 +3180,12 @@ test("artifact reservation, manifest verification, resume, and recording are one
 
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   assert.deepEqual(manifest, {
-    schema_version: 1,
+    schema_version: 2,
     operation_id: execution.operation_id,
     route: "analysis_execution",
     scope_ref: prepared.scope_ref,
+    artifact_role: "completion",
+    execution_receipt: executionReceipt(reserved),
     files: [reserved.artifact_intent.location],
     completed_at: manifest.completed_at,
     summary: "Treatment-effect estimates.",
@@ -2324,7 +3208,7 @@ test("artifact reservation, manifest verification, resume, and recording are one
       actor: `analysis_execution.${prepared.design}`,
       scope_transition: "preserve",
       updates: workerPatch,
-      artifact: { summary: manifest.summary },
+      artifact: scopedArtifact(reserved, manifest.summary),
     },
   }), "INVALID_ARTIFACT_MANIFEST");
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeInvalidManifest);
@@ -2338,12 +3222,13 @@ test("artifact reservation, manifest verification, resume, and recording are one
       actor: `analysis_execution.${prepared.design}`,
       scope_transition: "preserve",
       updates: workerPatch,
-      artifact: { summary: manifest.summary },
+      artifact: scopedArtifact(reserved, manifest.summary),
     },
   }), "WORKER_APPLIED");
   assert.equal(applied.artifact_record.operation_id, execution.operation_id);
   assert.equal(applied.artifact_record.location, reserved.artifact_intent.location);
   assert.equal(applied.artifact_record.design, prepared.design);
+  assert.equal(applied.artifact_record.artifact_role, "completion");
   assert.match(applied.artifact_record.created_at, /^\d{4}-\d{2}-\d{2}T/);
   const afterApply = readState(projectRoot);
   const completedSlot = afterApply.council_chamber.analysis_execution[prepared.design];
@@ -2939,7 +3824,7 @@ test("a historical report artifact remains valid with a new scope but cannot be 
       actor: "report_writer",
       scope_transition: "preserve",
       updates: { report_assembly: { current_format: "html" } },
-      artifact: { summary: artifactSummary },
+      artifact: scopedArtifact(reserved, artifactSummary),
     },
   }), "INVALID_INPUT");
   expectFailure(execute(projectRoot, "apply", {
@@ -2952,7 +3837,7 @@ test("a historical report artifact remains valid with a new scope but cannot be 
         report_assembly: { current_format: "html" },
         council_chamber: { report_writer: { current_status: "ready" } },
       },
-      artifact: { summary: artifactSummary },
+      artifact: scopedArtifact(reserved, artifactSummary),
     },
   }), "SCOPE_MISMATCH");
   expectFailure(execute(projectRoot, "apply", {
@@ -2965,7 +3850,7 @@ test("a historical report artifact remains valid with a new scope but cannot be 
         report_assembly: { draft_notes: ["Missing explicit HTML format."] },
         council_chamber: { report_writer: { current_status: "done" } },
       },
-      artifact: { summary: artifactSummary },
+      artifact: scopedArtifact(reserved, artifactSummary),
     },
   }), "SCOPE_MISMATCH");
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeInvalidReportApply);
@@ -2984,7 +3869,7 @@ test("a historical report artifact remains valid with a new scope but cannot be 
           report_writer: { current_status: "done" },
         },
       },
-      artifact: { summary: artifactSummary },
+      artifact: scopedArtifact(reserved, artifactSummary),
     },
   }), "WORKER_APPLIED");
   assert.equal(fs.existsSync(manifestPath), true);
@@ -3204,6 +4089,7 @@ test("new scope transitions clear only the replaced scope state", async (t) => {
               [prepared.design]: {
                 current_status: "ready",
                 summary: "Replacement analysis scope.",
+                execution_contract: structuredClone(DEFAULT_ANALYSIS_EXECUTION_CONTRACT),
               },
             },
           },
@@ -3380,6 +4266,7 @@ test("changing analysis support requires a new or revised scope identity", (t) =
         [design]: {
           current_status: "ready",
           summary: "The selected support route changed.",
+          execution_contract: structuredClone(DEFAULT_ANALYSIS_EXECUTION_CONTRACT),
           questions_for_user: [],
           feedback_to_route: [],
         },
@@ -3425,7 +4312,7 @@ test("--discard-legacy-plan is rejected when no legacy v4.5 state exists", async
     assert.equal(fs.existsSync(statePath(projectRoot)), false);
   });
 
-  await t.test("current v4 state", () => {
+  await t.test("current v5 state", () => {
     const projectRoot = temporaryProject(t);
     expectSuccess(execute(projectRoot, "open"), "CREATED");
     const before = fs.readFileSync(statePath(projectRoot), "utf8");
@@ -3968,6 +4855,84 @@ test("malformed discovery migration containers fail without mutation or archive"
   }
 });
 
+
+test("schema-4 migration archives exact bytes, preserves identity, and is idempotent", (t) => {
+  const projectRoot = temporaryProject(t);
+  const prepared = prepareAnalysisScope(projectRoot);
+  const started = expectSuccess(begin(projectRoot, prepared, "analysis_execution." + prepared.design, {
+    scope_ref: prepared.scope_ref,
+  }), "BEGAN_WORKER");
+  const legacyOperationId = crypto.randomUUID();
+  const legacyLocation = "output/legacy-audit.csv";
+  const legacySummary = "Legacy audit artifact.";
+  const state = readState(projectRoot);
+  state.artifact_records.push({
+    artifact_id: crypto.randomUUID(),
+    operation_id: legacyOperationId,
+    route: "data_audit",
+    location: legacyLocation,
+    created_at: "2026-01-01T00:00:00Z",
+    summary: legacySummary,
+  });
+  writeState(projectRoot, state);
+
+  const legacyPath = path.join(projectRoot, ...legacyLocation.split("/"));
+  fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
+  fs.writeFileSync(legacyPath, "field,value\nrows,12\n", "utf8");
+  fs.writeFileSync(legacyPath + ".manifest.json", JSON.stringify({
+    schema_version: 1,
+    operation_id: legacyOperationId,
+    route: "data_audit",
+    scope_ref: null,
+    files: [legacyLocation],
+    completed_at: "2026-01-01T00:00:00Z",
+    summary: legacySummary,
+  }, null, 2) + "\n", "utf8");
+
+  const v4 = downgradeCurrentStateToV4(projectRoot);
+  const original = fs.readFileSync(statePath(projectRoot));
+  const archiveDirectory = path.join(projectRoot, "project_state.archives");
+  assert.equal(v4.state_meta.active_operation.completion_protocol, undefined);
+  assert.equal(v4.state_meta.active_operation.contract_hash, undefined);
+  assert.equal(
+    v4.council_chamber.analysis_execution[prepared.design].execution_contract,
+    undefined,
+  );
+  assert.equal(v4.artifact_records[0].artifact_role, undefined);
+
+  const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V4");
+  assert.deepEqual(fs.readFileSync(migrated.archive_path), original);
+  assert.equal(migrated.project_id, v4.state_meta.project_id);
+  assert.equal(migrated.revision, v4.state_meta.revision + 1);
+  assert.equal(migrated.mode, "resume_worker");
+  assert.deepEqual(migrated.warnings, []);
+
+  const current = readState(projectRoot);
+  assert.equal(current.state_meta.schema_version, 5);
+  assert.equal(current.state_meta.project_id, v4.state_meta.project_id);
+  assert.equal(current.state_meta.active_operation.completion_protocol, 0);
+  assert.equal(current.state_meta.active_operation.contract_hash, null);
+  assert.equal(
+    current.council_chamber.analysis_execution[prepared.design].execution_contract,
+    null,
+  );
+  assert.equal(current.artifact_records[0].artifact_role, "completion");
+  assert.equal(current.artifact_records[0].operation_id, legacyOperationId);
+
+  const migratedBytes = fs.readFileSync(statePath(projectRoot));
+  const archiveNames = fs.readdirSync(archiveDirectory).sort();
+  const reopened = expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER");
+  assert.equal(reopened.project_id, migrated.project_id);
+  assert.equal(reopened.revision, migrated.revision);
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), migratedBytes);
+  assert.deepEqual(fs.readdirSync(archiveDirectory).sort(), archiveNames);
+  assert.equal(reopened.operation_packet.contract_hash, null);
+  assert.deepEqual(reopened.operation_packet.requirements, []);
+  expectSuccess(finish(projectRoot, {
+    ...reopened,
+    operation_id: started.operation_id,
+  }, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
 test("schema-2 migration preserves idle and active route boundaries", async (t) => {
   for (const scenario of [
     { name: "idle", route: null, mode: "idle" },
@@ -3983,9 +4948,9 @@ test("schema-2 migration preserves idle and active route boundaries", async (t) 
           scenario.route === "team_lead" ? "BEGAN_LEAD" : "BEGAN_WORKER",
         );
       }
-      const v4 = readState(projectRoot);
-      const priorOperation = v4.state_meta.active_operation;
-      const priorPlan = v4.next_step_plan;
+      const currentV5 = readState(projectRoot);
+      const priorOperation = currentV5.state_meta.active_operation;
+      const priorPlan = currentV5.next_step_plan;
       const v2 = downgradeCurrentStateToV2(projectRoot);
       const original = fs.readFileSync(statePath(projectRoot), "utf8");
 
@@ -3998,7 +4963,7 @@ test("schema-2 migration preserves idle and active route boundaries", async (t) 
       assert.deepEqual(migrated.plan, priorPlan);
 
       const current = readState(projectRoot);
-      assert.equal(current.state_meta.schema_version, 4);
+      assert.equal(current.state_meta.schema_version, 5);
       assert.equal(current.state_meta.project_id, v2.state_meta.project_id);
       assert.equal(current.state_meta.revision, v2.state_meta.revision + 1);
       assert.equal(current.state_meta.startup_notice, null);
@@ -4008,7 +4973,6 @@ test("schema-2 migration preserves idle and active route boundaries", async (t) 
       assert.equal(current.response_receipt, null);
       for (const section of [
         "project_summary",
-        "council_chamber",
         "data_facts",
         "domain_knowledge",
         "causal_facts",
@@ -4017,6 +4981,11 @@ test("schema-2 migration preserves idle and active route boundaries", async (t) 
       ]) {
         assert.deepEqual(current[section], v2[section], `${section} changed during v2 migration`);
       }
+      const expectedCouncil = structuredClone(v2.council_chamber);
+      for (const slot of Object.values(expectedCouncil.analysis_execution)) {
+        slot.execution_contract = null;
+      }
+      assert.deepEqual(current.council_chamber, expectedCouncil);
       assert.deepEqual(current.discovery_sidecar, {
         ...v2.discovery_sidecar,
         scope_id: null,

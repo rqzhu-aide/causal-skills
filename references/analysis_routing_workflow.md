@@ -19,8 +19,9 @@ Do not put scope status, mode, task text, or approval state in
 
 Read `council_chamber.analysis_execution` as a mapping of design ids to current
 analysis handoffs. For each relevant design slot, review `scope_id`,
-`scope_revision`, `current_status`, `support`, `summary`,
-`questions_for_user`, and `feedback_to_route`.
+`scope_revision`, `current_status`, `support`, `execution_contract`, `summary`,
+`questions_for_user`, and `feedback_to_route`. For a ready structured scope,
+`execution_contract` is the authoritative minimum work definition.
 
 Scope status meanings: `requested` means scope review is unfinished or the slot
 is missing; `ready` means reviewed and waiting for user approval; `blocked`

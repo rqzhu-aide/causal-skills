@@ -29,8 +29,8 @@ For a team-lead-only question about prior report work, apply `team_lead.md`'s
 prior-work rule; do not claim that it belongs to the current operation.
 
 For results-focused drafting, the derived analysis-output flag indicates only
-that a historical artifact record exists. Require relevant, available analysis
-artifacts that match the report scope; otherwise explain that only a planning
+that a historical `completion` artifact exists. Require relevant, available
+analysis artifacts that match the report scope; otherwise explain that only a planning
 report or bounded claim-boundary wording is available. If the purpose, audience,
 or claim boundary is unclear, ask which should shape the scope.
 
@@ -47,7 +47,7 @@ do not invent or negate a consequential scope choice. Use `questions_for_user`
 to inform the Decision Gate before output creation.
 
 If the report scope status is `done`, review the operation-matched report-writer
-artifact record and `council_chamber.report_writer.summary`. If the artifact is
+`completion` artifact record and `council_chamber.report_writer.summary`. If the artifact is
 absent or unavailable, treat this as a missing handoff and do not claim report
 output. Otherwise classify it as report output, revised report, or a derivative
 communication artifact and summarize it in the presentation. For
@@ -56,6 +56,8 @@ did not create new analysis. Trust `report_writer` to distinguish refinements
 that were safe to incorporate from material redesigns that needed another scope
 handoff.
 
-If the report scope status is `blocked`, explain the blocker in the presentation
-and ask for the smallest useful clarification, scope revision, missing
-asset, or fallback choice.
+If the report scope status is `blocked` with operation-matched
+`infeasibility_evidence`, explain what the approved report could not produce and
+why its scope needs revision; do not claim completed report output. Otherwise
+explain the blocker. Ask for the smallest useful clarification, scope revision,
+missing asset, or fallback choice.

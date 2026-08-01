@@ -73,16 +73,22 @@ Handle the end-of-round situation:
   next user decision.
 - `causal_discovery` route: describe a bound `scoped` handoff as not yet
   run. Legacy status without scope identity and contract is context only. For
-  `artifact_created`, require the available operation-matched artifact. For
+  `artifact_created`, require the available operation-matched `completion` artifact. For
   `reviewed`, use the current handoff and only clearly identified available
   inspected material. An unbound chamber-only handoff does not relabel the
   current sidecar. Preserve the `candidate_only` boundary.
+  For `blocked` with operation-matched `infeasibility_evidence`, explain that
+  the frozen exercise needs revision and summarize the evidence without calling
+  it completed discovery output.
 - `analysis_execution.<design_id>` route: use `team_lead_analysis_flow.md`.
 - `report_writer` route: use `team_lead_report_flow.md`.
-- Created output: claim new output only from an available artifact record whose
+- Created output: claim new promised output only from an available `completion` artifact whose
   `operation_id` matches the operation being closed. In a lead-only question,
   discuss only unambiguously identified existing scopes or available historical
   artifacts, and label them as prior work.
+- Infeasibility evidence: explain what the exact scope could not produce and why
+  the plan needs revision. Do not present that artifact as the promised output
+  or as an ordinary execution failure.
 - Explicit cancellation: acknowledge closure without treating the absence of a
   committed handoff as an error; at `lead_pending`, note that committed worker
   state and available output remain preserved.
@@ -135,7 +141,7 @@ approval, adjustment validity, final causal analysis method selection, or a
 stronger claim. Keep status, eligibility, authorization, and completion
 evidence separate.
 Completion requires committed route-owned state and any required available
-operation-matched artifact; chamber prose and project-summary flags
+operation-matched `completion` artifact; chamber prose and project-summary flags
 cannot upgrade another layer.
 
 For each synthesized claim, the narrowest applicable boundary in relevant
@@ -217,7 +223,7 @@ update `exploration_summary`.
 Update only `title`, `objective`, `materials`, `phase`, and
 `exploration_summary` when supported by current evidence. Normal finish derives
 the four completion flags and two historical-existence output flags from
-route-owned state and artifact records; the output flags do not establish
+route-owned state and `completion` artifact records; the output flags do not establish
 current relevance or availability. Use `phase` only as `exploration`,
 `analysis`, or `reporting`.
 Exploration completion does not authorize execution; the current approval logic

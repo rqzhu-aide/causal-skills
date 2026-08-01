@@ -32,8 +32,9 @@ work, and summarize completed artifacts.
    only for that explicit request; vague confirmation such as "yes", "ok", or
    "go ahead" is never a reset. Only explicit `--fresh` may archive and replace
    an active operation; otherwise omit `--fresh`.
-3. On successful `open`, read its structured result and then read the validated
-   state at the returned `state_path`. On a controller error, load team lead
+3. On successful `open`, read its structured result, including any
+   `operation_packet`, and then read the validated state at the returned
+   `state_path`. On a controller error, load team lead
    only in preflight-failure mode to explain the exact recovery boundary; do
    not repair, replace, or bypass rejected state manually.
    For `LEGACY_ACTIVE_PLAN`, an explicit user choice to abandon only the old
@@ -74,7 +75,8 @@ work, and summarize completed artifacts.
 7. If the worker will create durable output, follow
    `references/artifact_output_policy.md`: reserve the location before writing,
    write and validate only the returned temporary path, then submit the artifact
-   summary through `statectl apply`. The controller publishes and records it.
+   payload required by the `operation_packet`. The controller publishes
+   and records it.
 8. At `lead_pending`, load `references/team_lead.md` exactly once. Team lead
    submits its semantic summary and structured presentation through
    `statectl finish`, which derives aggregates, stores options, and renders.
@@ -118,8 +120,9 @@ latest successful controller result. Command-specific fields are:
   `discovery_scope: {transition, contract}` as defined by
   `references/causal_discovery.md`.
 - `apply`: `operation_id`, `actor`, owner-scoped `updates`, and optional
-  completed `artifact: {summary}`. Analysis and report workers must also supply
-  `scope_transition` (`new`, `revise`, or `preserve`). An unbound
+  `artifact` as defined by `references/artifact_output_policy.md`. Analysis and
+  report workers must also supply `scope_transition` (`new`, `revise`, or
+  `preserve`). An unbound
   discovery scope-only or blocked handoff may instead supply
   `discovery_scope` only when no artifact is reserved; it never accompanies
   `artifact`. Other workers omit both fields.
