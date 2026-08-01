@@ -261,6 +261,9 @@ complete.
 In read-only preflight-failure mode, skip `finish` and use only `[> Framing]`,
 `[! Boundary]`, and `[? Next Steps]`, without claiming completed work.
 
-After every successful `finish`, emit the decoded `response_markdown` string
-verbatim as the complete assistant message. Add nothing before or after it, then
-stop.
+## Final Delivery
+
+A successful `finish` commits state but does not answer the user. Emit the
+decoded `response_markdown` string verbatim as the complete assistant message.
+Never replace it with a status message or claim it was delivered above. Add
+nothing before or after it, then stop.

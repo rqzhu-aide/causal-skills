@@ -41,6 +41,11 @@ Focus on causal ingredients that could change the claim or analysis route:
 Keep causal state compact. Store only decision-relevant assumptions, threats,
 claim boundaries, and route implications.
 
+Treat discovery findings only as candidate questions and diagnostics. Establish
+variable roles, adjustment validity, method fit, and analysis readiness
+independently of those findings, using data facts, domain knowledge, timing, and
+causal assumptions.
+
 ## Readiness And Method Route Logic
 
 When the task requires causal readiness or a design/support recommendation,

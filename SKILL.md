@@ -81,10 +81,8 @@ work, and summarize completed artifacts.
 9. Each assistant turn handles at most one operation, whether newly begun or
    resumed. A rejected `begin` may be corrected or rerouted only before any
    `begin` succeeds. Once one succeeds, that operation consumes the turn. After
-   `finish` returns `next_action: emit_response_markdown_verbatim_and_stop`,
-   discard any response draft and emit the decoded `response_markdown` string
-   exactly as the complete assistant message. Add nothing, then stop; do not run
-   `open` or `begin` again until a new user message.
+   `finish` succeeds, follow `references/team_lead.md`'s Final Delivery rule
+   and stop. Do not run `open` or `begin` again until a new user message.
    The sole exception is a read-only preflight-failure response when no
    operation can be opened. An ordinary validation rejection from
    `reserve-artifact`, `apply`, or `finish` leaves the operation at its persisted

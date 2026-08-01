@@ -17,6 +17,19 @@ the assignment. On resume, a new message does not change it. Submit one
 `artifact`. The controller owns timestamps, artifact records, and transition to
 `lead_pending`; never edit the YAML, plan, or project summary directly.
 
+## Boundaries
+
+This route may inspect outcome distributions and run exposure-only support or
+input- or design-feasibility diagnostics. It must not fit an outcome model
+involving the target exposure or compute a raw, adjusted, subgroup, or
+interaction association. Any target result or refinement of an
+`analysis_execution` target must wait for `analysis_execution` bound to an exact
+ready scope. This route does not choose the final causal method, validate a
+causal claim, prepare an analysis scope, or execute causal analysis.
+
+Do not let generic profiling crowd out causal-data risks: unit, timing, leakage,
+support, missingness, dependencies, and variable roles are the priority.
+
 ## Causal Data Audit Scope
 
 Audit data facts that could change the causal target, analysis route, claim
@@ -112,16 +125,3 @@ created, follow `references/artifact_output_policy.md` and include compact
 
 Do not reserve or submit an artifact for an audit that created no durable
 output.
-
-## Boundaries
-
-This route may run bounded input and readiness profiling. It must not compute a
-target result: any new quantity, comparison, model-fit result, or test intended
-as an answer to an `analysis_execution` target or a refinement of it, including
-a raw or adjusted association or a subgroup or interaction contrast. Such work
-must wait for `analysis_execution` bound to an exact ready scope. This route
-does not choose the final causal method, validate a causal claim, prepare an
-analysis scope, or execute causal analysis.
-
-Do not let generic profiling crowd out causal-data risks: unit, timing, leakage,
-support, missingness, dependencies, and variable roles are the priority.

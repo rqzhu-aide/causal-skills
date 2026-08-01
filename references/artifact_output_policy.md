@@ -14,17 +14,20 @@ Use exactly one reserved artifact per output-producing operation:
 2. Resolve `temporary_path` against the project root and write only to that
    absolute path. Do not write into an unrelated output folder or adopt an
    unreserved path.
-3. Validate the output against the persisted assignment and, when present, the
-   bound analysis/report scope or frozen discovery contract before submission.
-   Files must open or parse. Every promised deliverable must exist in its
+3. Validate the actual code, settings, diagnostics, and produced files against
+   the persisted assignment and, when present, the bound analysis/report scope
+   or frozen discovery contract before submission. The intended plan, copied
+   manifest fields, or artifact summary is not evidence of conformance. Files
+   must open or parse. Every promised deliverable must exist in its
    promised rendered form before a completion handoff; source data does not
    substitute for a rendered figure, table, or document. Required
    diagnostics must exist, and required code or notebooks must run.
    Reports must render with their required content and boundary language; HTML
    reports must also have valid fragment targets and resolvable project-local
    links.
-   If validation fails, correct the temporary output and revalidate within the
-   same operation when possible. Do not submit the artifact or mark the route
+   Any material deviation is a validation failure. Correct the temporary output
+   and revalidate within the same operation when possible. Do not submit the
+   artifact or mark the route
    done unless validation passes. If validation cannot be completed, return the
    route's normal non-completion handoff, using `blocked` when its contract
    requires it.
