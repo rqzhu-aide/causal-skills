@@ -20,6 +20,9 @@ Use exactly one reserved artifact per output-producing operation:
    Supplemental work is allowed when it stays within the route's authority and
    claim boundary; list it under `supplemental_work` rather than treating it as
    required coverage.
+   A substituted estimator, weighting or support rule, diagnostic, promised
+   output, or claim boundary leaves that requirement unmet; it is not
+   supplemental work.
 4. Validate the produced files. Files must open or parse, required code or
    notebooks must run, and every promised deliverable must exist in its promised
    rendered form. Source data does not substitute for a rendered figure, table,

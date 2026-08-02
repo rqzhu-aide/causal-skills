@@ -43,8 +43,10 @@ for approval or execution or revise it automatically. If eligibility fails for
 another reason, state that the analysis is not currently runnable, name the
 failed prerequisite, and do not revise the scope automatically. Otherwise,
 treat `execution_contract` as the authoritative minimum work definition when
-present; chamber prose cannot replace it. Summarize the proposed scope in the
-presentation with only the target or
+present; chamber prose cannot replace it. Before presenting it, reconcile any
+displayed analysis-population counts to the stated total and make its support
+explanation agree with the authoritative contract. Summarize the proposed scope
+in the presentation with only the target or
 estimand, design and support, required inputs, estimation strategy or model
 family, main diagnostics, main output, and claim boundary. Translate design and
 support into plain user-facing method language. Do not expose route IDs, state
@@ -59,8 +61,12 @@ explain the blocker. Ask for the smallest useful clarification, data detail,
 design revision, or fallback choice.
 
 If the analysis scope status is `done`, use the available operation-matched
-`completion` artifact record and summarize the output briefly. If it is absent or
-unavailable, treat this as a missing handoff and do not claim output. When
+`completion` artifact record and summarize the output briefly. Before saying
+the scope ran exactly, unchanged, or with every requirement completed, check
+the artifact evidence against the contract's named method, support rule,
+population counts, limitations, and material supplemental work. If the artifact
+is absent or unavailable, treat this as a missing handoff and do not claim
+output. When
 several next moves are useful, prioritize analysis-facing choices: next
 contrast, diagnostic, sensitivity check, heterogeneity question, claim wording,
 or missing data/domain interpretation. Do not default to report, formatting, or
