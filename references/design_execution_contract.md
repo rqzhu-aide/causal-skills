@@ -75,7 +75,10 @@ Use these analysis scope handoff fields:
 - `execution_contract`: `{target, input_refs, method_plan,
   execution_requirements, output_type, claim_boundary}`. Use trimmed strings
   and unique nonempty string arrays. New or revised `ready` scopes require a
-  complete contract.
+  complete contract. Every unresolved condition that could invalidate
+  identification must appear inside `claim_boundary` as a condition on the
+  supported claim until committed evidence resolves it; listing it only as a
+  diagnostic, limitation, or future check is insufficient.
 - `summary`: compact scope, blocker, or completed-output description.
 - `questions_for_user`: 0-3 current questions, choices, or approval points for
   `ready` or `blocked` handoffs. Use `[]` for `done`; team lead derives later

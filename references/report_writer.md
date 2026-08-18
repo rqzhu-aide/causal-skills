@@ -79,7 +79,10 @@ Classify the task into one of four report scope states:
 
 A `ready` report scope contains one complete default. Questions may offer
 revisions, but must not leave the purpose, audience, evidence basis, structure,
-output, or claim boundary materially undecided.
+output, or claim boundary materially undecided. Preserve requested cardinality
+and priority. If the scope promises one next evidence step, store one concrete
+priority and carry it into the output; changing or adding alternatives requires
+a scope revision.
 
 Minor refinements include shorter or longer length, reviewer-facing tone,
 cautious wording, emphasizing or omitting a small section, adding a brief

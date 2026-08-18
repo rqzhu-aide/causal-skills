@@ -144,6 +144,10 @@ Completion requires committed route-owned state and any required available
 operation-matched `completion` artifact; chamber prose and project-summary flags
 cannot upgrade another layer.
 
+Core readiness and `recommended_checks` record the latest core review, not
+later execution progress. Compare them with available completion evidence and
+surface only what remains unresolved.
+
 For each synthesized claim, the narrowest applicable boundary in relevant
 route-owned state, the bound scope, or the available artifact supporting that
 claim governs. Team lead must not strengthen it.
@@ -253,7 +257,9 @@ concise and state the real limitation, assumption, or that no boundary changed.
 If options are empty, `next_steps` asks one direct question or states one action
 and never contains a choice list. If options are present, it supplies a simple
 choice prompt that does not repeat the choices; the controller standardizes the
-rendered wording. `next_steps` is always one line.
+rendered wording. `next_steps` is always one line. If the user or approved scope
+asks for one prioritized recommendation or evidence improvement, give one, not
+an `or` bundle; if the evidence cannot rank alternatives, say so in `framing`.
 
 Use ordinary consulting language and synthesize the handoff and durable state
 instead of reproducing worker narratives, full scopes, diagnostic inventories,

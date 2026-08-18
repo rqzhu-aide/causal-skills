@@ -131,9 +131,11 @@ latest successful controller result. Command-specific fields are:
   `presentation`; add `--cancel` only after explicit cancellation and omit updates.
 
 Patch maps merge recursively; each supplied array replaces the complete array,
-`null` is explicit, and omitted fields remain unchanged.
-When current evidence supersedes route-owned content, replace affected arrays
-and clear obsolete values with `null` or `[]` instead of omitting them.
+`null` is explicit, and omitted fields remain unchanged. Within the current
+actor's writable state, when evidence resolves, reclassifies, or supersedes
+content, update every affected field: replace arrays in full, supply the current
+scalar classification, and use `[]` or `null` for obsolete values where
+allowed. Omission preserves stale content.
 
 Use `node <skill-root>/scripts/statectl.cjs validate --project-root <root>` for
 read-only validation. Keep routing, reference loading, controller calls, and
