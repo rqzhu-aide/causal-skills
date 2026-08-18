@@ -1,33 +1,24 @@
 # Route: causal_discovery
 
 Use this route for exploratory causal discovery, graph-structure support, and
-discovery sidecar artifacts. This worker remains silent and submits internal
-findings for `team_lead` to synthesize.
+discovery sidecar artifacts.
 
 This is a core route, not a method route. It helps the team reason about
 candidate graphs, local variable neighborhoods, temporal tiers, edge/path
 uncertainty, discovery diagnostics, feature groups, and discovery-only
 artifacts that may support later causal review.
 
-## Plan Entry
+## Assignment And Ownership
 
-Read the validated state before route work. Proceed only at `worker_pending`
-when the committed plan's worker route is exactly `causal_discovery`.
+Use the worker `turn_context`, operation packet, persisted assignment, and
+routed data or artifacts. A frozen discovery scope is authoritative; neither a
+newer message nor technical convenience changes it. Use the full-state fallback
+only for relevant detail omitted from the context.
 
-Use `state_meta.active_operation.intent_summary`, the `operation_packet`, live
-state, inspectable data, routed graph/data/artifact materials, and any consistent
-detail still available from the operation-opening message as the assignment. A
-non-null
-`active_operation.discovery_scope` is the exact frozen work definition. On
-resume, neither a new message nor technical convenience changes it.
-
-Submit one `statectl apply` JSON payload with `actor: causal_discovery`,
-`updates` containing `council_chamber.causal_discovery` and, when allowed
-below, `discovery_sidecar`. Add an optional output `artifact` or no-output
-`discovery_scope` when applicable. Never submit both together. The controller
-owns scope identity, the stored execution contract, timestamps, artifact
-records, and transition to `lead_pending`; never edit those fields or the YAML
-directly.
+Submit one silent `apply` as `causal_discovery`, updating its chamber slot and,
+when allowed below, `discovery_sidecar`. Supply either an output artifact or a
+no-output `discovery_scope`, never both. The controller owns scope identity,
+the stored contract, artifact records, and stage transition.
 
 ## Mechanical Discovery Contract
 
@@ -183,10 +174,7 @@ Submit supported `discovery_sidecar` fields when supported by the request:
 
 ## Council Chamber Updates
 
-Submit chamber feedback only under
-`updates.council_chamber.causal_discovery`.
-
-Set:
+Submit only this route's chamber slot:
 
 - `current_status`: one short handoff disposition.
 - `summary`: compact synthesis of what was scoped, reviewed, created, or
@@ -196,8 +184,8 @@ Set:
 - `feedback_to_route`: 0-3 route-facing suggestions, such as useful data,
   domain, causal, report, or analysis follow-up.
 
-Keep chamber feedback short, decision-facing, grounded in `discovery_sidecar`
-or current uncertainty, and free of schema labels. Focus on exploratory limits,
+Keep it short, decision-facing, grounded in `discovery_sidecar` or current
+uncertainty, and free of schema labels. Focus on exploratory limits,
 diagnostics, created or inspected discovery outputs, and which reviewer should
 inspect implications before they affect adjustment, methods, claims, or report
 wording.

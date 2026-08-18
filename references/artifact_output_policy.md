@@ -7,15 +7,22 @@ review alone does not create an artifact record.
 
 Use exactly one reserved artifact per output-producing operation:
 
-1. Call `statectl reserve-artifact` before creating durable output. Request a
-   meaningful file or directory name tied to the work, never a timestamp-only
-   name. The controller returns an operation-unique final location under
-   `output/` and a project-relative `temporary_path`.
+1. Call `statectl reserve-artifact` before creating durable output, passing the
+   `operation_id`, `kind` (`file` or `directory`), a meaningful `slug`, and an
+   `extension` only for a file. Include `discovery_scope` when that route must
+   freeze a new or revised discovery contract. The controller returns an
+   operation-unique final location under `output/` and a project-relative
+   `temporary_path`.
 2. Resolve `temporary_path` against the project root and write only to that
    absolute path. Do not write into an unrelated output folder or adopt an
    unreserved path.
-3. Read the returned `operation_packet`. When `completion_protocol` is `1`, its
-   requirements are the minimum work for a completion handoff. Validate each
+3. Use the returned full `operation_packet`, or reuse the prior packet's
+   immutable contract when `operation_packet_ref.contract_unchanged` is `true`
+   and its operation ID, protocol, and hash match. Take current stage and action
+   from the reference or `turn_context`. If the prior full packet is
+   unavailable, run `open` to recover it. When
+   `completion_protocol` is `1`, its requirements are the minimum work for a
+   completion handoff. Validate each
    requirement against the actual code, settings, diagnostics, and output.
    Supplemental work is allowed when it stays within the route's authority and
    claim boundary; list it under `supplemental_work` rather than treating it as

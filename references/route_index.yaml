@@ -1,9 +1,9 @@
-purpose: "Compact route/path index for the causal-consultant router."
+purpose: "Canonical route/path registry for controller build and package validation."
 
 rules:
-  - "Use this file only to find valid route IDs and file paths."
+  - "The controller returns the references required for the committed stage; the runtime router does not need to load this registry."
   - "Only causal_check loads method_route_catalog.yaml when method recommendation is needed."
-  - "The router may load only routes that have a path in this index."
+  - "Every callable route and conditional reference must have a path in this index."
 
 core_routes:
   - id: team_lead

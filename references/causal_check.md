@@ -1,21 +1,14 @@
 # Route: causal_check
 
 Use this route to audit whether the causal question, design, method route, or
-conclusion is supported by the current project state. This worker remains silent
-and submits internal findings for `team_lead` to synthesize.
+conclusion is supported by the current project state.
 
-## Plan Entry
+## Assignment And Ownership
 
-Read the validated state before route work. Proceed only at `worker_pending`
-when the committed plan's worker route is exactly `causal_check`.
-
-Use `state_meta.active_operation.intent_summary`, live state, and any consistent
-detail still available from the operation-opening message as the assignment. On
-resume, a new message does not change it. Submit one `statectl apply` JSON
-payload with `actor: causal_check` and `updates` containing only `causal_facts`
-and `council_chamber.causal_check`. The controller owns timestamps and
-transition to `lead_pending`; never edit the YAML, plan, project summary, or
-artifact records directly.
+Use the worker `turn_context` and persisted assignment; a newer message does not
+change resumed work. Use the full-state fallback only for relevant detail
+omitted from the context. Submit one silent `apply` as `causal_check`, updating
+only `causal_facts` and `council_chamber.causal_check`.
 
 ## Causal Statistical Audit Scope
 
@@ -49,8 +42,8 @@ causal assumptions.
 ## Readiness And Method Route Logic
 
 When the task requires causal readiness or a design/support recommendation,
-load `references/method_route_catalog.yaml` and use route IDs exactly as written
-in `route_index.yaml`.
+load `references/method_route_catalog.yaml` and use its route IDs exactly. The
+controller validates every submitted ID.
 
 Do not recommend a method route merely because the user named it. Treat the
 latest explicit user target as current; intended use or a preferred alternative
@@ -141,9 +134,7 @@ fallback is available.
 
 ## Council Chamber Updates
 
-Submit chamber feedback only under `updates.council_chamber.causal_check`.
-
-Set:
+Submit only this route's chamber slot:
 
 - `current_status`: one short handoff disposition.
 - `summary`: compact synthesis of claim support, analysis readiness, or main
@@ -153,8 +144,8 @@ Set:
 - `feedback_to_route`: 0-3 route-facing suggestions, such as useful data,
   domain, discovery, support, or analysis follow-up.
 
-Keep chamber feedback short, decision-facing, grounded in `causal_facts`,
-data/domain state, or current uncertainty, and free of schema labels. When
+Keep it short, decision-facing, grounded in `causal_facts`, data/domain state,
+or current uncertainty, and free of schema labels. When
 analysis readiness or method selection was requested, summarize the recommended
 design/support direction, why only a non-causal fallback is mature, or why no
 method reaches the limited threshold.

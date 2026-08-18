@@ -3,9 +3,6 @@
 Use this reference to draft, revise, or structure academic, technical,
 reviewer-facing, or decision-facing reports.
 
-This worker remains silent and submits internal findings or revised text for
-`team_lead` to synthesize.
-
 `project_summary.analysis_output` and `project_summary.report_output` indicate
 only that a historical `completion` artifact exists. Results-focused report work
 also requires relevant, available analysis artifacts that match the current report
@@ -35,20 +32,15 @@ Use this vocabulary consistently:
   output files that can be used, cited, linked, omitted, or disclosed in the
   report scope.
 
-## Plan Entry
+## Assignment And Scope Lifecycle
 
-Read the validated state before route work. Proceed only at `worker_pending`
-when the committed plan's worker route is exactly `report_writer`.
-
-Use the self-contained `state_meta.active_operation.intent_summary`, its
-`scope_ref`, `operation_packet`, `report_assembly`, `artifact_records`, and live state as the
-assignment. On resume, a new message does not change it. A non-null `scope_ref`
-is the approval result recorded at `begin`; do not reinterpret approval from a
-later message. Submit one `statectl apply` JSON payload with
-`actor: report_writer`, `updates` containing only `report_assembly` and
-`council_chamber.report_writer`, and optional top-level `artifact`. The
-controller owns timestamps, scope identity, artifact append, and transition to
-`lead_pending`; never edit state directly.
+Use the worker `turn_context`, operation packet, persisted assignment,
+`report_assembly`, and available artifact evidence. A newer message does not
+change resumed work. A non-null scope reference records approval at `begin`;
+never reinterpret approval later. Use the full-state fallback only for relevant
+detail omitted from the context. Submit one silent `apply` as `report_writer`,
+updating only `report_assembly` and its chamber slot, with an artifact only for
+allowed output below.
 
 Classify the task into one of four report scope states:
 
@@ -121,12 +113,11 @@ state and artifacts.
 
 ## Causal Report Writing Logic
 
-Before preparing scope or output, read the report-relevant parts of the full
-project record, especially `project_summary`, `data_facts`, `domain_knowledge`,
-`causal_facts`, `discovery_sidecar`, `council_chamber.causal_discovery`,
-`artifact_records`, and `report_assembly`.
-Exclude any artifact that the controller reports as unavailable; do not infer a
-replacement from nearby output files.
+Use the report-relevant project, data, domain, causal, discovery, analysis,
+artifact, and assembly evidence supplied in the worker context. Exclude any
+artifact reported unavailable and never infer a replacement from nearby output
+files. Use the full-state fallback if a requested report claim depends on
+relevant historical detail omitted from the projection.
 
 For analysis reports, organize around the refined causal target, data reality,
 design/method fit, artifact-backed results, diagnostics, claim boundary, and
@@ -177,20 +168,16 @@ When scope feedback is needed:
 - Use `assets/report_template_planning.md` when the current scope lacks
   relevant, available analysis artifacts; otherwise use
   `assets/report_template_analysis.md`.
-- Inspect `artifact_records`, `project_summary`, `report_assembly`,
-  `discovery_sidecar`, `council_chamber.causal_discovery`, route-owned
-  summaries, and available files explicitly referenced by artifact records or
-  the persisted assignment before proposing the report scope.
+- Inspect the context's relevant route summaries and only available files
+  explicitly referenced by artifacts or the persisted assignment.
 - Write a compact `report_assembly.planned_structure` list that names the
   envisioned sections and what each section would do. Keep each entry short and
   approval-oriented, not drafted prose.
 - Submit the route-owned scope and chamber fields described below, including a
   compact inventory of finished artifacts the report would use, omit, or
   disclose and 0-3 questions for `team_lead`.
-- Set `scope_transition: new` for a new independent scope, `revise` for a
-  material change, or `preserve` when identity and revision remain valid. The
-  controller assigns `scope_id` and initializes, increments, or preserves
-  `scope_revision` accordingly.
+- Use `scope_transition: new` for an independent scope, `revise` for a material
+  change, or `preserve` when identity and revision remain valid.
 - Set `council_chamber.report_writer.current_status` to `ready` when the scope is
   approval-ready; otherwise set it to `blocked` and summarize the blocker.
 
@@ -215,9 +202,7 @@ proposed report, and which expected report pieces are missing, omitted, or only
 suitable as limitations. Translate that provenance into audience-facing
 evidence descriptions rather than copying it into the rendered report.
 
-Submit chamber feedback only under `updates.council_chamber.report_writer`.
-
-Set:
+Submit only this route's chamber slot:
 
 - `current_status`: report scope status only.
 - `summary`: one compact description of the report scope, produced output, or
@@ -233,11 +218,9 @@ is a pre-work or legacy marker; when observed, prepare and submit a completed
 scope handoff rather than passing that marker to team lead. Put any blocker
 reason in `summary`.
 
-Report writer is a handoff route, not a consulting-opinion route.
-
-Do not update global output status or artifact records directly. Submit report
-scope, output facts, and any output artifact through `apply`; team lead handles
-closeout synthesis through `finish`.
+Report writer is a handoff route, not a consulting-opinion route. The
+controller derives global output status and owns artifact records; team lead
+owns closeout synthesis.
 
 ## Report Outputs
 

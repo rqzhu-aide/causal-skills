@@ -2,202 +2,132 @@
 
 ## Purpose
 
-Use this compact reference only to choose the current-turn `route`, `support`,
-and compact self-contained `intent_summary` for `statectl begin`. Route
-selection is mandatory for every new operation.
-Do not answer, analyze, draft, inspect project materials, or create outputs
-directly from the user request; first commit the plan, then load the planned
-route reference. Keep route selection silent unless there is a blocker.
+Choose the current operation's route, optional support, and compact
+self-contained `intent_summary`. Route selection is mandatory before every new
+operation, including team-lead-only work. It chooses who works, not that
+worker's internal lane, handoff status, scientific conclusion, or final answer.
 
-The router chooses who works this turn. It does not decide a member's internal
-workflow lane, handoff status, output status, or final answer.
+Use the controller's router `turn_context`, the current user message, and any
+unchanged routing references already available. The context's
+`previous_response_cue` contains only the prior options, boundary, and next-step
+blocks needed for continuity; `pending_decision` remains authoritative for a
+numbered choice. Use the full-state fallback only when the present routing
+decision genuinely depends on omitted detail.
 
-## Inputs
-
-Read these before planning:
-
-1. The current user message.
-2. The validated state at the `state_path` returned by `statectl open`,
-   including any pending decision and response receipt.
-3. The immediately previous user-facing response for a direct question or
-   boundary; a matching pending decision is authoritative for the chosen
-   option's assignment.
-4. `references/route_index.yaml`.
-
-Do not load `references/method_route_catalog.yaml` from the router. Only
-`causal_check` loads the detailed method catalog when method recommendation is
-needed.
+Keep routing silent. Do not inspect project materials, analyze, draft, or create
+output before `begin` commits the assignment.
 
 ## Conditional Routing References
 
-After the intention check identifies report or analysis work, load its
-conditional routing reference before selecting the final route:
+After identifying an analysis or report intention, ensure its routing reference
+is available before selecting the final route:
 
-- `references/report_routing_workflow.md`: report requests, report approval,
+- `references/analysis_routing_workflow.md` for analysis, scope approval or
+  revision, design/support selection, or recent analysis-execution feedback.
+- `references/report_routing_workflow.md` for report requests, approval,
   reviewer-facing writing, limitations wording, report output, or recent
-  report-writer chamber feedback.
-- `references/analysis_routing_workflow.md`: analysis requests, approval or
-  revision of an analysis scope, method design/support selection, or recent
-  analysis-execution chamber feedback.
+  report-writer feedback.
 
-If neither condition applies, do not load these files.
+Do not load either file for unrelated work. Only `causal_check` loads
+`references/method_route_catalog.yaml` when method recommendation is needed.
 
-## Allowed Plan Shapes
+## Assignment Contract
 
-Always submit the assignment to `statectl begin` before loading any planned
-route reference. The controller constructs and persists `next_step_plan` as
-current-turn routing only, not a durable queue or deck.
+Submit exactly one controller-allowed assignment through `begin`: team lead
+alone, one core route followed by team lead, or one analysis design with
+optional support followed by team lead. The controller constructs the plan and
+rejects mixed or unknown routes.
 
-The examples below show command-specific fields only; every mutation also uses
-the expected project ID and revision from the latest controller result.
-
-Team-lead-only:
-
-```json
-{"route":"team_lead","intent_summary":"..."}
-```
-
-One core route plus team lead:
-
-```json
-{"route":"data_audit","intent_summary":"..."}
-```
-
-Analysis route plus team lead:
-
-```json
-{"route":"analysis_execution.<design_id>","support":null,
- "intent_summary":"..."}
-```
-
-Core routes are `data_audit`, `domain_expert`, `causal_check`,
-`causal_discovery`, and `report_writer`.
-
-The controller appends `team_lead` and rejects mixed or unknown routes. For
-analysis, encode a listed design as `analysis_execution.<design_id>` and use
-`support` only for a listed support route or `null`.
-
-When a matching pending decision exists, submit an unmodified choice as
-`selection: {decision_id, option_number}`. The controller retrieves its
+When a matching pending numbered choice exists, submit its unmodified
+`selection: {decision_id, option_number}`. The controller retrieves the stored
 assignment; do not reconstruct it.
 
-For analysis or report execution, include the exact ready `scope_ref`; its
-acceptance records approval for worker resume. For unchanged execution or review
-of the current discovery contract, include its exact discovery `scope_ref` only
-when both scope identity and contract are present; legacy status alone is not
-runnable. This binds the work definition but is not approval. A materially
-changed or independent discovery exercise begins unbound, and its worker freezes
-`revise` or `new`. Existing-material review without new output remains unbound
-and cannot alter the current sidecar. Output-producing review follows the new or
-revised exercise rule; replacement of an occupied sidecar must be clear from the
-request or a prior option. If the message does not distinguish unchanged work
-from new or revised work, plan only `team_lead`. The worker does not re-decide a
-bound scope from a later message.
+For analysis or report execution, include the exact current ready `scope_ref`.
+For unchanged execution or review of a discovery contract, include its exact
+reference only when both identity and contract exist. A discovery reference
+binds work but is not approval. A materially new or revised discovery exercise
+begins unbound. Existing-material review without output also remains unbound
+and cannot alter the current sidecar; review that creates output follows the
+new-or-revised exercise rule. Replacement of an occupied discovery sidecar must
+be clear from the request or selected option. If the message cannot distinguish
+unchanged from new or revised discovery work, route only team lead.
 
 Write `intent_summary` as a resumable assignment naming the requested action
 and only the essential target, material identifier or path, and output
-constraint needed to restart the route. For discovery, identify whether the
-assignment scopes, revises, reviews, or runs the exercise. Do not store
-transcript, detailed route payloads, scope cards, approval prose, mode flags,
-or route findings there; route-owned state holds the detail.
+constraint. For discovery, say whether the assignment scopes, revises, reviews,
+or runs the exercise. Do not store transcript, scope cards, approval prose,
+route findings, mode flags, or detailed payloads there.
 
-## Routing Priority
+## Conversation Binding
 
-First infer the user's current intention from the current message, the pending
-decision, the previous direct next step and boundary, and the current state.
-Route from that inferred intention, not from keywords alone.
+Infer intention from the current message, pending decision, previous response
+cue, and current router context, not from keywords alone.
 
-A choice binds only when the current message unambiguously identifies one menu
-item. A bare number additionally requires that menu in the immediately previous
-user-facing response. Without a matching pending decision, use normal routing
-instead of `selection`. A generic confirmation binds only when the previous response's
-`[? Next Steps]` asked one explicit yes/no question about an action, approval,
-or clarification.
-A successful selection consumes the decision; any successful normal `begin`
-supersedes it.
+A choice binds only when the message unambiguously identifies one option. A
+bare number additionally requires that menu in the immediately preceding
+response. Without a matching pending decision, use normal routing. A generic
+confirmation binds only when the preceding next step asked one explicit yes/no
+question about an action, approval, or clarification.
+
 Analysis or report execution requires one uniquely identified ready scope whose
-identity and revision have not changed since presentation. If the referenced
-scope was already noncurrent before this message, treat approval as stale and
-plan only `team_lead`. If the message itself changes the current scope, treat it
-as revision and route the owning worker without `scope_ref`.
+identity and revision remain current. If it was already noncurrent before this
+message, route only team lead. If this message materially changes the scope,
+route its owner for revision without a scope reference.
 
-Apply these rules in order:
+Apply these priorities in order:
 
-1. If the intention is outside the current project or causal scope, or needs no
-   project-state update, plan only `team_lead`.
-2. If the intention is unclear, could refer to multiple pending options, rejects
-   them without giving a new in-scope request, or is only meta, setup, boundary,
-   synthesis, or no-action, plan only `team_lead`.
-3. If the intention selects a pending choice or answers the previous direct
-   question, route the matching work only when it remains inside the project
-   and causal boundary.
-   For analysis or report execution, a matching `current_status: ready` handoff
-   must exist.
-4. If the intention is to revise or add work based on the previous user-facing
-   headings, route the changed or added work normally inside the current project
-   and causal boundary.
-5. If the intention is new project-scope information or a new in-scope request,
-   route the relevant member or work path using the selection rules below.
-6. If no route can make a meaningful state update, plan only `team_lead`.
+1. Outside-project, outside-causal, meta, setup, synthesis, thanks, no-action,
+   unclear, or multiply interpretable input routes only team lead.
+2. An unambiguous pending choice or direct answer routes its stored or matching
+   in-scope work, subject to current scope and gate requirements.
+3. A revision or added request based on the previous headings routes the owning
+   member normally.
+4. New project information or a new in-scope request routes the member best
+   able to make one meaningful durable update.
+5. If no member can make such an update, route only team lead.
 
-When a message asks for several in-scope things at once, infer the user's
-dominant current intention from the prior headings and current wording, then
-choose one bounded assignment for this `begin`.
+For several simultaneous in-scope requests, choose one bounded assignment that
+matches the dominant current intention. Later work is neither promised nor
+queued.
 
-For in-scope work selection after the conversation match:
+## Route Choice
 
-- If a clear strong preference stays inside causal, data, discovery, or report
-  boundaries, route that preference.
-- If user-provided information still lacks relevant core review, route the most
-  relevant unreviewed or stale core member. For a discovery run, an already-known
-  missing review that would materially change execution or interpretation takes
-  precedence; discovery handles blockers first found during its own work.
-- If the intended action, target, claim boundary, output, or authorization
-  remains materially ambiguous, plan only `team_lead`. Otherwise choose the
-  most useful valid route; the user need not name it.
+- Honor a clear user preference that remains inside causal, data, discovery,
+  or report boundaries.
+- When relevant core review is missing or stale, choose the reviewer most
+  directly connected to the request. For a discovery run, a known missing
+  review takes precedence only when it could materially change execution or
+  interpretation; discovery handles blockers first found during its own work.
+- If the intended target, claim boundary, output, or authorization remains
+  materially ambiguous, route only team lead. Technical choices inside a clear
+  route assignment belong to that worker.
+- Prefer a missing check over improving a limited check, and choose the missing
+  check most directly connected to the current request.
+- After data audit changes analysis-relevant facts, route causal check only when
+  readiness or the design/support recommendation is now missing or stale.
 
-For exploration:
+Use the core routes as follows:
 
-- Plan `data_audit` when actual data, a file path, schema, variables, sample
-  rows, or a concrete dataset description is provided for inspection. A data
-  dictionary used only for construct, measurement, endpoint, label, or coding
-  interpretation may instead route `domain_expert`. Also plan data audit for
-  timing, leakage, missingness, dependence, support/positivity, data validity,
-  or feasible restructuring.
-- Plan `causal_check` when the causal target, claim boundary, analysis
-  readiness, or current design/support recommendation must be established or
-  refreshed. When those are current and uniquely identify an eligible design,
-  use `analysis_routing_workflow.md` for scope work.
-- Plan `domain_expert` when the user gives a domain, setting, population,
-  construct, measurement, endpoint, integration issue, field-practice question,
-  common-practice question, precedent, reporting norm, or standard outcome.
-- Plan `causal_discovery` when a sufficiently identified request is about graph
-  structure, variable neighborhoods, discovery artifacts, graph-informed
-  feature work, local screening, time-series graph exploration, or reviewing
-  discovery output. Technical uncertainty inside a clear discovery request
-  belongs to that route, which may scope or block. Plan only `team_lead` when
-  user input is needed to identify the discovery target or authorize output.
-  For a direct run, the target, inputs, variable set, output form, and output
-  authorization must be identifiable; the worker chooses method and diagnostic
-  details not fixed by the request. Otherwise route scope-only discovery when
-  requested,
-  or `team_lead` when user input is needed.
-- Prefer missing checks before improving limited checks.
-- If multiple checks are missing, choose the one most directly connected to the
-  user's current request.
-- After `data_audit` changes analysis-relevant facts, route `causal_check` only
-  when causal readiness or the current design/support recommendation is missing
-  or stale.
+- `data_audit`: inspect actual data, paths, schemas, variables, sample rows, or
+  concrete dataset descriptions; evaluate timing, leakage, missingness,
+  dependence, support, validity, or feasible restructuring. A dictionary used
+  only to interpret constructs, measures, endpoints, labels, or coding may
+  instead belong to domain expert.
+- `domain_expert`: interpret domain, setting, population, constructs,
+  measurement, endpoints, integration, field practice, precedents, reporting
+  norms, or standard outcomes.
+- `causal_check`: establish or refresh the causal target, claim boundary,
+  analysis readiness, or design/support recommendation. When those are current
+  and identify one eligible design, use the analysis routing workflow for scope
+  work.
+- `causal_discovery`: handle sufficiently identified graph structure, variable
+  neighborhoods, discovery artifacts, graph-informed feature work, local
+  screening, time-series graph exploration, or discovery-output review. A
+  direct run must identify the target, inputs, variable set, output form, and
+  output authorization; its worker chooses unfixed method and diagnostic
+  details. Route scope-only discovery when requested. Use team lead when user
+  input is needed to identify or authorize the work.
+- `report_writer`: use the report routing workflow.
 
-For analysis begin eligibility and approval binding, use
-`analysis_routing_workflow.md`.
-
-## Do Not Do During Route Selection
-
-- Do not build the final answer.
-- Do not update durable route sections.
-- Do not include detailed report scope, report outlines, analysis plans,
-  approval prose, or route findings in `intent_summary`.
-- Do not load the detailed method catalog.
-- Do not exceed the allowed plan shapes.
-- Do not load any planned route unless `statectl begin` succeeds.
+For analysis begin eligibility and exact approval binding, use
+`references/analysis_routing_workflow.md`.

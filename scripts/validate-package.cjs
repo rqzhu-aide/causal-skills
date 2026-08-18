@@ -89,6 +89,13 @@ if (
   throw new Error("state controller must advertise work-contract and artifact-role capabilities");
 }
 if (
+  template.capabilities?.turn_context !== 1
+  || template.capabilities?.required_references !== 1
+  || template.capabilities?.operation_packet_ref !== 1
+) {
+  throw new Error("state controller must advertise turn-context and packet-reference capabilities");
+}
+if (
   template.capabilities?.response_rendering !== 1
   || template.capabilities?.pending_decision !== 1
   || template.capabilities?.response_receipt !== 1

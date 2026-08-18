@@ -2,25 +2,14 @@
 
 Use this reference from design routes only. Support routes provide context
 inside the selected design scope; the design route owns the worker submission.
-The worker remains silent and never edits `project_state.yaml` directly.
 
 ## Active Assignment
 
-Proceed only when `state_meta.active_operation.stage` is `worker_pending` and
-the committed plan contains exactly the matching design assignment:
-
-```yaml
-- id: analysis_execution.<that_design_id>
-  support: optional_support
-```
-
-Use the persisted `intent_summary`, route, `scope_ref`, `operation_packet`, live
-state, selected design, and optional support as the authoritative assignment.
-Consistent detail
-from the operation-opening message may refine the initial pass, but is not
-required for resume. A resumed worker does not reinterpret a newer message; it
-restarts from this route boundary and reuses any matching completed artifact
-reported by the controller.
+Use the worker `turn_context`, full operation packet, selected design, and only
+the selected support reference. The persisted assignment and scope binding are
+authoritative on resume. Use the full-state fallback only for relevant detail
+omitted from the context, and reuse any matching completed artifact reported by
+the controller.
 
 ## Scope Decision
 
@@ -34,8 +23,8 @@ output instruction in the selected design and support references. Without an
 exact bound ready `scope_ref`, treat those instructions as scope content only;
 do not run them or compute target results.
 
-- Execute only when `state_meta.active_operation.scope_ref` is present and
-  exactly matches that ready slot's `scope_id` and `scope_revision`. The model
+- Execute only when `turn_context.operation.scope_ref` is present and exactly
+  matches that ready slot's `scope_id` and `scope_revision`. The model
   made the approval decision before `begin`; the persisted binding carries that
   decision across resume while the controller verifies identity only.
 - Missing scope reference, missing slot, `requested`, or a new analysis request:
@@ -111,25 +100,19 @@ must revise and reroute it. Other material changes may return a revised `ready`
 or `blocked` handoff without output while retaining the planned support. This is
 a scope-consistency check, not a repeat of the full begin gate.
 
-When the approved scope remains current:
+When the approved scope remains current, follow
+`references/artifact_output_policy.md`: reserve one meaningful output directory,
+execute and validate every operation-packet requirement, and submit one silent
+owner-scoped `apply`. Requirements are minimum coverage; supplemental work is
+allowed only inside the approved target and claim boundary.
 
-1. Call `statectl reserve-artifact` for one meaningful directory directly under
-   `output/`.
-2. Follow `references/artifact_output_policy.md` to write temporary output,
-   then validate it against every requirement in the operation packet. These
-   are minimum coverage, not a ban on supplemental work that stays within the
-   approved target and claim boundary.
-3. For completion, submit one `statectl apply` payload with
-   `actor: analysis_execution.<that_design_id>`, `scope_transition: preserve`,
-   updates only for the matching chamber slot, `current_status: done`, and an
-   `artifact_role: completion` receipt covering every required item.
-4. If execution instead produces useful evidence that the exact bound scope
-   cannot yield its promised output, submit `scope_transition: preserve`,
-   `current_status: blocked`, and an `artifact_role: infeasibility_evidence`
-   receipt. This preserves proof that the plan needs revision without claiming
-   the promised result. A tool, package, or transient execution failure is not
-   infeasibility evidence; retry it or use the normal no-artifact blocked
-   handoff.
+For completion, preserve the scope, update only the matching analysis chamber
+slot to `done`, and submit a `completion` receipt covering every requirement.
+If work on the exact scope instead proves that its promised output cannot be
+produced responsibly, preserve the scope, set it `blocked`, and submit
+`infeasibility_evidence` covering completed and unmet requirements. A package,
+tool, or transient failure is not infeasibility evidence; retry or use the
+normal no-artifact blocked handoff.
 
 Put a compact prose record in the artifact `summary`: design, support when used,
 target or estimand, main result or infeasibility finding, completed diagnostics,
@@ -137,8 +120,8 @@ claim boundary, and material limitations. Put detailed data contracts, settings,
 package versions, tables, and diagnostic inventories in the output files or
 chamber summary.
 
-`statectl apply` owns timestamps, IDs, artifact append, revision checks, route
-ownership validation, and transition to `lead_pending`. It rejects changes to
-`project_summary`, `next_step_plan`, another route's state, or the artifact list
-itself. A rejected submission must be corrected and retried; do not rerun a
+Submit as `analysis_execution.<that_design_id>` with the required scope
+transition and only its matching chamber slot. The controller owns all
+identities, timestamps, artifact append, ownership checks, and stage transition.
+A rejected submission must be corrected and retried; do not rerun a
 successfully completed matching artifact.

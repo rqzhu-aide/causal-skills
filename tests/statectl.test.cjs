@@ -8,13 +8,18 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const test = require("node:test");
 const YAML = require("yaml");
+const { beginOperation: beginSourceOperation } = require("../scripts/statectl-src/core.cjs");
 
 const SKILL_ROOT = path.resolve(__dirname, "..");
-const CLI = path.join(SKILL_ROOT, "scripts", "statectl.cjs");
+const BUNDLED_CLI = path.join(SKILL_ROOT, "scripts", "statectl.cjs");
+const CLI = process.env.STATECTL_TEST_SOURCE === "1"
+  ? path.join(SKILL_ROOT, "scripts", "statectl-src", "cli.cjs")
+  : BUNDLED_CLI;
 const CODEX_HOOK = path.join(SKILL_ROOT, "project-hooks", ".codex", "project_state_stop_check.js");
 const CLAUDE_HOOK = path.join(SKILL_ROOT, "project-hooks", ".claude", "project_state_stop_check.js");
 const SOURCE_HOOK = path.join(SKILL_ROOT, "scripts", "statectl-src", "hook.cjs");
 const FIXTURES = path.join(__dirname, "fixtures");
+const PACKETS = new Map();
 
 function temporaryProject(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "causal-statectl-"));
@@ -42,6 +47,9 @@ function execute(projectRoot, command, options = {}) {
   assert.doesNotThrow(() => {
     result = JSON.parse(lines[0]);
   }, `statectl emitted invalid JSON\nstdout: ${child.stdout}\nstderr: ${child.stderr}`);
+  if (result && result.operation_packet && result.operation_packet.operation_id) {
+    PACKETS.set(result.operation_packet.operation_id, structuredClone(result.operation_packet));
+  }
   return { ...child, result };
 }
 
@@ -155,6 +163,54 @@ function expected(result) {
   };
 }
 
+function assertRequiredReferences(result, expectedReferences) {
+  assert.deepEqual(result.required_references, expectedReferences);
+  assert.equal(new Set(result.required_references).size, result.required_references.length);
+  for (const reference of result.required_references) {
+    assert.equal(reference.includes("\\"), false, `${reference} must use POSIX separators`);
+    assert.equal(path.posix.normalize(reference), reference);
+    assert.equal(fs.existsSync(path.join(SKILL_ROOT, ...reference.split("/"))), true, `${reference} must exist`);
+  }
+}
+
+function assertTurnContext(projectRoot, result, expectedContext) {
+  const state = readState(projectRoot);
+  assert.deepEqual(Object.keys(result.turn_context).sort(), [
+    "actor",
+    "artifact_status",
+    "artifact_warnings",
+    "audience",
+    "operation",
+    "previous_response_cue",
+    "project_id",
+    "revision",
+    "scope_snapshot",
+    "stage",
+    "startup_notice",
+    "state",
+    "version",
+  ]);
+  assert.equal(result.turn_context.version, 1);
+  assert.equal(result.turn_context.audience, expectedContext.audience);
+  assert.equal(result.turn_context.actor, expectedContext.actor);
+  assert.equal(result.turn_context.stage, expectedContext.stage);
+  assert.equal(result.turn_context.project_id, state.state_meta.project_id);
+  assert.equal(result.turn_context.revision, state.state_meta.revision);
+  assert.deepEqual(result.turn_context.startup_notice, state.state_meta.startup_notice);
+  assert.deepEqual(result.turn_context.operation, state.state_meta.active_operation);
+  if (Object.prototype.hasOwnProperty.call(result, "artifact_status")) {
+    assert.deepEqual(result.turn_context.artifact_status, result.artifact_status);
+  }
+  if (Object.prototype.hasOwnProperty.call(result, "warnings")) {
+    assert.deepEqual(result.turn_context.artifact_warnings, result.warnings);
+  }
+  assertRequiredReferences(result, expectedContext.references);
+  assert.equal("turn_context" in state, false);
+  assert.equal("required_references" in state, false);
+  assert.equal("operation_packet_ref" in state, false);
+  assert.equal(state.state_meta.schema_version, 5);
+}
+
 function begin(projectRoot, prior, route, extras = {}) {
   return execute(projectRoot, "begin", {
     payload: {
@@ -262,19 +318,26 @@ function analysisSlot(status, summary, support = null, executionContract = DEFAU
   return slot;
 }
 
+function packetFor(result) {
+  const packet = result.operation_packet ?? PACKETS.get(result.operation_id);
+  assert.ok(packet, "result must expose or reference a previously returned operation_packet");
+  return packet;
+}
+
 function packetRequirementIds(result) {
-  assert.ok(result.operation_packet, "result must expose operation_packet");
-  assert.ok(Array.isArray(result.operation_packet.requirements));
-  return result.operation_packet.requirements.map((item) => item.id);
+  const packet = packetFor(result);
+  assert.ok(Array.isArray(packet.requirements));
+  return packet.requirements.map((item) => item.id);
 }
 
 function executionReceipt(result, options = {}) {
+  const packet = packetFor(result);
   const requirementIds = packetRequirementIds(result);
   const unmetRequirements = options.unmet_requirements ?? [];
   const completedRequirements = options.completed_requirements
     ?? requirementIds.filter((id) => !unmetRequirements.includes(id));
   return {
-    contract_hash: options.contract_hash ?? result.operation_packet.contract_hash,
+    contract_hash: options.contract_hash ?? packet.contract_hash,
     completed_requirements: [...completedRequirements],
     unmet_requirements: [...unmetRequirements],
     supplemental_work: [...(options.supplemental_work ?? [])],
@@ -443,6 +506,180 @@ test("open creates a valid state and a normal open is a byte-preserving no-op", 
   assert.equal(reopened.mode, "idle");
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), firstBytes);
   expectSuccess(execute(projectRoot, "validate"), "VALID");
+});
+
+test("begin treats a historical manifest lstat race as an availability warning", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+  const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      kind: "file",
+      slug: "warning-race",
+      extension: "txt",
+    },
+  }), "ARTIFACT_RESERVED");
+  writeReservedTemporary(projectRoot, reserved, "validated audit output\n");
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: started.operation_id,
+      actor: "data_audit",
+      updates: {
+        data_facts: {
+          data_checked: "passing",
+          data_sources: ["data/input.csv"],
+          audit_scope: "Historical artifact warning regression.",
+          unit_of_observation: "Row",
+          artifact_refs: [reserved.artifact_intent.location],
+        },
+        council_chamber: {
+          data_audit: {
+            current_status: "complete",
+            summary: "Audit artifact completed.",
+            questions_for_user: [],
+            feedback_to_route: [],
+          },
+        },
+      },
+      artifact: { summary: "Validated audit output." },
+    },
+  }), "WORKER_APPLIED");
+  const closed = expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+
+  const manifestPath = path.resolve(projectRoot, ...reserved.manifest_path.split("/"));
+  const originalLstat = fs.lstatSync;
+  let reopened;
+  fs.lstatSync = function lstatWithManifestRace(filePath, ...args) {
+    if (path.resolve(filePath) === manifestPath) {
+      const error = new Error("forced historical manifest race");
+      error.code = "ENOENT";
+      throw error;
+    }
+    return originalLstat.call(fs, filePath, ...args);
+  };
+  try {
+    reopened = beginSourceOperation({
+      projectRoot,
+      payload: {
+        ...expected(closed),
+        route: "team_lead",
+        intent_summary: "Verify warning-only historical artifact diagnostics.",
+      },
+    });
+  } finally {
+    fs.lstatSync = originalLstat;
+  }
+
+  assert.equal(reopened.ok, true);
+  assert.equal(reopened.code, "BEGAN_LEAD");
+  assert.equal(reopened.revision, closed.revision + 1);
+  assert.deepEqual(reopened.turn_context.artifact_warnings, [{
+    code: "INVALID_HISTORICAL_ARTIFACT_MANIFEST",
+    artifact_id: applied.artifact_record.artifact_id,
+    location: applied.artifact_record.location,
+    manifest_path: reserved.manifest_path,
+  }]);
+  const state = readState(projectRoot);
+  assert.equal(state.state_meta.revision, reopened.revision);
+  assert.equal(state.state_meta.active_operation.id, reopened.operation_id);
+  assert.equal(state.state_meta.active_operation.stage, "lead_pending");
+  expectSuccess(finish(projectRoot, reopened, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
+test("idle open returns exact routing context and a compact previous-response cue", (t) => {
+  const projectRoot = temporaryProject(t);
+  const created = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const seeded = readState(projectRoot);
+  const analysisId = crypto.randomUUID();
+  const discoveryId = crypto.randomUUID();
+  const reportId = crypto.randomUUID();
+  seeded.council_chamber.analysis_execution.single_time_observational = {
+    ...analysisSlot("ready", "Exact analysis scope sentinel."),
+    last_updated: null,
+    scope_id: analysisId,
+    scope_revision: 2,
+  };
+  seeded.discovery_sidecar = {
+    ...seeded.discovery_sidecar,
+    scope_id: discoveryId,
+    scope_revision: 3,
+    execution_contract: structuredClone(DEFAULT_DISCOVERY_CONTRACT),
+    status: "scoped",
+    goal: DEFAULT_DISCOVERY_CONTRACT.target,
+    scope: "Exact discovery scope sentinel.",
+  };
+  seeded.report_assembly.scope_id = reportId;
+  seeded.report_assembly.scope_revision = 4;
+  seeded.report_assembly.report_goal = "Exact report scope sentinel.";
+  seeded.council_chamber.report_writer.current_status = "ready";
+  seeded.council_chamber.report_writer.summary = "Exact report handoff sentinel.";
+  writeState(projectRoot, seeded);
+
+  const started = expectSuccess(begin(projectRoot, created, "team_lead"), "BEGAN_LEAD");
+  const finished = expectSuccess(finish(projectRoot, started, {}, {
+    presentation: {
+      confirmation: "Confirmation sentinel omitted from routing context.",
+      framing: "Framing sentinel omitted from routing context.",
+      options: [
+        {
+          label: "Audit the supplied data",
+          consultant_read: "Inspect the current dataset structure.",
+          tradeoff: "Improves data certainty before analysis.",
+          assignment: { route: "data_audit", intent_summary: "Audit the supplied dataset." },
+        },
+        {
+          label: "Clarify the study domain",
+          consultant_read: "Review the construct and setting.",
+          tradeoff: "Improves interpretation before method selection.",
+          assignment: { route: "domain_expert", intent_summary: "Clarify the study domain." },
+        },
+      ],
+      boundary: "Exact boundary cue.",
+      next_steps: "This is replaced when options exist.",
+    },
+  }), "OPERATION_FINISHED");
+  const before = fs.readFileSync(statePath(projectRoot), "utf8");
+  const reopened = expectSuccess(execute(projectRoot, "open"), "OPENED");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+  assertTurnContext(projectRoot, reopened, {
+    audience: "router",
+    actor: null,
+    stage: "idle",
+    references: ["references/route_selection_workflow.md"],
+  });
+
+  const state = readState(projectRoot);
+  const contextState = reopened.turn_context.state;
+  assert.deepEqual(contextState.project_summary, state.project_summary);
+  assert.deepEqual(
+    contextState.analysis_execution.single_time_observational.execution_contract,
+    DEFAULT_ANALYSIS_EXECUTION_CONTRACT,
+  );
+  assert.deepEqual(contextState.core_status.causal_discovery.sidecar, state.discovery_sidecar);
+  assert.deepEqual(contextState.report.assembly, state.report_assembly);
+  assert.deepEqual(contextState.pending_decision, state.pending_decision);
+  assert.deepEqual(contextState.artifact_records, state.artifact_records);
+  assert.deepEqual(reopened.turn_context.previous_response_cue, {
+    operation_id: finished.operation_id,
+    revision: finished.revision,
+    consultant_options: [
+      "    1. Audit the supplied data",
+      "       Consultant read: Inspect the current dataset structure.",
+      "       Tradeoff: Improves data certainty before analysis.",
+      "    2. Clarify the study domain",
+      "       Consultant read: Review the construct and setting.",
+      "       Tradeoff: Improves interpretation before method selection.",
+    ].join("\n"),
+    boundary: "Exact boundary cue.",
+    next_steps: "Choose one option, or suggest another action.",
+  });
+  const serializedContext = JSON.stringify(reopened.turn_context);
+  assert.equal(serializedContext.includes("Framing sentinel omitted"), false);
+  assert.equal(serializedContext.includes("Confirmation sentinel omitted"), false);
+  assert.equal(serializedContext.includes("response_markdown"), false);
 });
 
 test("validate exposes a deterministic scope snapshot without mutating state", (t) => {
@@ -932,6 +1169,124 @@ test("begin emits exactly the three supported plan shapes and rejects unknown ro
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), original);
 });
 
+test("begin returns comprehensive actor context and exact route references", async (t) => {
+  for (const actor of [
+    "data_audit",
+    "domain_expert",
+    "causal_check",
+    "causal_discovery",
+    "report_writer",
+  ]) {
+    await t.test(actor, () => {
+      const projectRoot = temporaryProject(t);
+      const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+      const started = expectSuccess(begin(projectRoot, opened, actor), "BEGAN_WORKER");
+      assertTurnContext(projectRoot, started, {
+        audience: "worker",
+        actor,
+        stage: "worker_pending",
+        references: [`references/${actor}.md`],
+      });
+      for (const section of [
+        "project_summary",
+        "council_chamber",
+        "data_facts",
+        "domain_knowledge",
+        "causal_facts",
+        "discovery_sidecar",
+        "artifact_records",
+      ]) {
+        assert.ok(Object.prototype.hasOwnProperty.call(started.turn_context.state, section), section);
+      }
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(started.turn_context.state, "report_assembly"),
+        actor === "report_writer",
+      );
+      expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+    });
+  }
+
+  await t.test("team_lead", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const started = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    assertTurnContext(projectRoot, started, {
+      audience: "team_lead",
+      actor: "team_lead",
+      stage: "lead_pending",
+      references: ["references/team_lead.md"],
+    });
+    assert.deepEqual(started.turn_context.state.report_assembly, readState(projectRoot).report_assembly);
+    expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+  });
+
+  await t.test("analysis design and support", () => {
+    const projectRoot = temporaryProject(t);
+    const prepared = prepareAnalysisScope(
+      projectRoot,
+      "single_time_observational",
+      "statistical-validity",
+    );
+    const state = readState(projectRoot);
+    state.council_chamber.analysis_execution.difference_in_differences = {
+      ...analysisSlot("blocked", "Unrelated analysis scope sentinel."),
+      last_updated: null,
+      scope_id: crypto.randomUUID(),
+      scope_revision: 1,
+      execution_contract: null,
+    };
+    writeState(projectRoot, state);
+    const started = expectSuccess(begin(
+      projectRoot,
+      prepared,
+      "analysis_execution.single_time_observational",
+      { support: "statistical-validity", scope_ref: prepared.scope_ref },
+    ), "BEGAN_WORKER");
+    assertTurnContext(projectRoot, started, {
+      audience: "worker",
+      actor: "analysis_execution.single_time_observational",
+      stage: "worker_pending",
+      references: [
+        "references/design_execution_contract.md",
+        "references/design/single_time_observational.md",
+        "references/support/statistical-validity.md",
+        "references/artifact_output_policy.md",
+      ],
+    });
+    const analysisContext = started.turn_context.state.council_chamber.analysis_execution;
+    assert.deepEqual(Object.keys(analysisContext), ["single_time_observational"]);
+    assert.deepEqual(
+      analysisContext.single_time_observational.execution_contract,
+      DEFAULT_ANALYSIS_EXECUTION_CONTRACT,
+    );
+    assert.equal(
+      started.turn_context.scope_snapshot.analysis.difference_in_differences.current_status,
+      "blocked",
+    );
+    assert.equal(JSON.stringify(started.turn_context.state).includes("Unrelated analysis scope sentinel."), false);
+    expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+  });
+
+  await t.test("bound report", () => {
+    const projectRoot = temporaryProject(t);
+    const prepared = prepareReportScope(projectRoot);
+    const started = expectSuccess(begin(projectRoot, prepared, "report_writer", {
+      scope_ref: prepared.scope_ref,
+    }), "BEGAN_WORKER");
+    assertTurnContext(projectRoot, started, {
+      audience: "worker",
+      actor: "report_writer",
+      stage: "worker_pending",
+      references: [
+        "references/report_writer.md",
+        "references/artifact_output_policy.md",
+      ],
+    });
+    assert.deepEqual(started.turn_context.state.report_assembly, readState(projectRoot).report_assembly);
+    expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+  });
+});
+
 test("command input type failures use INVALID_INPUT without mutating state", (t) => {
   const projectRoot = temporaryProject(t);
   const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
@@ -978,10 +1333,21 @@ test("revision checks, ownership, worker resume, lead resume, and closeout form 
   const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
   const startupNotice = readState(projectRoot).state_meta.startup_notice;
   const started = expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+  assertTurnContext(projectRoot, started, {
+    audience: "worker",
+    actor: "data_audit",
+    stage: "worker_pending",
+    references: ["references/data_audit.md"],
+  });
+  const beforeWorkerResume = fs.readFileSync(statePath(projectRoot), "utf8");
   assert.deepEqual(readState(projectRoot).state_meta.startup_notice, startupNotice);
   const workerResume = expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeWorkerResume);
   assert.equal(workerResume.plan_actor, "data_audit");
   assert.equal(workerResume.active_operation.id, started.operation_id);
+  assert.deepEqual(workerResume.turn_context, started.turn_context);
+  assert.deepEqual(workerResume.required_references, started.required_references);
+  assert.ok(workerResume.operation_packet);
   assert.deepEqual(readState(projectRoot).state_meta.startup_notice, startupNotice);
 
   const validUpdates = {
@@ -1032,13 +1398,31 @@ test("revision checks, ownership, worker resume, lead resume, and closeout form 
     },
   }), "WORKER_APPLIED");
   assert.equal(applied.revision, 2);
+  assert.equal("operation_packet" in applied, false);
+  assert.equal(applied.operation_packet_ref.contract_unchanged, true);
+  assertTurnContext(projectRoot, applied, {
+    audience: "team_lead",
+    actor: "data_audit",
+    stage: "lead_pending",
+    references: ["references/team_lead.md"],
+  });
   const appliedState = readState(projectRoot);
   assert.equal(appliedState.project_summary.data_audit_complete, true);
+  assert.deepEqual(applied.turn_context.state.data_facts, appliedState.data_facts);
+  assert.deepEqual(
+    applied.turn_context.state.council_chamber.data_audit,
+    appliedState.council_chamber.data_audit,
+  );
   assert.deepEqual(appliedState.state_meta.startup_notice, startupNotice);
 
+  const beforeLeadResume = fs.readFileSync(statePath(projectRoot), "utf8");
   const leadResume = expectSuccess(execute(projectRoot, "open"), "RESUME_LEAD");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeLeadResume);
   assert.equal(leadResume.active_operation.id, started.operation_id);
   assert.equal(leadResume.active_operation.stage, "lead_pending");
+  assert.deepEqual(leadResume.turn_context, applied.turn_context);
+  assert.deepEqual(leadResume.required_references, applied.required_references);
+  assert.ok(leadResume.operation_packet);
   assert.deepEqual(readState(projectRoot).state_meta.startup_notice, startupNotice);
 
   const beforeBadFinish = fs.readFileSync(statePath(projectRoot), "utf8");
@@ -1368,6 +1752,16 @@ test("discovery scope-only work persists one exact contract and later begin bind
   const bound = expectSuccess(begin(projectRoot, closed, "causal_discovery", {
     scope_ref: exact,
   }), "BEGAN_WORKER");
+  assertTurnContext(projectRoot, bound, {
+    audience: "worker",
+    actor: "causal_discovery",
+    stage: "worker_pending",
+    references: [
+      "references/causal_discovery.md",
+      "references/artifact_output_policy.md",
+    ],
+  });
+  assert.deepEqual(bound.turn_context.state.discovery_sidecar.execution_contract, DEFAULT_DISCOVERY_CONTRACT);
   assert.deepEqual(readState(projectRoot).state_meta.active_operation.discovery_scope, {
     transition: "preserve",
     base_ref: exact,
@@ -1489,6 +1883,8 @@ test("direct discovery output freezes its contract at reservation and records th
       discovery_scope: discoveryScope("new"),
     },
   }), "ARTIFACT_RESERVED");
+  assert.ok(reserved.operation_packet);
+  assert.equal("operation_packet_ref" in reserved, false);
   assert.equal(reserved.scope_ref.kind, "discovery");
   assert.deepEqual(reserved.discovery_scope.contract, DEFAULT_DISCOVERY_CONTRACT);
   const resumed = expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER");
@@ -2358,7 +2754,7 @@ test("analysis and report done handoffs require an artifact in the same apply", 
 });
 
 
-test("operation packets stay contract-stable across begin, open, reserve, and apply", (t) => {
+test("operation packets stay contract-stable while reserve and apply compact unchanged packets", (t) => {
   const projectRoot = temporaryProject(t);
   const prepared = prepareAnalysisScope(projectRoot);
   const actor = "analysis_execution." + prepared.design;
@@ -2419,7 +2815,15 @@ test("operation packets stay contract-stable across begin, open, reserve, and ap
       extension: "csv",
     },
   }), "ARTIFACT_RESERVED");
-  assert.deepEqual(reserved.operation_packet, workerPacket);
+  assert.equal("operation_packet" in reserved, false);
+  assert.deepEqual(reserved.operation_packet_ref, {
+    operation_id: workerPacket.operation_id,
+    stage: "worker_pending",
+    action: "apply",
+    completion_protocol: workerPacket.completion_protocol,
+    contract_hash: workerPacket.contract_hash,
+    contract_unchanged: true,
+  });
   writeReservedTemporary(projectRoot, reserved, "estimate,se\n1.5,0.2\n");
 
   const artifact = scopedArtifact(reserved, "Bound analysis with supplemental diagnostics.", {
@@ -2443,7 +2847,16 @@ test("operation packets stay contract-stable across begin, open, reserve, and ap
       artifact,
     },
   }), "WORKER_APPLIED");
-  const leadPacket = applied.operation_packet;
+  assert.equal("operation_packet" in applied, false);
+  assert.deepEqual(applied.operation_packet_ref, {
+    operation_id: workerPacket.operation_id,
+    stage: "lead_pending",
+    action: "finish",
+    completion_protocol: workerPacket.completion_protocol,
+    contract_hash: workerPacket.contract_hash,
+    contract_unchanged: true,
+  });
+  const leadPacket = expectSuccess(execute(projectRoot, "open"), "RESUME_LEAD").operation_packet;
   assert.equal(leadPacket.stage, "lead_pending");
   assert.equal(leadPacket.action, "finish");
   for (const field of [
@@ -2458,10 +2871,6 @@ test("operation packets stay contract-stable across begin, open, reserve, and ap
   ]) {
     assert.deepEqual(leadPacket[field], workerPacket[field], field + " changed across apply");
   }
-  assert.deepEqual(
-    expectSuccess(execute(projectRoot, "open"), "RESUME_LEAD").operation_packet,
-    leadPacket,
-  );
 
   const manifest = JSON.parse(fs.readFileSync(
     path.join(projectRoot, ...reserved.manifest_path.split("/")),
@@ -2476,6 +2885,57 @@ test("operation packets stay contract-stable across begin, open, reserve, and ap
   assert.equal(applied.artifact_record.artifact_role, "completion");
   const closed = expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
   assert.equal(closed.operation_packet, null);
+});
+
+test("apply returns a full replacement packet when a new scope changes the work contract", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  seedAnalysisEligibility(projectRoot);
+  const started = expectSuccess(begin(
+    projectRoot,
+    opened,
+    "analysis_execution.single_time_observational",
+  ), "BEGAN_WORKER");
+  assert.equal(started.operation_packet.completion_protocol, 0);
+  assert.equal(started.operation_packet.contract_hash, null);
+
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "analysis_execution.single_time_observational",
+      scope_transition: "new",
+      updates: {
+        council_chamber: {
+          analysis_execution: {
+            single_time_observational: analysisSlot("ready", "New contract is ready."),
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+  assert.equal("operation_packet_ref" in applied, false);
+  assert.ok(applied.operation_packet);
+  assert.equal(applied.operation_packet.stage, "lead_pending");
+  assert.equal(applied.operation_packet.action, "finish");
+  assert.equal(applied.operation_packet.completion_protocol, 1);
+  assert.match(applied.operation_packet.contract_hash, /^[0-9a-f]{64}$/);
+  assert.ok(applied.operation_packet.requirements.length > 0);
+  assertTurnContext(projectRoot, applied, {
+    audience: "team_lead",
+    actor: "analysis_execution.single_time_observational",
+    stage: "lead_pending",
+    references: [
+      "references/team_lead.md",
+      "references/team_lead_analysis_flow.md",
+    ],
+  });
+
+  const resumed = expectSuccess(execute(projectRoot, "open"), "RESUME_LEAD");
+  assert.deepEqual(resumed.operation_packet, applied.operation_packet);
+  assert.deepEqual(resumed.turn_context, applied.turn_context);
+  assert.deepEqual(resumed.required_references, applied.required_references);
+  expectSuccess(finish(projectRoot, applied, {}, { cancel: true }), "OPERATION_CANCELLED");
 });
 
 test("scoped completion rejects incomplete, inconsistent, or uninventoried receipts atomically", (t) => {
@@ -2555,7 +3015,7 @@ test("scoped completion rejects incomplete, inconsistent, or uninventoried recei
   unsupportedReceipt.execution_receipt.unsupported = true;
   expectAtomicFailure(applyWith(unsupportedReceipt), "INVALID_ARTIFACT_RECEIPT");
 
-  const contractHash = reserved.operation_packet.contract_hash;
+  const contractHash = packetFor(reserved).contract_hash;
   const mismatchedHash = (contractHash[0] === "0" ? "1" : "0") + contractHash.slice(1);
   expectAtomicFailure(applyWith(scopedArtifact(reserved, "Hash mismatch.", {
     contract_hash: mismatchedHash,
@@ -2943,7 +3403,7 @@ test("completed infeasibility manifest retries preserve role and receipt and rec
   assert.equal(resumed.artifact_status.status, "complete");
   assert.equal(resumed.artifact_status.artifact_role, "infeasibility_evidence");
   assert.deepEqual(resumed.artifact_status.execution_receipt, artifact.execution_receipt);
-  assert.deepEqual(resumed.operation_packet, reserved.operation_packet);
+  assert.deepEqual(resumed.operation_packet, packetFor(reserved));
 
   const roleMismatch = structuredClone(artifact);
   roleMismatch.artifact_role = "completion";
@@ -3230,6 +3690,8 @@ test("artifact reservation, manifest verification, resume, and recording are one
   assert.equal(applied.artifact_record.design, prepared.design);
   assert.equal(applied.artifact_record.artifact_role, "completion");
   assert.match(applied.artifact_record.created_at, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(applied.turn_context.artifact_status.location_state, "complete");
+  assert.deepEqual(applied.turn_context.artifact_status.execution_receipt, manifest.execution_receipt);
   const afterApply = readState(projectRoot);
   const completedSlot = afterApply.council_chamber.analysis_execution[prepared.design];
   assert.equal(completedSlot.summary, manifest.summary);
@@ -3237,6 +3699,9 @@ test("artifact reservation, manifest verification, resume, and recording are one
   assert.deepEqual(completedSlot.feedback_to_route, ["Preserve this feedback."]);
   assert.equal(afterApply.project_summary.analysis_output, "exist");
   const summaryTimestamp = afterApply.project_summary.last_updated;
+
+  const leadResume = expectSuccess(execute(projectRoot, "open"), "RESUME_LEAD");
+  assert.deepEqual(leadResume.turn_context.artifact_status, applied.turn_context.artifact_status);
 
   const closed = expectSuccess(finish(projectRoot, applied, {}, { cancel: true }), "OPERATION_CANCELLED");
   assert.equal(closed.revision, reserved.revision + 2);
@@ -3449,7 +3914,7 @@ test("atomic finish failure preserves a resumable lead operation and removes tem
 test("bundled stop hook validates strictly without external YAML modules", async (t) => {
   assert.deepEqual(fs.readFileSync(CODEX_HOOK), fs.readFileSync(CLAUDE_HOOK));
   assert.match(fs.readFileSync(CODEX_HOOK, "utf8"), /Bundled dependency: yaml \(ISC\)/);
-  assert.match(fs.readFileSync(CLI, "utf8"), /Bundled dependency: yaml \(ISC\)/);
+  assert.match(fs.readFileSync(BUNDLED_CLI, "utf8"), /Bundled dependency: yaml \(ISC\)/);
 
   await t.test("missing state warns without blocking", () => {
     const projectRoot = temporaryProject(t);

@@ -16,9 +16,27 @@ result is any new quantity, comparison, model-fit result, or test intended as
 an answer to an `analysis_execution` target or a refinement of it. Only an
 `analysis_execution` operation bound to an exact ready scope may compute one.
 Calling a result a diagnostic does not change this classification. Other routes
-may inspect inputs, assess route-owned readiness with input- or design-feasibility
-diagnostics, run only their expressly allowed non-target
+may inspect inputs, assess route-owned readiness with input- or
+design-feasibility diagnostics, run only their expressly allowed non-target
 work, and summarize completed artifacts.
+
+## Runtime Context
+
+Successful stage-entry results from `open`, `begin`, and `apply` provide
+validated `turn_context` and `required_references`. Use the context as the
+normal state view. Read
+`state_path` only when relevant detail or an exact finish-recovery receipt is
+genuinely omitted; this is a read-only fallback, not a routine step.
+
+Here, **load** means ensure a reference is available in context. In a continuous
+session, reuse an unchanged reference already loaded. Load only missing or
+changed files from `required_references` plus conditional references expressly
+required by an active routing file. When several are missing, read them in one
+tool call when the host permits.
+
+Controller stage, identity, scope, warnings, and next-action fields are
+authoritative. Context projections are derived from committed state and are
+never another state store.
 
 ## Turn Protocol
 
@@ -28,115 +46,102 @@ work, and summarize completed artifacts.
    `project_state.yaml`, falling back to the current directory for a new state.
 2. Check only the current user message for an explicit fresh-state request such
    as "start fresh", "reset this project", or "save old state and create new".
-   Run `node <skill-root>/scripts/statectl.cjs open --project-root <root> --fresh`
-   only for that explicit request; vague confirmation such as "yes", "ok", or
-   "go ahead" is never a reset. Only explicit `--fresh` may archive and replace
-   an active operation; otherwise omit `--fresh`.
-3. On successful `open`, read its structured result, including any
-   `operation_packet`, and then read the validated state at the returned
-   `state_path`. On a controller error, load team lead
-   only in preflight-failure mode to explain the exact recovery boundary; do
-   not repair, replace, or bypass rejected state manually.
-   For `LEGACY_ACTIVE_PLAN`, an explicit user choice to abandon only the old
-   transient plan may be carried out with `open --discard-legacy-plan`; this
-   archives the original and preserves its durable v4.5 evidence. Use
-   `--fresh` instead only when the user explicitly wants a new project.
-4. Resume before routing; `open.mode` and the persisted active stage take
-   precedence over the result code:
-   - explicit cancellation of the persisted operation: load team lead only and
-     use `finish --cancel`; preserve durable state and unrecorded files.
-   - `worker_pending`: load only the persisted worker assignment and run it from
-     the route boundary.
-   - `lead_pending`: load `references/team_lead.md` and finish the persisted
-     operation.
-   - idle: route, including after creation, migration, or reset.
-   Apart from explicit fresh reset, materially new input neither replaces nor
-   queues active work. Finish it first; new work is outside its assignment.
-   Persisted `intent_summary`, route, and `scope_ref` remain authoritative;
-   do not expand them on resume. At `worker_pending`, only a non-null `scope_ref`
-   for analysis or report work records exact scope approval. A discovery
-   `scope_ref` binds an exact discovery contract and is never approval
-   evidence. At `lead_pending`, a `scope_ref` identifies the resulting scope
-   handoff; use the planned route's authoritative state and required evidence
-   for closeout.
-5. For a new operation, read `references/route_index.yaml` and
-   `references/route_selection_workflow.md`. Infer one dominant intention and
-   prepare exactly one allowed assignment. Call `statectl begin` with a JSON
-   payload; the controller constructs and commits `next_step_plan`. Do not load
-   a worker until `begin` succeeds.
-   After this skill is explicitly activated, even synthesis, clarification,
-   thanks, or no-state-change replies use a team-lead operation; never answer
-   directly because no durable update appears necessary.
-6. If the plan has a non-`team_lead` route, load that route reference. For
-   `analysis_execution.<design_id>`, load the matching design reference and its
-   optional support reference; there is no separate analysis-execution route
-   file. The worker submits one owner-scoped JSON update through `statectl apply`
-   and never speaks to the user.
-7. If the worker will create durable output, follow
-   `references/artifact_output_policy.md`: reserve the location before writing,
-   write and validate only the returned temporary path, then submit the artifact
-   payload required by the `operation_packet`. The controller publishes
-   and records it.
-8. At `lead_pending`, load `references/team_lead.md` exactly once. Team lead
-   submits its semantic summary and structured presentation through
-   `statectl finish`, which derives aggregates, stores options, and renders.
-9. Each assistant turn handles at most one operation, whether newly begun or
-   resumed. A rejected `begin` may be corrected or rerouted only before any
-   `begin` succeeds. Once one succeeds, that operation consumes the turn. After
-   `finish` succeeds, follow `references/team_lead.md`'s Final Delivery rule
-   and stop. Do not run `open` or `begin` again until a new user message.
-   The sole exception is a read-only preflight-failure response when no
-   operation can be opened. An ordinary validation rejection from
-   `reserve-artifact`, `apply`, or `finish` leaves the operation at its persisted
-   stage; correct and retry
-   it, or cancel only after an explicit user request. On any project, revision,
-   operation, or stage mismatch, or when mutation JSON is missing or unusable,
-   run `open` once and follow the persisted stage. Retry the same mutation only
-   when project, revision, operation, and stage are unchanged. If this follows
-   `finish` and the project is now idle at the next revision, treat it as
-   committed, emit `response_receipt.response_markdown` exactly, and stop. This
-   receipt recovery applies only to finish uncertainty in the same logical
-   turn; on a later user turn, route normally and do not automatically replay
-   an earlier receipt.
+   Run `statectl open --fresh` only for that request. Vague confirmation such as
+   "yes", "ok", or "go ahead" is never reset authorization. Only `--fresh` may
+   archive and replace an active operation.
+3. Normally start with `statectl open`. One fast path is allowed in a continuous
+   session: after the immediately preceding successful `finish` for the same
+   project root, an unambiguous selection or direct continuation of that exact
+   response may call `begin` with the returned project ID and revision, without
+   rereading state or unchanged references. Do not use this path for reset,
+   cancellation, a new topic, ambiguous wording, uncertain session continuity,
+   or any missing prior result. A rejected fast-path `begin` changes nothing;
+   run `open` once and follow its committed stage.
+4. On successful `open`, follow `turn_context.stage` before considering the new
+   request:
+   - explicit cancellation of the persisted operation: load team lead and use
+     `finish --cancel`; preserve durable state and unrecorded files;
+   - `worker_pending`: resume the persisted worker from its route boundary;
+   - `lead_pending`: skip the worker and finish through team lead;
+   - idle: perform normal route selection.
 
-## Controller Inputs
+   On error, load team lead only in preflight-failure mode and explain the
+   recovery boundary; never repair or bypass state manually. For
+   `LEGACY_ACTIVE_PLAN`, an explicit choice to abandon only the transient plan
+   may use `open --discard-legacy-plan`, preserving durable v4.5 evidence.
+5. At an active stage, persisted intent, route, and scope binding remain the
+   assignment. A newer message may authorize cancellation and may be
+   acknowledged by team lead, but it does not replace, expand, or queue the
+   active operation. At `worker_pending`, an analysis or report `scope_ref`
+   records exact approval; a discovery reference binds a contract but is not
+   approval evidence.
+6. For an idle operation, load the controller-required routing references. Infer
+   one dominant intention and call `statectl begin` with one allowed assignment.
+   Do not load or run the worker before `begin` succeeds. Once this skill is
+   explicitly active, synthesis, clarification, thanks, and no-state-change
+   replies also use a team-lead operation rather than answering directly.
+7. At `worker_pending`, load the returned worker references. The worker performs
+   only its persisted assignment, submits one owner-scoped update through
+   `statectl apply`, and remains silent. An analysis worker uses its selected
+   design reference, the shared design contract, and only its selected support
+   reference. If relevant route work requires detail omitted from
+   `turn_context`, use the full-state fallback before deciding or acting.
+8. When the worker will create durable output, load
+   `references/artifact_output_policy.md`, reserve before writing, validate the
+   returned temporary output, and submit the required artifact receipt through
+   `apply`. Reuse the current operation packet when the controller reports its
+   contract unchanged; do not reread or reinterpret the same requirements.
+9. At `lead_pending`, load the returned lead references. Team lead uses the
+   committed lead context, submits its semantic summary and presentation
+   through `statectl finish`, and emits only the controller-rendered response.
+   Do not reread the full YAML unless the current answer needs relevant detail
+   omitted from the lead context.
+10. Each assistant turn handles at most one operation. Once `begin` succeeds,
+    that operation consumes the turn. After `finish` succeeds, emit the rendered
+    response and stop; do not open or begin again until a new user message. The
+    sole no-operation exception is a read-only preflight-failure response.
 
-Run input-bearing mutations (`begin`, `reserve-artifact`, `apply`, and
-`finish`) as:
+For an ordinary `reserve-artifact`, `apply`, or `finish` rejection, correct and
+retry the same stage, or cancel only after explicit authorization. On project,
+revision, operation, stage, or unusable-input errors, run `open` once and
+follow committed state.
+Retry only while project, revision, operation, and stage still match. If an
+uncertain `finish` is followed by an idle `open` at the next revision with a
+matching response receipt, use the read-only fallback to verify its operation
+and revision, emit that `response_markdown` exactly, and stop. Never replay an
+older receipt on a later turn.
+
+A rejected ordinary `begin` may be corrected or rerouted only before any
+`begin` succeeds. It never authorizes bypassing controller validation.
+
+## Controller Calls
+
+Pass mutation JSON by file or stdin, never as shell-escaped YAML:
 
 ```text
 node <skill-root>/scripts/statectl.cjs <command> --project-root <root> --input <json-file|->
 ```
 
-Every input includes `expected_project_id` and `expected_revision` from the
-latest successful controller result. Command-specific fields are:
+Use the expected project ID and revision from the current result. `begin` uses
+an exact pending `selection` or normal `route`, compact `intent_summary`,
+optional `support`, and any required scope reference. Later calls use these
+compact envelopes:
 
-- `begin`: either `selection: {decision_id, option_number}` for the pending
-  decision, or a normal `route`, `intent_summary`, optional `support`, and
-  optional exact analysis, report, or discovery `scope_ref`.
-- `reserve-artifact`: `operation_id`, `kind` (`file` or `directory`), `slug`,
-  and `extension` when `kind` is `file`; omit `extension` for a directory. An
-  unbound discovery run also supplies
-  `discovery_scope: {transition, contract}` as defined by
-  `references/causal_discovery.md`.
-- `apply`: `operation_id`, `actor`, owner-scoped `updates`, and optional
-  `artifact` as defined by `references/artifact_output_policy.md`. Analysis and
-  report workers must also supply `scope_transition` (`new`, `revise`, or
-  `preserve`). An unbound
-  discovery scope-only or blocked handoff may instead supply
-  `discovery_scope` only when no artifact is reserved; it never accompanies
-  `artifact`. Other workers omit both fields.
-- `finish`: `operation_id`, optional semantic
-  `updates: {project_summary: {...}}`, and `team_lead.md`'s structured
-  `presentation`; add `--cancel` only after explicit cancellation and omit updates.
+- `reserve-artifact`: active `operation_id`, `kind`, `slug`, and file
+  `extension` or route-required `discovery_scope` when applicable;
+- `apply`: active `operation_id`, exact `actor`, owner-scoped `updates`, and any
+  route-required `scope_transition`, `discovery_scope`, or `artifact`;
+- `finish`: active `operation_id`, team lead `presentation`, and optional
+  `updates: {project_summary: ...}`.
 
-Patch maps merge recursively; each supplied array replaces the complete array,
-`null` is explicit, and omitted fields remain unchanged. Within the current
-actor's writable state, when evidence resolves, reclassifies, or supersedes
-content, update every affected field: replace arrays in full, supply the current
-scalar classification, and use `[]` or `null` for obsolete values where
-allowed. Omission preserves stale content.
+Use `finish --cancel` only after explicit cancellation.
 
-Use `node <skill-root>/scripts/statectl.cjs validate --project-root <root>` for
-read-only validation. Keep routing, reference loading, controller calls, and
-route work silent unless a real blocker or permission issue prevents completion.
+Patch maps merge recursively, supplied arrays replace complete arrays, `null`
+is explicit, and omitted fields stay unchanged. When evidence supersedes
+route-owned content, replace every affected field and explicitly clear obsolete
+values. The controller owns identities, timestamps, artifact records, aggregate
+flags, plan transitions, pending decisions, and response rendering.
+
+Use `statectl validate` only for read-only diagnostics. Keep routing, reference
+loading, controller calls, and route work silent unless a real blocker or
+permission issue prevents completion.

@@ -1,21 +1,15 @@
 # Route: data_audit
 
 Use this route to audit whether the project has well-defined, valid data inputs
-for causal framing, analysis planning, or execution. This worker remains silent
-and submits internal findings for `team_lead` to synthesize.
+for causal framing, analysis planning, or execution.
 
-## Plan Entry
+## Assignment And Ownership
 
-Read the validated state before route work. Proceed only at `worker_pending`
-when the committed plan's worker route is exactly `data_audit`.
-
-Use `state_meta.active_operation.intent_summary`, live state, inspectable files,
-and any consistent detail still available from the operation-opening message as
-the assignment. On resume, a new message does not change it. Submit one
-`statectl apply` JSON payload with `actor: data_audit`, `updates` containing only
-`data_facts` and `council_chamber.data_audit`, and optional top-level
-`artifact`. The controller owns timestamps, artifact records, and transition to
-`lead_pending`; never edit the YAML, plan, or project summary directly.
+Use the worker `turn_context` and its persisted assignment; a newer message does
+not change resumed work. Inspect relevant files named by that assignment. Use
+the full-state fallback only for relevant detail omitted from the context.
+Submit one silent `apply` as `data_audit`, updating only `data_facts` and
+`council_chamber.data_audit`, with an artifact only when allowed below.
 
 ## Boundaries
 
@@ -90,9 +84,7 @@ leakage, missingness, support, or unavailable files prevent valid execution.
 
 ## Council Chamber Updates
 
-Submit chamber feedback only under `updates.council_chamber.data_audit`.
-
-Set:
+Submit only this route's chamber slot:
 
 - `current_status`: one short handoff disposition.
 - `summary`: compact synthesis of data support, blockers, or usable facts.
@@ -101,8 +93,8 @@ Set:
 - `feedback_to_route`: 0-3 route-facing suggestions, such as useful domain,
   causal, discovery, or analysis follow-up.
 
-Keep chamber feedback short, decision-facing, grounded in `data_facts` or
-current uncertainty, and free of schema labels. Use it for data support,
+Keep it short, decision-facing, grounded in `data_facts` or current uncertainty,
+and free of schema labels. Use it for data support,
 blockers, reshaping needs, timing concerns, leakage risks, support limitations,
 or immediately useful member follow-up. Recommend another member, such as
 `domain_expert` or `causal_check`, only when the current state gives that member

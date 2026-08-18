@@ -1,22 +1,15 @@
 # Route: domain_expert
 
 Use this route to build durable domain knowledge and surface domain-driven
-feedback. This worker remains silent and submits internal findings for
-`team_lead` to synthesize.
+feedback.
 
-## Plan Entry
+## Assignment And Ownership
 
-Read the validated state before route work. Proceed only at `worker_pending`
-when the committed plan's worker route is exactly `domain_expert`.
-
-Use `state_meta.active_operation.intent_summary`, live state, provided domain
-materials, and any consistent detail still available from the operation-opening
-message as the assignment. On resume, a new message does not change it. Submit
-one `statectl apply` JSON payload with `actor: domain_expert` and `updates`
-containing only `domain_knowledge` and
-`council_chamber.domain_expert`. The controller owns timestamps and transition
-to `lead_pending`; never edit the YAML, plan, project summary, or artifact
-records directly.
+Use the worker `turn_context`, persisted assignment, and provided domain
+materials; a newer message does not change resumed work. Use the full-state
+fallback only for relevant detail omitted from the context. Submit one silent
+`apply` as `domain_expert`, updating only `domain_knowledge` and
+`council_chamber.domain_expert`.
 
 ## Domain Reasoning Scope
 
@@ -69,9 +62,7 @@ domain interpretation.
 
 ## Council Chamber Updates
 
-Submit chamber feedback only under `updates.council_chamber.domain_expert`.
-
-Set:
+Submit only this route's chamber slot:
 
 - `current_status`: one short handoff disposition.
 - `summary`: compact synthesis of domain meaning, practice, or uncertainty.
@@ -80,8 +71,8 @@ Set:
 - `feedback_to_route`: 0-3 route-facing suggestions, such as useful data,
   causal, discovery, or analysis follow-up.
 
-Keep chamber feedback short, decision-facing, grounded in `domain_knowledge` or
-current uncertainty, and free of schema labels. Use it for construct meaning,
+Keep it short, decision-facing, grounded in `domain_knowledge` or current
+uncertainty, and free of schema labels. Use it for construct meaning,
 measurement, common practice, domain gaps, interpretation boundaries, or
 immediately useful member follow-up. Recommend another member, such as
 `data_audit` or `causal_check`, only when the current state gives that member

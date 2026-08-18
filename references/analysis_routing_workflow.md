@@ -17,8 +17,8 @@ Do not put scope status, mode, task text, or approval state in
 
 ## Existing Analysis Feedback
 
-Read `council_chamber.analysis_execution` as a mapping of design ids to current
-analysis handoffs. For each relevant design slot, review `scope_id`,
+Read `turn_context.state.analysis_execution` as a mapping of design ids to
+current analysis handoffs. For each relevant design slot, review `scope_id`,
 `scope_revision`, `current_status`, `support`, `execution_contract`, `summary`,
 `questions_for_user`, and `feedback_to_route`. For a ready structured scope,
 `execution_contract` is the authoritative minimum work definition.
@@ -61,9 +61,12 @@ Decision rules:
 
 Call `statectl begin` for `analysis_execution.<design_id>` only when:
 
-- `data_facts.data_checked`, `domain_knowledge.domain_checked`, and
-  `causal_facts.causal_checked` are each `passing` or `limited`, and
-  `causal_facts.analysis_readiness` is `ready` or `limited`;
+- `turn_context.state.core_status.data_audit.data_checked`,
+  `turn_context.state.core_status.domain_expert.domain_checked`, and
+  `turn_context.state.core_status.causal_check.facts.causal_checked` are each
+  `passing` or `limited`, and
+  `turn_context.state.core_status.causal_check.facts.analysis_readiness` is
+  `ready` or `limited`;
 - the current design recommendation matches `<design_id>`; and
 - any non-null selected support matches the current support recommendation.
 

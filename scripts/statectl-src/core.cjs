@@ -456,6 +456,32 @@ function operationPacket(state, operation, planInfo) {
   };
 }
 
+function packetContent(packet) {
+  if (packet === null) return null;
+  const {
+    stage: _stage,
+    action: _action,
+    ...content
+  } = packet;
+  return content;
+}
+
+function operationPacketResult(previousPacket, currentPacket) {
+  if (currentPacket === null || !deepEqual(packetContent(previousPacket), packetContent(currentPacket))) {
+    return { operation_packet: currentPacket };
+  }
+  return {
+    operation_packet_ref: {
+      operation_id: currentPacket.operation_id,
+      stage: currentPacket.stage,
+      action: currentPacket.action,
+      completion_protocol: currentPacket.completion_protocol,
+      contract_hash: currentPacket.contract_hash,
+      contract_unchanged: true,
+    },
+  };
+}
+
 function normalizeReceiptStringArray(value, label) {
   return normalizeContractArray(value, label, "INVALID_ARTIFACT_RECEIPT");
 }
@@ -1522,6 +1548,14 @@ function migrateV4State(v4) {
   return migrated;
 }
 
+function availableRegularFile(filePath) {
+  try {
+    return fs.lstatSync(filePath).isFile();
+  } catch (_error) {
+    return false;
+  }
+}
+
 function artifactWarnings(projectRoot, state) {
   const warnings = [];
   state.artifact_records.forEach((record) => {
@@ -1579,7 +1613,7 @@ function artifactWarnings(projectRoot, state) {
       });
       return;
     }
-    if (!fs.lstatSync(manifestPath).isFile()) {
+    if (!availableRegularFile(manifestPath)) {
       warnings.push({
         code: "INVALID_HISTORICAL_ARTIFACT_MANIFEST",
         artifact_id: record.artifact_id,
@@ -1750,7 +1784,7 @@ function artifactWarnings(projectRoot, state) {
         includesPrimary = true;
         includesDeliverable = true;
       }
-      if (!fs.existsSync(listedPath) || !fs.lstatSync(listedPath).isFile()) {
+      if (!fs.existsSync(listedPath) || !availableRegularFile(listedPath)) {
         warnings.push({
           code: "MISSING_HISTORICAL_ARTIFACT_FILE",
           artifact_id: record.artifact_id,
@@ -1816,9 +1850,10 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
       : {
         kind: "reset",
         archive_path: normalizePath(path.relative(root, archivePath)),
-      };
+    };
     const state = instantiateTemplate(template, startupNotice);
     atomicWrite(statePath, stringifyYaml(state));
+    const context = contextForCurrentStage(state, validatePlan(state.next_step_plan), []);
     return {
       ok: true,
       code: exists ? "RESET" : "CREATED_FRESH",
@@ -1829,6 +1864,7 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
       mode: "idle",
       operation_packet: null,
       warnings: [],
+      ...context,
     };
   }
 
@@ -1838,6 +1874,7 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
       archive_path: null,
     });
     atomicWrite(statePath, stringifyYaml(state));
+    const context = contextForCurrentStage(state, validatePlan(state.next_step_plan), []);
     return {
       ok: true,
       code: "CREATED",
@@ -1847,6 +1884,7 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
       mode: "idle",
       operation_packet: null,
       warnings: [],
+      ...context,
     };
   }
 
@@ -1858,6 +1896,7 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
     const serialized = stringifyYaml(migrated);
     const archivePath = archiveBytes(root, original, discardLegacyPlan ? "migration-v45-discarded-plan" : "migration-v45");
     atomicWrite(statePath, serialized);
+    const context = contextForCurrentStage(migrated, validatePlan(migrated.next_step_plan), warnings);
     return {
       ok: true,
       code: discardLegacyPlan ? "MIGRATED_LEGACY_PLAN_DISCARDED" : "MIGRATED",
@@ -1868,6 +1907,7 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
       mode: "idle",
       operation_packet: null,
       warnings,
+      ...context,
     };
   }
 
@@ -1896,6 +1936,7 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
     const serialized = stringifyYaml(migrated);
     const archivePath = archiveBytes(root, original, `migration-v${sourceVersion}-v${SCHEMA_VERSION}`);
     atomicWrite(statePath, serialized);
+    const context = contextForCurrentStage(migrated, planInfo, warnings, artifactStatus);
     return {
       ok: true,
       code: `MIGRATED_V${sourceVersion}`,
@@ -1910,6 +1951,7 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
       operation_packet: packet,
       artifact_status: artifactStatus,
       warnings,
+      ...context,
     };
   }
 
@@ -1926,6 +1968,11 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
     mode = operation.stage === "worker_pending" ? "resume_worker" : "resume_lead";
     code = operation.stage === "worker_pending" ? "RESUME_WORKER" : "RESUME_LEAD";
   }
+  const artifactStatus = operation && operation.artifact_intent
+    ? inspectReservedArtifact(root, operation, planInfo.actor, packet)
+    : null;
+  const warnings = artifactWarnings(root, parsed);
+  const context = contextForCurrentStage(parsed, planInfo, warnings, artifactStatus);
   return {
     ok: true,
     code,
@@ -1937,10 +1984,9 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
     plan_actor: planInfo.actor,
     active_operation: operation,
     operation_packet: packet,
-    artifact_status: operation && operation.artifact_intent
-      ? inspectReservedArtifact(root, operation, planInfo.actor, packet)
-      : null,
-    warnings: artifactWarnings(root, parsed),
+    artifact_status: artifactStatus,
+    warnings,
+    ...context,
   };
 }
 
@@ -2214,7 +2260,13 @@ function beginOperation({ projectRoot, payload }) {
   state.state_meta.active_operation = operation;
   state.pending_decision = null;
   state.response_receipt = null;
+  const warnings = artifactWarnings(projectRoot, state);
   const revision = commitMutation(statePath, state);
+  const audience = stage === "worker_pending" ? "worker" : "team_lead";
+  const context = {
+    turn_context: turnContext(state, planInfo, audience, warnings),
+    required_references: requiredReferences(state, planInfo, audience),
+  };
   return {
     ok: true,
     code: stage === "lead_pending" ? "BEGAN_LEAD" : "BEGAN_WORKER",
@@ -2224,6 +2276,7 @@ function beginOperation({ projectRoot, payload }) {
     stage,
     plan,
     operation_packet: operationPacket(state, operation, planInfo),
+    ...context,
   };
 }
 
@@ -2327,6 +2380,7 @@ function reserveArtifact({ projectRoot, payload }) {
   const operation = assertOperation(state, payload, "worker_pending");
   const planInfo = validatePlan(state.next_step_plan);
   const actor = planInfo.actor;
+  const previousPacket = operationPacket(state, operation, planInfo);
   if (!(ARTIFACT_ACTORS.has(actor) || actor.startsWith("analysis_execution."))) {
     fail("OWNERSHIP_VIOLATION", `${actor} cannot create durable artifacts`);
   }
@@ -2367,6 +2421,7 @@ function reserveArtifact({ projectRoot, payload }) {
   }
   operation.artifact_intent = artifactIntent;
   const revision = commitMutation(statePath, state);
+  const currentPacket = operationPacket(state, operation, planInfo);
   return {
     ok: true,
     code: "ARTIFACT_RESERVED",
@@ -2376,7 +2431,7 @@ function reserveArtifact({ projectRoot, payload }) {
     artifact_intent: operation.artifact_intent,
     scope_ref: operation.scope_ref,
     discovery_scope: operation.discovery_scope,
-    operation_packet: operationPacket(state, operation, planInfo),
+    ...operationPacketResult(previousPacket, currentPacket),
     temporary_path: temporaryArtifactLocation(operation.artifact_intent, operation.id),
     manifest_path: normalizePath(path.relative(path.resolve(projectRoot), manifest)),
   };
@@ -3228,6 +3283,7 @@ function applyWorker({ projectRoot, payload }) {
   const operation = assertOperation(state, payload, "worker_pending");
   const planInfo = validatePlan(state.next_step_plan);
   if (payload.actor !== planInfo.actor) fail("PLAN_MISMATCH", `apply actor must be ${planInfo.actor}`);
+  const previousPacket = operationPacket(state, operation, planInfo);
   validateOwnedUpdates(payload.actor, payload.updates);
   const updates = clone(payload.updates);
   const hasArtifact = payload.artifact !== undefined && payload.artifact !== null;
@@ -3346,7 +3402,15 @@ function applyWorker({ projectRoot, payload }) {
   if (deriveSummaryAggregates(merged)) merged.project_summary.last_updated = nowIso();
   merged.state_meta.active_operation.stage = "lead_pending";
   const leadPacket = operationPacket(merged, merged.state_meta.active_operation, planInfo);
+  const artifactStatus = mergedOperation.artifact_intent
+    ? inspectReservedArtifact(projectRoot, mergedOperation, payload.actor, leadPacket)
+    : null;
+  const warnings = artifactWarnings(projectRoot, merged);
   const revision = commitMutation(statePath, merged);
+  const context = {
+    turn_context: turnContext(merged, planInfo, "team_lead", warnings, artifactStatus),
+    required_references: requiredReferences(merged, planInfo, "team_lead"),
+  };
   return {
     ok: true,
     code: "WORKER_APPLIED",
@@ -3355,7 +3419,8 @@ function applyWorker({ projectRoot, payload }) {
     operation_id: operation.id,
     stage: "lead_pending",
     artifact_record: artifactRecord,
-    operation_packet: leadPacket,
+    ...operationPacketResult(previousPacket, leadPacket),
+    ...context,
   };
 }
 
@@ -3622,6 +3687,189 @@ function scopeSnapshot(state) {
   return { analysis, report, discovery };
 }
 
+function responseHeadingBody(markdown, heading) {
+  const start = markdown.indexOf(heading);
+  if (start === -1) return null;
+  const bodyStart = start + heading.length;
+  let bodyEnd = markdown.length;
+  for (const candidate of RESPONSE_HEADINGS) {
+    if (candidate === heading) continue;
+    const index = markdown.indexOf(`\n\n${candidate}`, bodyStart);
+    if (index !== -1 && index < bodyEnd) bodyEnd = index;
+  }
+  let body = markdown.slice(bodyStart, bodyEnd);
+  if (body.startsWith("\n")) body = body.slice(1);
+  body = body.trimEnd();
+  return body || null;
+}
+
+function previousResponseCue(receipt) {
+  if (receipt === null) return null;
+  return {
+    operation_id: receipt.operation_id,
+    revision: receipt.revision,
+    consultant_options: responseHeadingBody(receipt.response_markdown, "[+ Consultant Options]"),
+    boundary: responseHeadingBody(receipt.response_markdown, "[! Boundary]"),
+    next_steps: responseHeadingBody(receipt.response_markdown, "[? Next Steps]"),
+  };
+}
+
+function routerStateProjection(state) {
+  return {
+    project_summary: clone(state.project_summary),
+    core_status: {
+      data_audit: {
+        last_updated: state.data_facts.last_updated,
+        data_checked: state.data_facts.data_checked,
+        handoff: clone(state.council_chamber.data_audit),
+      },
+      domain_expert: {
+        last_updated: state.domain_knowledge.last_updated,
+        domain_checked: state.domain_knowledge.domain_checked,
+        handoff: clone(state.council_chamber.domain_expert),
+      },
+      causal_check: {
+        facts: clone(state.causal_facts),
+        handoff: clone(state.council_chamber.causal_check),
+      },
+      causal_discovery: {
+        sidecar: clone(state.discovery_sidecar),
+        handoff: clone(state.council_chamber.causal_discovery),
+      },
+    },
+    analysis_execution: clone(state.council_chamber.analysis_execution),
+    report: {
+      assembly: clone(state.report_assembly),
+      handoff: clone(state.council_chamber.report_writer),
+    },
+    pending_decision: clone(state.pending_decision),
+    artifact_records: clone(state.artifact_records),
+  };
+}
+
+function workerCouncilProjection(state, planInfo) {
+  const council = {
+    data_audit: clone(state.council_chamber.data_audit),
+    domain_expert: clone(state.council_chamber.domain_expert),
+    causal_check: clone(state.council_chamber.causal_check),
+    causal_discovery: clone(state.council_chamber.causal_discovery),
+    analysis_execution: {},
+    report_writer: clone(state.council_chamber.report_writer),
+  };
+  if (planInfo.actor === "report_writer" || ["causal_check", "causal_discovery"].includes(planInfo.actor)) {
+    council.analysis_execution = clone(state.council_chamber.analysis_execution);
+  } else if (planInfo.design !== null) {
+    const slot = state.council_chamber.analysis_execution[planInfo.design];
+    if (slot !== undefined) council.analysis_execution[planInfo.design] = clone(slot);
+  }
+  return council;
+}
+
+function workerStateProjection(state, planInfo) {
+  const projected = {
+    project_summary: clone(state.project_summary),
+    council_chamber: workerCouncilProjection(state, planInfo),
+    data_facts: clone(state.data_facts),
+    domain_knowledge: clone(state.domain_knowledge),
+    causal_facts: clone(state.causal_facts),
+    discovery_sidecar: clone(state.discovery_sidecar),
+    artifact_records: clone(state.artifact_records),
+  };
+  if (planInfo.actor === "report_writer") {
+    projected.report_assembly = clone(state.report_assembly);
+  }
+  return projected;
+}
+
+function leadStateProjection(state, planInfo) {
+  if (planInfo.actor !== "team_lead") return workerStateProjection(state, planInfo);
+  return {
+    project_summary: clone(state.project_summary),
+    council_chamber: clone(state.council_chamber),
+    data_facts: clone(state.data_facts),
+    domain_knowledge: clone(state.domain_knowledge),
+    causal_facts: clone(state.causal_facts),
+    discovery_sidecar: clone(state.discovery_sidecar),
+    report_assembly: clone(state.report_assembly),
+    artifact_records: clone(state.artifact_records),
+  };
+}
+
+function turnContext(state, planInfo, audience, warnings, artifactStatus = null) {
+  const operation = state.state_meta.active_operation;
+  const projected = audience === "router"
+    ? routerStateProjection(state)
+    : audience === "worker"
+      ? workerStateProjection(state, planInfo)
+      : leadStateProjection(state, planInfo);
+  return {
+    version: 1,
+    audience,
+    actor: audience === "router" ? null : planInfo.actor,
+    project_id: state.state_meta.project_id,
+    revision: state.state_meta.revision,
+    stage: operation === null ? "idle" : operation.stage,
+    startup_notice: clone(state.state_meta.startup_notice),
+    operation: clone(operation),
+    scope_snapshot: scopeSnapshot(state),
+    state: projected,
+    previous_response_cue: audience === "router" ? previousResponseCue(state.response_receipt) : null,
+    artifact_status: clone(artifactStatus),
+    artifact_warnings: clone(warnings),
+  };
+}
+
+function requiredReferences(state, planInfo, audience) {
+  if (audience === "router") return ["references/route_selection_workflow.md"];
+  if (audience === "team_lead") {
+    const references = ["references/team_lead.md"];
+    if (planInfo.design !== null) references.push("references/team_lead_analysis_flow.md");
+    if (planInfo.actor === "report_writer") references.push("references/team_lead_report_flow.md");
+    return references;
+  }
+
+  const references = [];
+  if (planInfo.design !== null) {
+    references.push(
+      "references/design_execution_contract.md",
+      `references/design/${planInfo.design}.md`,
+    );
+    if (planInfo.support !== null) references.push(`references/support/${planInfo.support}.md`);
+  } else {
+    references.push(`references/${planInfo.actor}.md`);
+  }
+  const operation = state.state_meta.active_operation;
+  if (
+    operation !== null
+    && (
+      operation.artifact_intent !== null
+      || (
+        operation.scope_ref !== null
+        && (
+          planInfo.design !== null
+          || ["report_writer", "causal_discovery"].includes(planInfo.actor)
+        )
+      )
+    )
+  ) {
+    references.push("references/artifact_output_policy.md");
+  }
+  return [...new Set(references)];
+}
+
+function contextForCurrentStage(state, planInfo, warnings, artifactStatus = null) {
+  const operation = state.state_meta.active_operation;
+  const audience = operation === null
+    ? "router"
+    : operation.stage === "worker_pending"
+      ? "worker"
+      : "team_lead";
+  return {
+    turn_context: turnContext(state, planInfo, audience, warnings, artifactStatus),
+    required_references: requiredReferences(state, planInfo, audience),
+  };
+}
+
 function validateProject({ projectRoot }) {
   const root = path.resolve(projectRoot);
   const statePath = statePathFor(root);
@@ -3663,6 +3911,9 @@ function validateTemplate({ skillRoot }) {
       analysis_contract: 1,
       completion_protocol: 1,
       artifact_roles: 1,
+      turn_context: 1,
+      required_references: 1,
+      operation_packet_ref: 1,
     },
   };
 }
