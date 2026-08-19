@@ -8,7 +8,10 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const test = require("node:test");
 const YAML = require("yaml");
-const { beginOperation: beginSourceOperation } = require("../scripts/statectl-src/core.cjs");
+const {
+  applyWorker: applySourceWorker,
+  beginOperation: beginSourceOperation,
+} = require("../scripts/statectl-src/core.cjs");
 
 const SKILL_ROOT = path.resolve(__dirname, "..");
 const BUNDLED_CLI = path.join(SKILL_ROOT, "scripts", "statectl.cjs");
@@ -587,6 +590,100 @@ test("begin treats a historical manifest lstat race as an availability warning",
   assert.equal(state.state_meta.active_operation.id, reopened.operation_id);
   assert.equal(state.state_meta.active_operation.stage, "lead_pending");
   expectSuccess(finish(projectRoot, reopened, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
+test("active artifact inspection classifies filesystem races without mutating state", async (t) => {
+  function preparedArtifact(projectRoot) {
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const started = expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+    const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+      payload: {
+        ...expected(started),
+        operation_id: started.operation_id,
+        kind: "file",
+        slug: "active-race",
+        extension: "txt",
+      },
+    }), "ARTIFACT_RESERVED");
+    const target = path.join(projectRoot, ...reserved.artifact_intent.location.split("/"));
+    const manifestPath = path.join(projectRoot, ...reserved.manifest_path.split("/"));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, "validated audit output\n", "utf8");
+    const summary = "Validated audit output.";
+    fs.writeFileSync(manifestPath, `${JSON.stringify({
+      schema_version: 1,
+      operation_id: started.operation_id,
+      route: "data_audit",
+      scope_ref: null,
+      files: [reserved.artifact_intent.location],
+      completed_at: new Date().toISOString(),
+      summary,
+    }, null, 2)}\n`, "utf8");
+    return {
+      payload: {
+        ...expected(reserved),
+        operation_id: started.operation_id,
+        actor: "data_audit",
+        updates: {
+          data_facts: {
+            data_checked: "passing",
+            audit_scope: "Active artifact race classification.",
+          },
+          council_chamber: {
+            data_audit: {
+              current_status: "complete",
+              summary: "Audit completed.",
+              questions_for_user: [],
+              feedback_to_route: [],
+            },
+          },
+        },
+        artifact: { summary },
+      },
+      target,
+      manifestPath,
+    };
+  }
+
+  const scenarios = [
+    { name: "output disappears", selectedPath: "target", fsCode: "ENOENT", expectedCode: "MISSING_ARTIFACT" },
+    { name: "manifest disappears", selectedPath: "manifestPath", fsCode: "ENOENT", expectedCode: "MISSING_ARTIFACT" },
+    { name: "output cannot be inspected", selectedPath: "target", fsCode: "EACCES", expectedCode: "IO_ERROR" },
+    { name: "manifest cannot be inspected", selectedPath: "manifestPath", fsCode: "EACCES", expectedCode: "IO_ERROR" },
+  ];
+
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, () => {
+      const projectRoot = temporaryProject(t);
+      const prepared = preparedArtifact(projectRoot);
+      const before = fs.readFileSync(statePath(projectRoot));
+      const racePath = path.resolve(prepared[scenario.selectedPath]);
+      const originalLstat = fs.lstatSync;
+      let matchingInspections = 0;
+      fs.lstatSync = function lstatWithActiveArtifactRace(filePath, ...args) {
+        if (path.resolve(filePath) === racePath && ++matchingInspections === 2) {
+          if (scenario.fsCode === "ENOENT") fs.unlinkSync(racePath);
+          const error = new Error(`forced ${scenario.fsCode} active artifact race`);
+          error.code = scenario.fsCode;
+          throw error;
+        }
+        return originalLstat.call(fs, filePath, ...args);
+      };
+      try {
+        assert.throws(
+          () => applySourceWorker({ projectRoot, payload: prepared.payload }),
+          (error) => error && error.code === scenario.expectedCode,
+        );
+      } finally {
+        fs.lstatSync = originalLstat;
+      }
+      assert.equal(matchingInspections, 2);
+      assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+      const state = readState(projectRoot);
+      assert.equal(state.state_meta.revision, prepared.payload.expected_revision);
+      assert.equal(state.state_meta.active_operation.stage, "worker_pending");
+    });
+  }
 });
 
 test("idle open returns exact routing context and a compact previous-response cue", (t) => {
@@ -3950,6 +4047,10 @@ test("bundled stop hook validates strictly without external YAML modules", async
     const result = runHook(projectRoot);
     assert.equal(result.decision, "block");
     assert.match(result.reason, /still active/);
+    assert.equal(
+      result.systemMessage,
+      "project_state.yaml contains an unfinished causal-consultant operation.",
+    );
   });
 
   await t.test("strict validation errors warn without blocking preflight recovery", () => {
@@ -5041,6 +5142,55 @@ test("finish rejects malformed presentations and illegal option assignments with
       assert.equal(state.state_meta.active_operation.id, started.operation_id);
       assert.equal(state.state_meta.active_operation.stage, "lead_pending");
       assert.equal(state.pending_decision, null);
+    });
+  }
+});
+
+test("finish allows detailed framing while keeping compact response fields bounded", async (t) => {
+  await t.test("detailed framing is accepted", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const started = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    const framing = "f".repeat(4000);
+    const closed = expectSuccess(finish(projectRoot, started, {}, {
+      presentation: { ...DEFAULT_PRESENTATION, framing },
+    }), "OPERATION_FINISHED");
+    assert.match(closed.response_markdown, new RegExp(`\\[> Framing\\]\\n${framing}`));
+  });
+
+  const cases = [
+    {
+      name: "excessive framing",
+      presentation: { ...DEFAULT_PRESENTATION, framing: "f".repeat(6001) },
+      expectedLimit: 6000,
+    },
+    {
+      name: "excessive next steps",
+      presentation: { ...DEFAULT_PRESENTATION, next_steps: "n".repeat(1001) },
+      expectedLimit: 1000,
+    },
+    {
+      name: "excessive option text",
+      presentation: optionsPresentation([
+        { ...decisionOption("Audit the data", "data_audit"), consultant_read: "a".repeat(1001) },
+        decisionOption("Review the domain", "domain_expert"),
+      ]),
+      expectedLimit: 1000,
+    },
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, () => {
+      const projectRoot = temporaryProject(t);
+      const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+      const started = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+      const before = fs.readFileSync(statePath(projectRoot));
+      const failure = expectFailure(
+        finish(projectRoot, started, {}, { presentation: scenario.presentation }),
+        "INVALID_INPUT",
+      );
+      assert.match(failure.message, new RegExp(`at most ${scenario.expectedLimit} characters`));
+      assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
     });
   }
 });

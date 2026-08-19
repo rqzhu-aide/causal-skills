@@ -19,10 +19,8 @@ Use exactly one reserved artifact per output-producing operation:
 3. Use the returned full `operation_packet`, or reuse the prior packet's
    immutable contract when `operation_packet_ref.contract_unchanged` is `true`
    and its operation ID, protocol, and hash match. Take current stage and action
-   from the reference or `turn_context`. If the prior full packet is
-   unavailable, run `open` to recover it. When
-   `completion_protocol` is `1`, its requirements are the minimum work for a
-   completion handoff. Validate each
+   from the reference or `turn_context`. When `completion_protocol` is `1`, its
+   requirements are the minimum work for a completion handoff. Validate each
    requirement against the actual code, settings, diagnostics, and output.
    Supplemental work is allowed when it stays within the route's authority and
    claim boundary; list it under `supplemental_work` rather than treating it as

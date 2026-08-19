@@ -14,6 +14,7 @@ const STATE_FILE = "project_state.yaml";
 const ARCHIVE_DIR = "project_state.archives";
 const MAX_INTENT_LENGTH = 1000;
 const MAX_RESPONSE_TEXT_LENGTH = 1000;
+const MAX_RESPONSE_FRAMING_LENGTH = 6000;
 const MAX_ARTIFACT_SLUG_LENGTH = 80;
 const DISCOVERY_CONTRACT_KEYS = new Set([
   "target",
@@ -594,13 +595,18 @@ function assertExactTopLevel(state, expected = REQUIRED_TOP_LEVEL) {
   if (extra.length) fail("INVALID_STATE", `unsupported top-level sections: ${extra.join(", ")}`);
 }
 
-function normalizeResponseText(value, label, singleLine = false) {
+function normalizeResponseText(
+  value,
+  label,
+  singleLine = false,
+  maxLength = MAX_RESPONSE_TEXT_LENGTH,
+) {
   if (typeof value !== "string" || !value.trim()) {
     fail("INVALID_INPUT", `${label} must be a nonempty string`);
   }
   const normalized = value.replace(/\r\n?/g, "\n").trim();
-  if (normalized.length > MAX_RESPONSE_TEXT_LENGTH) {
-    fail("INVALID_INPUT", `${label} must contain at most ${MAX_RESPONSE_TEXT_LENGTH} characters`);
+  if (normalized.length > maxLength) {
+    fail("INVALID_INPUT", `${label} must contain at most ${maxLength} characters`);
   }
   if (singleLine && normalized.includes("\n")) {
     fail("INVALID_INPUT", `${label} must be a single line`);
@@ -2454,20 +2460,55 @@ function expectedArtifactRoute(actor) {
   return actor.startsWith("analysis_execution.") ? "analysis_execution" : actor;
 }
 
+function isMissingArtifactFsError(error) {
+  return error && ["ENOENT", "ENOTDIR"].includes(error.code);
+}
+
+function failArtifactFsError(error, missingMessage, ioMessage) {
+  if (isMissingArtifactFsError(error)) {
+    fail("MISSING_ARTIFACT", `${missingMessage}: ${error.message}`);
+  }
+  fail("IO_ERROR", `${ioMessage}: ${error.message}`);
+}
+
+function lstatRequiredArtifact(filePath, missingMessage, ioMessage) {
+  try {
+    return fs.lstatSync(filePath);
+  } catch (error) {
+    failArtifactFsError(error, missingMessage, ioMessage);
+  }
+}
+
+function readRequiredArtifactText(filePath, missingMessage, ioMessage) {
+  try {
+    return fs.readFileSync(filePath, "utf8");
+  } catch (error) {
+    failArtifactFsError(error, missingMessage, ioMessage);
+  }
+}
+
 function validateManifest(projectRoot, operation, actor, packet, expectedArtifact = null) {
   const intent = operation.artifact_intent;
   if (!intent) fail("MISSING_ARTIFACT", "no artifact is reserved for this operation");
   const target = resolveOutputPath(projectRoot, intent.location);
-  if (!fs.existsSync(target)) fail("MISSING_ARTIFACT", `reserved artifact does not exist: ${intent.location}`);
   validateArtifactBody(projectRoot, operation, target);
   const manifestPath = manifestPathFor(target, intent.kind);
-  if (!fs.existsSync(manifestPath)) fail("MISSING_ARTIFACT", `completion manifest does not exist: ${manifestPath}`);
-  if (!fs.lstatSync(manifestPath).isFile()) {
+  const manifestStat = lstatRequiredArtifact(
+    manifestPath,
+    `completion manifest does not exist: ${manifestPath}`,
+    `could not inspect completion manifest ${manifestPath}`,
+  );
+  if (!manifestStat.isFile()) {
     fail("INVALID_ARTIFACT_MANIFEST", "completion manifest must be a regular file");
   }
+  const manifestText = readRequiredArtifactText(
+    manifestPath,
+    `completion manifest does not exist: ${manifestPath}`,
+    `could not read completion manifest ${manifestPath}`,
+  );
   let manifest;
   try {
-    manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    manifest = JSON.parse(manifestText);
   } catch (error) {
     fail("INVALID_ARTIFACT_MANIFEST", `completion manifest is invalid JSON: ${error.message}`);
   }
@@ -2546,7 +2587,12 @@ function validateManifest(projectRoot, operation, actor, packet, expectedArtifac
   for (const item of manifest.files) {
     const normalized = normalizePath(item);
     const resolved = resolveOutputPath(projectRoot, normalized);
-    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+    const fileStat = lstatRequiredArtifact(
+      resolved,
+      `manifest file does not exist: ${normalized}`,
+      `could not inspect manifest file ${normalized}`,
+    );
+    if (!fileStat.isFile()) {
       fail("MISSING_ARTIFACT", `manifest file does not exist: ${normalized}`);
     }
     if (intent.kind === "directory") {
@@ -2584,12 +2630,11 @@ function validateManifest(projectRoot, operation, actor, packet, expectedArtifac
 
 function validateArtifactBody(projectRoot, operation, artifactPath, temporary = false) {
   const intent = operation.artifact_intent;
-  let stat;
-  try {
-    stat = fs.lstatSync(artifactPath);
-  } catch (error) {
-    fail("MISSING_ARTIFACT", `reserved artifact cannot be inspected: ${error.message}`);
-  }
+  const stat = lstatRequiredArtifact(
+    artifactPath,
+    "reserved artifact does not exist",
+    "could not inspect reserved artifact",
+  );
   if (intent.kind === "file") {
     if (!stat.isFile() || stat.size === 0) {
       fail("MISSING_ARTIFACT", "reserved file artifact is empty or not a regular file");
@@ -2604,7 +2649,11 @@ function validateArtifactBody(projectRoot, operation, artifactPath, temporary = 
     try {
       entries = fs.readdirSync(directory, { withFileTypes: true });
     } catch (error) {
-      fail("IO_ERROR", `could not inspect reserved directory artifact: ${error.message}`);
+      failArtifactFsError(
+        error,
+        "reserved directory artifact does not exist",
+        "could not inspect reserved directory artifact",
+      );
     }
     for (const entry of entries) {
       const relative = relativeDirectory ? path.join(relativeDirectory, entry.name) : entry.name;
@@ -2705,6 +2754,9 @@ function publishReservedArtifact(projectRoot, operation, actor, artifact, packet
     try {
       fs.renameSync(temporary, target);
     } catch (error) {
+      if (isMissingArtifactFsError(error)) {
+        fail("MISSING_ARTIFACT", `reserved temporary artifact does not exist: ${temporaryLocation}`);
+      }
       fail("IO_ERROR", `could not publish reserved artifact: ${error.message}`);
     }
     atomicWrite(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -2720,7 +2772,7 @@ function artifactEntryExists(filePath) {
     fs.lstatSync(filePath);
     return true;
   } catch (error) {
-    if (["ENOENT", "ENOTDIR"].includes(error.code)) return false;
+    if (isMissingArtifactFsError(error)) return false;
     fail("IO_ERROR", `could not inspect reserved artifact path: ${error.message}`);
   }
 }
@@ -3307,6 +3359,11 @@ function applyWorker({ projectRoot, payload }) {
     const frozenStatus = inspectReservedArtifact(projectRoot, operation, payload.actor, workerPacket);
     if (frozenStatus.location_state === "complete") {
       validateManifest(projectRoot, operation, payload.actor, workerPacket, artifact);
+    } else if (
+      frozenStatus.location_state === "invalid"
+      && frozenStatus.reason_code === "MISSING_ARTIFACT"
+    ) {
+      fail("MISSING_ARTIFACT", "the reserved artifact disappeared during validation");
     }
   }
 
@@ -3491,7 +3548,12 @@ function normalizePresentation(state, presentation) {
       true,
     );
   }
-  const framing = normalizeResponseText(presentation.framing, "finish presentation.framing");
+  const framing = normalizeResponseText(
+    presentation.framing,
+    "finish presentation.framing",
+    false,
+    MAX_RESPONSE_FRAMING_LENGTH,
+  );
   const boundary = normalizeResponseText(presentation.boundary, "finish presentation.boundary");
   const suppliedNextSteps = normalizeResponseText(
     presentation.next_steps,

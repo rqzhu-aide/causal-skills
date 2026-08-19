@@ -24,9 +24,11 @@ work, and summarize completed artifacts.
 
 Successful stage-entry results from `open`, `begin`, and `apply` provide
 validated `turn_context` and `required_references`. Use the context as the
-normal state view. Read
-`state_path` only when relevant detail or an exact finish-recovery receipt is
-genuinely omitted; this is a read-only fallback, not a routine step.
+normal state view. Read `<project-root>/project_state.yaml` only when relevant
+detail or an exact finish-recovery receipt is genuinely omitted; this is a
+read-only fallback, not a routine step. If an `operation_packet_ref` is
+returned but its matching full packet is unavailable, run `open` once to
+recover it.
 
 Here, **load** means ensure a reference is available in context. In a continuous
 session, reuse an unchanged reference already loaded. Load only missing or

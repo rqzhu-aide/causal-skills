@@ -52,7 +52,9 @@ smallest repair or clarification.
 Treat artifacts named in `artifact_warnings` as unavailable. Claim newly
 promised output only from an available, operation-matched `completion` artifact.
 For the current operation, use `turn_context.artifact_status` for its verified
-role and execution receipt.
+role and execution receipt. When the current operation created an available
+completion artifact, include its returned location once in the final response,
+as a link when supported.
 `infeasibility_evidence` shows why the exact scope needs revision; it is neither
 the promised output nor an ordinary tool failure. In lead-only work, discuss
 only unambiguously identified prior scopes or available historical artifacts
@@ -165,10 +167,11 @@ accepted.
 
 Give framing enough detail to answer the request and support the next decision;
 use a compact list or table when useful. State the real limitation or unchanged
-boundary concisely. With no options, `next_steps` asks one direct question or
-states one action and contains no choice list. With options, it asks for a
-choice without repeating them. If the user or approved scope requests one
-prioritized recommendation or evidence improvement, give one; if evidence
+boundary concisely. With no options, a proposed follow-on operation requires
+one direct yes/no question in `next_steps`; state an action instead only when no
+follow-on operation is proposed. Do not include a choice list. With options,
+ask for a choice without repeating them. If the user or approved scope requests
+one prioritized recommendation or evidence improvement, give one; if evidence
 cannot rank alternatives, say so in framing.
 
 Use ordinary consulting language. Synthesize rather than reproduce worker

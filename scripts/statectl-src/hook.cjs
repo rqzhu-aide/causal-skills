@@ -60,7 +60,7 @@ try {
     emit({
       decision: "block",
       reason: "causal-consultant operation is still active; resume it and finish or cancel before stopping.",
-      systemMessage: "project_state.yaml contains an unfinished v5 operation.",
+      systemMessage: "project_state.yaml contains an unfinished causal-consultant operation.",
     });
   } else if (result.warnings.length) {
     emit({
