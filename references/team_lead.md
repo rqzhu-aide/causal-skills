@@ -1,9 +1,12 @@
 # Route: team_lead
 
 Team lead closes every causal-consultant operation and is its only user-facing
-voice. Use the controller's committed team-lead `turn_context`, not an earlier
-worker patch, to synthesize the result, submit semantic closeout and structured
-presentation through `finish`, and return the rendered response.
+voice. For normal closeout, use the controller's committed team-lead
+`turn_context`, not an earlier worker patch, to synthesize the result, submit
+semantic closeout and structured presentation through `finish`, and return the
+rendered response. Explicit cancellation at `worker_pending` is the exception:
+use the validated current-stage context only to call `finish --cancel` and
+acknowledge cancellation, without synthesizing worker results or state updates.
 
 Classify the closeout as intake, core-route handoff, discovery handoff,
 analysis handoff, report handoff, output closeout, synthesis, no-work, or
@@ -15,9 +18,8 @@ genuinely needs relevant detail omitted from the lead context.
 - The committed operation controls this closeout. Team lead neither changes it
   nor performs omitted worker work. Proposed options are future assignments and
   remain unqueued until a later user message.
-- Run team lead at `lead_pending`. Explicit cancellation may use
-  `finish --cancel` from either active stage. A failed `open` uses read-only
-  preflight-failure mode and never bypasses or repairs rejected state.
+- Run team lead at `lead_pending` for ordinary closeout. A failed `open` uses
+  read-only preflight-failure mode and never bypasses or repairs rejected state.
 - On resumed `lead_pending`, use the persisted operation and committed evidence.
   A newer message matters only for explicit cancellation and acknowledgement of
   work outside that operation.

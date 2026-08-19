@@ -2059,7 +2059,7 @@ function resolveScopeReference(state, route, scopeRef, support = null) {
     fail("SCOPE_MISMATCH", "the requested scope reference is not current");
   }
   if (status !== "ready") {
-    fail("SCOPE_MISMATCH", `scope status ${status} cannot be approved or revised`);
+    fail("SCOPE_MISMATCH", `scope status ${status} cannot be bound for execution`);
   }
 }
 

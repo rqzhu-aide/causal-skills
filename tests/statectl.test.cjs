@@ -2756,9 +2756,10 @@ test("analysis and report scope identities are controller-owned and exact refere
     }), "WORKER_APPLIED");
     const closed = expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
 
-    expectFailure(begin(projectRoot, closed, `analysis_execution.${prepared.design}`, {
+    const failure = expectFailure(begin(projectRoot, closed, `analysis_execution.${prepared.design}`, {
       scope_ref: prepared.scope_ref,
     }), "SCOPE_MISMATCH");
+    assert.match(failure.message, /cannot be bound for execution/);
   });
 
   await t.test("report scope", () => {
