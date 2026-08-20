@@ -1,7 +1,7 @@
 # Interactive Causal Consultant
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-6.0.1-blue.svg)]()
+[![Version](https://img.shields.io/badge/version-6.1.0-blue.svg)]()
 [![Status](https://img.shields.io/badge/status-active%20development-orange.svg)]()
 
 An interactive causal inference consultant skill for moving from a rough causal
@@ -46,28 +46,35 @@ The internal team is:
   response, mediation, transportability, non-continuous outcomes, and
   statistical validity.
 
-Version 6.0.1 keeps the deterministic schema-5 state protocol and exact
-controller-derived turn contexts for efficient routing, worker handoff, and
-lead closeout. It also clarifies cancellation at the worker boundary and scope
-binding failures. The controller returns exact stage-relevant state and
-reference paths, so normal work does not repeatedly reload the complete project
-record. Durable state and recovery boundaries remain unchanged: strict YAML
-validation, migration from recognized v4.5 and versioned schema-2/3/4 states,
-revision-checked owner-scoped updates, exact analysis, report, and discovery
-scope identities, controller work cards, coverage receipts, verified artifact
-manifests, and automatic recovery at worker/lead boundaries. It also enforces
-analysis-entry eligibility in `statectl begin`, aligns route and team-lead
-status semantics, and gives each user choice one legal next operation with
-durable numbered selection. Normal delivery emits the controller-rendered
-decision contract verbatim after closeout. Runtime use requires Node.js 18 or
-newer. The committed bundle needs no `npm install` or global packages.
+The runtime keeps the deterministic schema-5 state protocol and adds a
+provider-neutral phase-capsule transport. On hosts that support isolated model
+invocations, the controller writes one complete router, worker, or lead capsule
+to the ephemeral `.statectl-tmp/phase-context.json`; the orchestrator receives
+only a compact reference and starts the next phase without carrying prior model
+reasoning or tool transcripts. The next phase still receives the exact
+stage-relevant state, work packet, and references. Hosts without isolation use
+the same full capsule inline or retain the legacy context interface.
+Isolated phases must share the project root. This reduces replayed context; it
+does not require or guarantee fewer model calls.
+
+This changes only internal context delivery. The user-facing workflow and
+durable recovery boundaries remain unchanged: strict YAML validation, supported
+migration, revision-checked owner-scoped updates, exact analysis, report, and
+discovery scope identities, controller work packets, coverage receipts,
+verified artifact manifests, and worker/lead boundary recovery. Known output
+can be reserved atomically with `begin`, saving one controller round without
+combining scientific routing, worker judgment, or team-lead synthesis. Runtime
+use requires Node.js 18 or newer. The committed bundle needs no `npm install`
+or global packages.
 
 ```text
-User <-> causal-consultant router
-          -> statectl open -> router context
-          -> statectl begin -> worker context + selected route reference
-          -> statectl apply -> committed lead context
-          -> team_lead -> statectl finish -> recoverable rendered response
+User <-> host orchestrator
+          -> open --context-file -> fresh router phase
+          -> begin [optional reservation] --context-file -> fresh worker or team-lead phase
+          -> apply --context-file when a worker ran -> fresh team-lead phase
+          -> finish -> recoverable controller-rendered response
+
+project_state.yaml remains the sole durable state; phase-context.json is ephemeral.
 ```
 
 ## What It Helps With
@@ -132,25 +139,25 @@ of the personal skill runtime.
 Codex personal install:
 
 ```text
-Copy the folder from https://github.com/rqzhu-aide/causal-consultant/tree/v6.0.1 into `~/.codex/skills/causal-consultant`.
+Copy the folder from https://github.com/rqzhu-aide/causal-consultant/tree/v6.1.0 into `~/.codex/skills/causal-consultant`.
 ```
 
 Claude Code personal install:
 
 ```text
-Copy the folder from https://github.com/rqzhu-aide/causal-consultant/tree/v6.0.1 into `~/.claude/skills/causal-consultant`.
+Copy the folder from https://github.com/rqzhu-aide/causal-consultant/tree/v6.1.0 into `~/.claude/skills/causal-consultant`.
 ```
 
 Codex or other agent project-local install:
 
 ```text
-Copy the folder from https://github.com/rqzhu-aide/causal-consultant/tree/v6.0.1 into `.agents/skills/causal-consultant`.
+Copy the folder from https://github.com/rqzhu-aide/causal-consultant/tree/v6.1.0 into `.agents/skills/causal-consultant`.
 ```
 
 Alternative project-local install:
 
 ```text
-Copy the folder from https://github.com/rqzhu-aide/causal-consultant/tree/v6.0.1 into `.agent/skills/causal-consultant`.
+Copy the folder from https://github.com/rqzhu-aide/causal-consultant/tree/v6.1.0 into `.agent/skills/causal-consultant`.
 ```
 
 ### Optional Project Hooks
@@ -165,8 +172,8 @@ run:
 
 ```powershell
 New-Item -ItemType Directory -Force -Path ".codex" | Out-Null
-Invoke-WebRequest "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v6.0.1/project-hooks/.codex/hooks.json" -OutFile ".codex\hooks.json"
-Invoke-WebRequest "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v6.0.1/project-hooks/.codex/project_state_stop_check.js" -OutFile ".codex\project_state_stop_check.js"
+Invoke-WebRequest "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v6.1.0/project-hooks/.codex/hooks.json" -OutFile ".codex\hooks.json"
+Invoke-WebRequest "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v6.1.0/project-hooks/.codex/project_state_stop_check.js" -OutFile ".codex\project_state_stop_check.js"
 ```
 
 Codex project hook, macOS/Linux shell. Navigate to your project working
@@ -174,8 +181,8 @@ directory, then run:
 
 ```sh
 mkdir -p .codex
-curl -L "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v6.0.1/project-hooks/.codex/hooks.json" -o .codex/hooks.json
-curl -L "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v6.0.1/project-hooks/.codex/project_state_stop_check.js" -o .codex/project_state_stop_check.js
+curl -L "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v6.1.0/project-hooks/.codex/hooks.json" -o .codex/hooks.json
+curl -L "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v6.1.0/project-hooks/.codex/project_state_stop_check.js" -o .codex/project_state_stop_check.js
 ```
 
 Codex may require you to trust or approve the project hook in Codex settings
@@ -186,8 +193,8 @@ directory, then run:
 
 ```powershell
 New-Item -ItemType Directory -Force -Path ".claude" | Out-Null
-Invoke-WebRequest "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v6.0.1/project-hooks/.claude/settings.json" -OutFile ".claude\settings.json"
-Invoke-WebRequest "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v6.0.1/project-hooks/.claude/project_state_stop_check.js" -OutFile ".claude\project_state_stop_check.js"
+Invoke-WebRequest "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v6.1.0/project-hooks/.claude/settings.json" -OutFile ".claude\settings.json"
+Invoke-WebRequest "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v6.1.0/project-hooks/.claude/project_state_stop_check.js" -OutFile ".claude\project_state_stop_check.js"
 ```
 
 Claude Code project hook, macOS/Linux shell. Navigate to your project working
@@ -195,8 +202,8 @@ directory, then run:
 
 ```sh
 mkdir -p .claude
-curl -L "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v6.0.1/project-hooks/.claude/settings.json" -o .claude/settings.json
-curl -L "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v6.0.1/project-hooks/.claude/project_state_stop_check.js" -o .claude/project_state_stop_check.js
+curl -L "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v6.1.0/project-hooks/.claude/settings.json" -o .claude/settings.json
+curl -L "https://raw.githubusercontent.com/rqzhu-aide/causal-consultant/v6.1.0/project-hooks/.claude/project_state_stop_check.js" -o .claude/project_state_stop_check.js
 ```
 
 ## License

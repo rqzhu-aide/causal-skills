@@ -7,12 +7,17 @@ self-contained `intent_summary`. Route selection is mandatory before every new
 operation, including team-lead-only work. It chooses who works, not that
 worker's internal lane, handoff status, scientific conclusion, or final answer.
 
-Use the controller's router `turn_context`, the current user message, and any
-unchanged routing references already available. The context's
+Use the controller's router phase context, the current user message, and the
+returned routing references. The context's
 `previous_response_cue` contains only the prior options, boundary, and next-step
 blocks needed for continuity; `pending_decision` remains authoritative for a
 numbered choice. Use the full-state fallback only when the present routing
 decision genuinely depends on omitted detail.
+
+Do not load cold history unless the current message refers to wording that the
+pending decision, response cue, and durable state cannot resolve. If the
+smallest relevant exchange is unavailable or ambiguous, route only team lead
+for clarification.
 
 Keep routing silent. Do not inspect project materials, analyze, draft, or create
 output before `begin` commits the assignment.
@@ -61,7 +66,7 @@ route findings, mode flags, or detailed payloads there.
 ## Conversation Binding
 
 Infer intention from the current message, pending decision, previous response
-cue, and current router context, not from keywords alone.
+cue, and current router phase context, not from keywords alone.
 
 A choice binds only when the message unambiguously identifies one option. A
 bare number additionally requires that menu in the immediately preceding

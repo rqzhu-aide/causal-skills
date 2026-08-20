@@ -92,8 +92,10 @@ if (
   template.capabilities?.turn_context !== 1
   || template.capabilities?.required_references !== 1
   || template.capabilities?.operation_packet_ref !== 1
+  || template.capabilities?.phase_capsule !== 1
+  || template.capabilities?.begin_artifact_reservation !== 1
 ) {
-  throw new Error("state controller must advertise turn-context and packet-reference capabilities");
+  throw new Error("state controller must advertise phase-context and packet capabilities");
 }
 if (
   template.capabilities?.response_rendering !== 1

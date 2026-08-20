@@ -28,9 +28,9 @@ genuinely needs relevant detail omitted from the lead context.
 - Load `team_lead_report_flow.md` for a report operation or a lead-only question
   about report approval, output, or assembly.
 
-Reuse unchanged references already available in a continuous session. The
-controller's `required_references` identifies what must be available for the
-current stage.
+The controller's `required_references` identifies what must be available for
+the current lead phase. Within one invocation, reuse an unchanged reference
+already loaded.
 
 ## Evidence Review
 

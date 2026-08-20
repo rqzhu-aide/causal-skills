@@ -10,6 +10,8 @@ const ROUTES = require("./route-catalog.json");
 const SCHEMA_VERSION = 5;
 const MANIFEST_VERSION = 2;
 const LEGACY_MANIFEST_VERSION = 1;
+const PHASE_CAPSULE_PROTOCOL = "phase-capsule-v1";
+const PHASE_CAPSULE_VERSION = 1;
 const STATE_FILE = "project_state.yaml";
 const ARCHIVE_DIR = "project_state.archives";
 const MAX_INTENT_LENGTH = 1000;
@@ -337,6 +339,15 @@ function validateAnalysisContract(value, label, code = "INVALID_STATE") {
 
 function sha256Hex(value) {
   return crypto.createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function canonicalJson(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+    .join(",")}}`;
 }
 
 function contractHash(scopeKind, contract) {
@@ -1839,7 +1850,14 @@ function loadTemplate(skillRoot) {
   return template;
 }
 
-function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan = false }) {
+function openProject({
+  projectRoot,
+  skillRoot,
+  fresh = false,
+  discardLegacyPlan = false,
+  contextProtocol = null,
+}) {
+  const selectedContextProtocol = normalizeContextProtocol(contextProtocol, "open context protocol");
   const root = path.resolve(projectRoot);
   const statePath = statePathFor(root);
   const template = loadTemplate(skillRoot);
@@ -1859,7 +1877,13 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
     };
     const state = instantiateTemplate(template, startupNotice);
     atomicWrite(statePath, stringifyYaml(state));
-    const context = contextForCurrentStage(state, validatePlan(state.next_step_plan), []);
+    const context = contextForCurrentStage(
+      state,
+      validatePlan(state.next_step_plan),
+      [],
+      null,
+      selectedContextProtocol,
+    );
     return {
       ok: true,
       code: exists ? "RESET" : "CREATED_FRESH",
@@ -1880,7 +1904,13 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
       archive_path: null,
     });
     atomicWrite(statePath, stringifyYaml(state));
-    const context = contextForCurrentStage(state, validatePlan(state.next_step_plan), []);
+    const context = contextForCurrentStage(
+      state,
+      validatePlan(state.next_step_plan),
+      [],
+      null,
+      selectedContextProtocol,
+    );
     return {
       ok: true,
       code: "CREATED",
@@ -1902,7 +1932,13 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
     const serialized = stringifyYaml(migrated);
     const archivePath = archiveBytes(root, original, discardLegacyPlan ? "migration-v45-discarded-plan" : "migration-v45");
     atomicWrite(statePath, serialized);
-    const context = contextForCurrentStage(migrated, validatePlan(migrated.next_step_plan), warnings);
+    const context = contextForCurrentStage(
+      migrated,
+      validatePlan(migrated.next_step_plan),
+      warnings,
+      null,
+      selectedContextProtocol,
+    );
     return {
       ok: true,
       code: discardLegacyPlan ? "MIGRATED_LEGACY_PLAN_DISCARDED" : "MIGRATED",
@@ -1942,7 +1978,13 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
     const serialized = stringifyYaml(migrated);
     const archivePath = archiveBytes(root, original, `migration-v${sourceVersion}-v${SCHEMA_VERSION}`);
     atomicWrite(statePath, serialized);
-    const context = contextForCurrentStage(migrated, planInfo, warnings, artifactStatus);
+    const context = contextForCurrentStage(
+      migrated,
+      planInfo,
+      warnings,
+      artifactStatus,
+      selectedContextProtocol,
+    );
     return {
       ok: true,
       code: `MIGRATED_V${sourceVersion}`,
@@ -1978,7 +2020,13 @@ function openProject({ projectRoot, skillRoot, fresh = false, discardLegacyPlan 
     ? inspectReservedArtifact(root, operation, planInfo.actor, packet)
     : null;
   const warnings = artifactWarnings(root, parsed);
-  const context = contextForCurrentStage(parsed, planInfo, warnings, artifactStatus);
+  const context = contextForCurrentStage(
+    parsed,
+    planInfo,
+    warnings,
+    artifactStatus,
+    selectedContextProtocol,
+  );
   return {
     ok: true,
     code,
@@ -2220,15 +2268,29 @@ function resolveDecisionSelection(state, selection) {
   return option.assignment;
 }
 
-function beginOperation({ projectRoot, payload }) {
+function beginOperation({
+  projectRoot,
+  payload,
+  contextProtocol = null,
+}) {
   const { statePath, state } = loadCurrentState(projectRoot);
   assertExpected(state, payload);
   if (state.state_meta.active_operation !== null || state.next_step_plan.length) {
     fail("ACTIVE_OPERATION", "finish or cancel the active operation before beginning another");
   }
   const assignmentFields = ["route", "support", "intent_summary", "scope_ref"];
-  const allowedInput = new Set(["expected_project_id", "expected_revision", "selection", ...assignmentFields]);
+  const allowedInput = new Set([
+    "expected_project_id",
+    "expected_revision",
+    "selection",
+    "artifact_reservation",
+    ...assignmentFields,
+  ]);
   assertKnownKeys(payload, allowedInput, "begin input", "INVALID_INPUT");
+  const selectedContextProtocol = normalizeContextProtocol(
+    contextProtocol,
+    "begin context protocol",
+  );
   const hasSelection = Object.prototype.hasOwnProperty.call(payload, "selection");
   if (hasSelection && assignmentFields.some((field) => Object.prototype.hasOwnProperty.call(payload, field))) {
     fail("INVALID_INPUT", "begin selection cannot be combined with route assignment fields");
@@ -2266,13 +2328,29 @@ function beginOperation({ projectRoot, payload }) {
   state.state_meta.active_operation = operation;
   state.pending_decision = null;
   state.response_receipt = null;
+  const reservation = payload.artifact_reservation === undefined
+    ? null
+    : reserveArtifactIntent(
+      projectRoot,
+      operation,
+      planInfo,
+      payload.artifact_reservation,
+      "begin input.artifact_reservation",
+    );
   const warnings = artifactWarnings(projectRoot, state);
+  const currentPacket = operationPacket(state, operation, planInfo);
+  const artifactStatus = reservation === null
+    ? null
+    : inspectReservedArtifact(projectRoot, operation, planInfo.actor, currentPacket);
+  if (artifactStatus !== null) assertCleanArtifactReservation(artifactStatus);
   const revision = commitMutation(statePath, state);
-  const audience = stage === "worker_pending" ? "worker" : "team_lead";
-  const context = {
-    turn_context: turnContext(state, planInfo, audience, warnings),
-    required_references: requiredReferences(state, planInfo, audience),
-  };
+  const context = contextForCurrentStage(
+    state,
+    planInfo,
+    warnings,
+    artifactStatus,
+    selectedContextProtocol,
+  );
   return {
     ok: true,
     code: stage === "lead_pending" ? "BEGAN_LEAD" : "BEGAN_WORKER",
@@ -2281,7 +2359,8 @@ function beginOperation({ projectRoot, payload }) {
     operation_id: operation.id,
     stage,
     plan,
-    operation_packet: operationPacket(state, operation, planInfo),
+    operation_packet: currentPacket,
+    ...(reservation === null ? {} : reservation),
     ...context,
   };
 }
@@ -2351,9 +2430,81 @@ function bindDiscoveryScope(state, operation, value, label) {
 
 function normalizeExtension(value) {
   if (value === undefined || value === null || value === "") return "";
+  if (typeof value !== "string") fail("INVALID_INPUT", "extension must be a string");
   const extension = value.startsWith(".") ? value : `.${value}`;
   if (!/^\.[a-z0-9]{1,10}$/i.test(extension)) fail("INVALID_INPUT", "extension must be a simple file extension");
   return extension.toLowerCase();
+}
+
+function pathIsWithin(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return (
+    relative === ""
+    || (
+      !path.isAbsolute(relative)
+      && relative !== ".."
+      && !relative.startsWith(`..${path.sep}`)
+    )
+  );
+}
+
+function assertArtifactAncestorsWithinProject(projectRoot, candidate) {
+  const root = path.resolve(projectRoot);
+  let realRoot;
+  try {
+    realRoot = fs.realpathSync(root);
+  } catch (error) {
+    fail("IO_ERROR", `could not resolve project root for artifact safety: ${error.message}`);
+  }
+
+  const relative = path.relative(root, candidate);
+  const segments = relative.split(path.sep).filter(Boolean);
+  let current = root;
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    current = path.join(current, segments[index]);
+    let stat;
+    try {
+      stat = fs.lstatSync(current);
+    } catch (error) {
+      if (error && error.code === "ENOENT") return;
+      if (error && error.code === "ENOTDIR") {
+        fail("INVALID_ARTIFACT_PATH", "an artifact path ancestor is not a directory");
+      }
+      fail("IO_ERROR", `could not inspect artifact path safely: ${error.message}`);
+    }
+
+
+    if (stat.isSymbolicLink()) {
+      fail("INVALID_ARTIFACT_PATH", "artifact path ancestors under output must not be links");
+    }
+    let realCurrent;
+    try {
+      realCurrent = fs.realpathSync(current);
+    } catch (error) {
+      if (error && ["ENOENT", "ENOTDIR", "ELOOP"].includes(error.code)) {
+        fail("INVALID_ARTIFACT_PATH", "artifact path contains a dangling or invalid link");
+      }
+      fail("IO_ERROR", `could not resolve artifact path safely: ${error.message}`);
+    }
+    if (!pathIsWithin(realRoot, realCurrent)) {
+      fail("INVALID_ARTIFACT_PATH", "artifact path resolves outside the project root");
+    }
+
+    if (index < segments.length - 1) {
+      let resolvedStat;
+      try {
+        resolvedStat = fs.statSync(current);
+      } catch (error) {
+        if (error && ["ENOENT", "ENOTDIR", "ELOOP"].includes(error.code)) {
+          fail("INVALID_ARTIFACT_PATH", "artifact path contains a dangling or invalid ancestor");
+        }
+        fail("IO_ERROR", `could not inspect artifact path ancestor: ${error.message}`);
+      }
+      if (!resolvedStat.isDirectory()) {
+        fail("INVALID_ARTIFACT_PATH", "an artifact path ancestor is not a directory");
+      }
+    }
+  }
 }
 
 function resolveOutputPath(projectRoot, relativeLocation) {
@@ -2367,10 +2518,61 @@ function resolveOutputPath(projectRoot, relativeLocation) {
   if (resolved !== outputRoot && !resolved.startsWith(`${outputRoot}${path.sep}`)) {
     fail("INVALID_ARTIFACT_PATH", "artifact location escapes the project output directory");
   }
+  assertArtifactAncestorsWithinProject(root, resolved);
   return resolved;
 }
 
-function reserveArtifact({ projectRoot, payload }) {
+function reserveArtifactIntent(projectRoot, operation, planInfo, input, label) {
+  assertObject(input, label, "INVALID_INPUT");
+  assertKnownKeys(input, new Set(["kind", "slug", "extension"]), label, "INVALID_INPUT");
+  const actor = planInfo.actor;
+  if (!(ARTIFACT_ACTORS.has(actor) || actor.startsWith("analysis_execution."))) {
+    fail("OWNERSHIP_VIOLATION", `${actor} cannot create durable artifacts`);
+  }
+  if ((actor === "report_writer" || actor.startsWith("analysis_execution.")) && operation.scope_ref === null) {
+    fail("SCOPE_MISMATCH", `${actor} must begin with an exact ready scope_ref before reserving output`);
+  }
+  if (actor === "causal_discovery" && operation.discovery_scope === null) {
+    fail("SCOPE_MISMATCH", "causal_discovery must freeze a discovery_scope before reserving output");
+  }
+  if (operation.artifact_intent !== null) fail("ARTIFACT_ALREADY_RESERVED", "this operation already has an artifact reservation");
+  assertEnum(input.kind, ["file", "directory"], `${label}.kind`, "INVALID_INPUT");
+  if (
+    typeof input.slug !== "string"
+    || input.slug.length > MAX_ARTIFACT_SLUG_LENGTH
+    || !/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(input.slug)
+  ) {
+    fail("INVALID_INPUT", `${label}.slug must contain at most ${MAX_ARTIFACT_SLUG_LENGTH} lowercase letters, digits, hyphens, or underscores`);
+  }
+  const extension = input.kind === "file" ? normalizeExtension(input.extension) : "";
+  if (input.kind === "file" && !extension) fail("INVALID_INPUT", `${label} file artifacts require an extension`);
+  if (input.kind === "directory" && input.extension !== undefined) {
+    fail("INVALID_INPUT", `${label} directory artifacts do not use extensions`);
+  }
+  const location = `output/${input.slug}-${operation.id.slice(0, 8)}${extension}`;
+  const artifactIntent = { kind: input.kind, location };
+  const target = resolveOutputPath(projectRoot, location);
+  const manifest = manifestPathFor(target, input.kind);
+  const temporary = resolveOutputPath(
+    projectRoot,
+    temporaryArtifactLocation(artifactIntent, operation.id),
+  );
+  if (artifactEntryExists(target) || artifactEntryExists(manifest) || artifactEntryExists(temporary)) {
+    fail("ARTIFACT_COLLISION", `reserved artifact path already exists: ${location}`);
+  }
+  operation.artifact_intent = artifactIntent;
+  return {
+    artifact_intent: clone(artifactIntent),
+    temporary_path: temporaryArtifactLocation(artifactIntent, operation.id),
+    manifest_path: normalizePath(path.relative(path.resolve(projectRoot), manifest)),
+  };
+}
+
+function reserveArtifact({
+  projectRoot,
+  payload,
+  contextProtocol = null,
+}) {
   const { statePath, state } = loadCurrentState(projectRoot);
   assertExpected(state, payload);
   const allowedInput = new Set([
@@ -2383,63 +2585,52 @@ function reserveArtifact({ projectRoot, payload }) {
     "discovery_scope",
   ]);
   assertKnownKeys(payload, allowedInput, "reserve-artifact input", "INVALID_INPUT");
+  const selectedContextProtocol = normalizeContextProtocol(
+    contextProtocol,
+    "reserve-artifact context protocol",
+  );
   const operation = assertOperation(state, payload, "worker_pending");
   const planInfo = validatePlan(state.next_step_plan);
   const actor = planInfo.actor;
   const previousPacket = operationPacket(state, operation, planInfo);
-  if (!(ARTIFACT_ACTORS.has(actor) || actor.startsWith("analysis_execution."))) {
-    fail("OWNERSHIP_VIOLATION", `${actor} cannot create durable artifacts`);
-  }
-  if ((actor === "report_writer" || actor.startsWith("analysis_execution.")) && operation.scope_ref === null) {
-    fail("SCOPE_MISMATCH", `${actor} must begin with an exact ready scope_ref before reserving output`);
-  }
   if (payload.discovery_scope !== undefined) {
     if (actor !== "causal_discovery") {
       fail("OWNERSHIP_VIOLATION", `${actor} cannot set discovery_scope`);
     }
     bindDiscoveryScope(state, operation, payload.discovery_scope, "reserve-artifact discovery_scope");
   }
-  if (actor === "causal_discovery" && operation.discovery_scope === null) {
-    fail("SCOPE_MISMATCH", "causal_discovery must freeze a discovery_scope before reserving output");
-  }
-  if (operation.artifact_intent !== null) fail("ARTIFACT_ALREADY_RESERVED", "this operation already has an artifact reservation");
-  assertEnum(payload.kind, ["file", "directory"], "kind", "INVALID_INPUT");
-  if (
-    typeof payload.slug !== "string"
-    || payload.slug.length > MAX_ARTIFACT_SLUG_LENGTH
-    || !/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(payload.slug)
-  ) {
-    fail("INVALID_INPUT", `slug must contain at most ${MAX_ARTIFACT_SLUG_LENGTH} lowercase letters, digits, hyphens, or underscores`);
-  }
-  const extension = payload.kind === "file" ? normalizeExtension(payload.extension) : "";
-  if (payload.kind === "file" && !extension) fail("INVALID_INPUT", "file artifacts require an extension");
-  if (payload.kind === "directory" && payload.extension !== undefined) fail("INVALID_INPUT", "directory artifacts do not use extensions");
-  const location = `output/${payload.slug}-${operation.id.slice(0, 8)}${extension}`;
-  const artifactIntent = { kind: payload.kind, location };
-  const target = resolveOutputPath(projectRoot, location);
-  const manifest = manifestPathFor(target, payload.kind);
-  const temporary = resolveOutputPath(
+  const reservation = reserveArtifactIntent(
     projectRoot,
-    temporaryArtifactLocation(artifactIntent, operation.id),
+    operation,
+    planInfo,
+    {
+      kind: payload.kind,
+      slug: payload.slug,
+      ...(payload.extension !== undefined ? { extension: payload.extension } : {}),
+    },
+    "reserve-artifact input",
   );
-  if (fs.existsSync(target) || fs.existsSync(manifest) || fs.existsSync(temporary)) {
-    fail("ARTIFACT_COLLISION", `reserved artifact path already exists: ${location}`);
-  }
-  operation.artifact_intent = artifactIntent;
-  const revision = commitMutation(statePath, state);
   const currentPacket = operationPacket(state, operation, planInfo);
+  const warnings = artifactWarnings(projectRoot, state);
+  const artifactStatus = inspectReservedArtifact(projectRoot, operation, actor, currentPacket);
+  assertCleanArtifactReservation(artifactStatus);
+  const revision = commitMutation(statePath, state);
+  const context = selectedContextProtocol === PHASE_CAPSULE_PROTOCOL
+    ? { phase_capsule: phaseCapsule(state, planInfo, "worker", warnings, artifactStatus) }
+    : {};
   return {
     ok: true,
     code: "ARTIFACT_RESERVED",
     project_id: state.state_meta.project_id,
     revision,
     operation_id: operation.id,
-    artifact_intent: operation.artifact_intent,
+    artifact_intent: reservation.artifact_intent,
     scope_ref: operation.scope_ref,
     discovery_scope: operation.discovery_scope,
     ...operationPacketResult(previousPacket, currentPacket),
-    temporary_path: temporaryArtifactLocation(operation.artifact_intent, operation.id),
-    manifest_path: normalizePath(path.relative(path.resolve(projectRoot), manifest)),
+    temporary_path: reservation.temporary_path,
+    manifest_path: reservation.manifest_path,
+    ...context,
   };
 }
 
@@ -2842,6 +3033,17 @@ function inspectReservedArtifact(projectRoot, operation, actor, packet) {
     }
     throw error;
   }
+}
+
+function assertCleanArtifactReservation(artifactStatus) {
+  if (artifactStatus.location_state === "absent") return;
+  if (
+    artifactStatus.location_state === "invalid"
+    && artifactStatus.reason_code === "INVALID_ARTIFACT_PATH"
+  ) {
+    fail("INVALID_ARTIFACT_PATH", "the reserved artifact path is invalid");
+  }
+  fail("ARTIFACT_COLLISION", `the reserved artifact locations are not empty: ${artifactStatus.location_state}`);
 }
 
 function rejectControllerFields(patch, label, fields = ["last_updated"]) {
@@ -3318,7 +3520,11 @@ function appendArtifactRecord(state, projectRoot, operation, actor, artifact, pa
   return record;
 }
 
-function applyWorker({ projectRoot, payload }) {
+function applyWorker({
+  projectRoot,
+  payload,
+  contextProtocol = null,
+}) {
   const { statePath, state } = loadCurrentState(projectRoot);
   assertExpected(state, payload);
   const allowedInput = new Set([
@@ -3332,6 +3538,10 @@ function applyWorker({ projectRoot, payload }) {
     "artifact",
   ]);
   assertKnownKeys(payload, allowedInput, "apply input", "INVALID_INPUT");
+  const selectedContextProtocol = normalizeContextProtocol(
+    contextProtocol,
+    "apply context protocol",
+  );
   const operation = assertOperation(state, payload, "worker_pending");
   const planInfo = validatePlan(state.next_step_plan);
   if (payload.actor !== planInfo.actor) fail("PLAN_MISMATCH", `apply actor must be ${planInfo.actor}`);
@@ -3464,10 +3674,13 @@ function applyWorker({ projectRoot, payload }) {
     : null;
   const warnings = artifactWarnings(projectRoot, merged);
   const revision = commitMutation(statePath, merged);
-  const context = {
-    turn_context: turnContext(merged, planInfo, "team_lead", warnings, artifactStatus),
-    required_references: requiredReferences(merged, planInfo, "team_lead"),
-  };
+  const context = contextForCurrentStage(
+    merged,
+    planInfo,
+    warnings,
+    artifactStatus,
+    selectedContextProtocol,
+  );
   return {
     ok: true,
     code: "WORKER_APPLIED",
@@ -3881,6 +4094,43 @@ function turnContext(state, planInfo, audience, warnings, artifactStatus = null)
   };
 }
 
+function phaseName(audience) {
+  return audience === "team_lead" ? "lead" : audience;
+}
+
+function completionCommandForAudience(audience) {
+  if (audience === "router") return "begin";
+  if (audience === "worker") return "apply";
+  return "finish";
+}
+
+function phaseCapsule(state, planInfo, audience, warnings, artifactStatus = null) {
+  const context = turnContext(state, planInfo, audience, warnings, artifactStatus);
+  const body = {
+    protocol: PHASE_CAPSULE_PROTOCOL,
+    version: PHASE_CAPSULE_VERSION,
+    kind: "full",
+    phase: phaseName(audience),
+    turn_context: context,
+    operation_packet: operationPacket(state, state.state_meta.active_operation, planInfo),
+    required_references: requiredReferences(state, planInfo, audience),
+    completion_command: completionCommandForAudience(audience),
+  };
+  const contextHash = sha256Hex(canonicalJson(body));
+  return {
+    ...body,
+    context_id: `ctx-v${PHASE_CAPSULE_VERSION}-${contextHash}`,
+  };
+}
+
+function normalizeContextProtocol(value, label) {
+  if (value === undefined || value === null) return null;
+  if (value !== PHASE_CAPSULE_PROTOCOL) {
+    fail("INVALID_INPUT", `${label} must be ${PHASE_CAPSULE_PROTOCOL}`);
+  }
+  return value;
+}
+
 function requiredReferences(state, planInfo, audience) {
   if (audience === "router") return ["references/route_selection_workflow.md"];
   if (audience === "team_lead") {
@@ -3919,13 +4169,22 @@ function requiredReferences(state, planInfo, audience) {
   return [...new Set(references)];
 }
 
-function contextForCurrentStage(state, planInfo, warnings, artifactStatus = null) {
+function contextForCurrentStage(
+  state,
+  planInfo,
+  warnings,
+  artifactStatus = null,
+  contextProtocol = null,
+) {
   const operation = state.state_meta.active_operation;
   const audience = operation === null
     ? "router"
     : operation.stage === "worker_pending"
       ? "worker"
       : "team_lead";
+  if (contextProtocol === PHASE_CAPSULE_PROTOCOL) {
+    return { phase_capsule: phaseCapsule(state, planInfo, audience, warnings, artifactStatus) };
+  }
   return {
     turn_context: turnContext(state, planInfo, audience, warnings, artifactStatus),
     required_references: requiredReferences(state, planInfo, audience),
@@ -3976,11 +4235,14 @@ function validateTemplate({ skillRoot }) {
       turn_context: 1,
       required_references: 1,
       operation_packet_ref: 1,
+      phase_capsule: 1,
+      begin_artifact_reservation: 1,
     },
   };
 }
 
 module.exports = {
+  PHASE_CAPSULE_PROTOCOL,
   StateError,
   applyWorker,
   beginOperation,

@@ -11,8 +11,10 @@ const YAML = require("yaml");
 const {
   applyWorker: applySourceWorker,
   beginOperation: beginSourceOperation,
+  reserveArtifact: reserveSourceArtifact,
 } = require("../scripts/statectl-src/core.cjs");
 
+const { capsuleContextId, writeFullCapsule } = require("../scripts/statectl-src/context-file.cjs");
 const SKILL_ROOT = path.resolve(__dirname, "..");
 const BUNDLED_CLI = path.join(SKILL_ROOT, "scripts", "statectl.cjs");
 const CLI = process.env.STATECTL_TEST_SOURCE === "1"
@@ -5914,4 +5916,876 @@ test("strict validation rejects duplicate pending assignments", (t) => {
 
   expectFailure(execute(projectRoot, "validate"), "INVALID_STATE");
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+});
+
+const PHASE_CONTEXT_PROTOCOL = "phase-capsule-v1";
+const PHASE_CONTEXT_RELATIVE_PATH = ".statectl-tmp/phase-context.json";
+
+function phaseContextPath(projectRoot) {
+  return path.join(projectRoot, ...PHASE_CONTEXT_RELATIVE_PATH.split("/"));
+}
+
+function readPhaseContext(projectRoot) {
+  return JSON.parse(fs.readFileSync(phaseContextPath(projectRoot), "utf8"));
+}
+
+function assertContextReference(result, capsule, phase) {
+  assert.deepEqual(result.context_ref, {
+    protocol: PHASE_CONTEXT_PROTOCOL,
+    version: 1,
+    context_id: capsule.context_id,
+    phase,
+    path: PHASE_CONTEXT_RELATIVE_PATH,
+  });
+  assert.equal(capsuleContextId(capsule), capsule.context_id);
+  assert.equal("phase_capsule" in result, false);
+  assert.equal("phase_capsule_delta" in result, false);
+  assert.equal("turn_context" in result, false);
+  assert.equal("operation_packet" in result, false);
+}
+
+test("context-file mode carries a full router-worker-lead lifecycle across CLI processes", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open", {
+    args: ["--context-file"],
+  }), "CREATED");
+  const router = readPhaseContext(projectRoot);
+  assert.equal(router.protocol, PHASE_CONTEXT_PROTOCOL);
+  assert.equal(router.version, 1);
+  assert.equal(router.kind, "full");
+  assert.equal(router.phase, "router");
+  assert.equal(router.completion_command, "begin");
+  assert.equal(router.turn_context.revision, opened.revision);
+  assertContextReference(opened, router, "router");
+  assert.deepEqual(Object.keys(opened).sort(), [
+    "code",
+    "context_ref",
+    "mode",
+    "ok",
+    "project_id",
+    "revision",
+  ]);
+  if (process.platform !== "win32") {
+    assert.equal(fs.statSync(phaseContextPath(projectRoot)).mode & 0o777, 0o600);
+  }
+
+  const firstBytes = fs.readFileSync(phaseContextPath(projectRoot));
+  const reopened = expectSuccess(execute(projectRoot, "open", {
+    args: ["--context-file"],
+  }), "OPENED");
+  assert.deepEqual(fs.readFileSync(phaseContextPath(projectRoot)), firstBytes);
+  assert.equal(reopened.context_ref.context_id, opened.context_ref.context_id);
+
+  const started = expectSuccess(execute(projectRoot, "begin", {
+    args: ["--context-file"],
+    payload: {
+      ...expected(reopened),
+      route: "data_audit",
+      intent_summary: "Audit the current data inputs.",
+    },
+  }), "BEGAN_WORKER");
+  const worker = readPhaseContext(projectRoot);
+  assert.equal(worker.phase, "worker");
+  assert.equal(worker.completion_command, "apply");
+  assert.equal(worker.turn_context.actor, "data_audit");
+  assert.equal(worker.turn_context.operation.id, started.operation_id);
+  assertContextReference(started, worker, "worker");
+
+  const workerStateBytes = fs.readFileSync(statePath(projectRoot));
+  const workerContextBytes = fs.readFileSync(phaseContextPath(projectRoot));
+  const workerResume = expectSuccess(execute(projectRoot, "open", {
+    args: ["--context-file"],
+  }), "RESUME_WORKER");
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), workerStateBytes);
+  assert.deepEqual(fs.readFileSync(phaseContextPath(projectRoot)), workerContextBytes);
+  assert.deepEqual(workerResume.context_ref, started.context_ref);
+
+  expectFailure(execute(projectRoot, "apply", {
+    args: ["--context-file"],
+    payload: {
+      ...expected(workerResume),
+      operation_id: started.operation_id,
+      actor: "domain_expert",
+      updates: {},
+    },
+  }), "PLAN_MISMATCH");
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), workerStateBytes);
+  assert.deepEqual(fs.readFileSync(phaseContextPath(projectRoot)), workerContextBytes);
+
+  const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+    args: ["--context-file"],
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      kind: "file",
+      slug: "phase-context-audit",
+      extension: "csv",
+    },
+  }), "ARTIFACT_RESERVED");
+  const reservedWorker = readPhaseContext(projectRoot);
+  assert.equal(reservedWorker.phase, "worker");
+  assert.equal(reservedWorker.turn_context.revision, reserved.revision);
+  assert.deepEqual(
+    reservedWorker.turn_context.operation.artifact_intent,
+    reserved.artifact_intent,
+  );
+  assert.equal(reservedWorker.turn_context.artifact_status.temporary_path, reserved.temporary_path);
+  assertContextReference(reserved, reservedWorker, "worker");
+  assert.equal(typeof reserved.temporary_path, "string");
+  assert.equal(typeof reserved.manifest_path, "string");
+
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    args: ["--context-file"],
+    payload: {
+      ...expected(reserved),
+      operation_id: started.operation_id,
+      actor: "data_audit",
+      updates: {
+        data_facts: {
+          data_checked: "passing",
+          data_sources: ["data/input.csv"],
+          audit_scope: "Current supplied inputs",
+          unit_of_observation: "Participant",
+        },
+        council_chamber: {
+          data_audit: {
+            current_status: "complete",
+            summary: "The supplied inputs passed the requested audit.",
+            questions_for_user: [],
+            feedback_to_route: [],
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+  const lead = readPhaseContext(projectRoot);
+  assert.equal(lead.phase, "lead");
+  assert.equal(lead.completion_command, "finish");
+  assert.equal(lead.turn_context.stage, "lead_pending");
+  assertContextReference(applied, lead, "lead");
+
+  const leadStateBytes = fs.readFileSync(statePath(projectRoot));
+  const leadContextBytes = fs.readFileSync(phaseContextPath(projectRoot));
+  const leadResume = expectSuccess(execute(projectRoot, "open", {
+    args: ["--context-file"],
+  }), "RESUME_LEAD");
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), leadStateBytes);
+  assert.deepEqual(fs.readFileSync(phaseContextPath(projectRoot)), leadContextBytes);
+  assert.deepEqual(leadResume.context_ref, applied.context_ref);
+
+  const closed = expectSuccess(finish(projectRoot, {
+    ...leadResume,
+    operation_id: lead.turn_context.operation.id,
+  }), "OPERATION_FINISHED");
+  assert.equal(fs.existsSync(phaseContextPath(projectRoot)), false);
+  assert.equal(closed.delivery_warnings, undefined);
+  const finalState = readState(projectRoot);
+  assert.equal(finalState.state_meta.active_operation, null);
+  assert.equal("phase_capsule" in finalState, false);
+  assert.equal("context_id" in finalState, false);
+});
+
+test("begin can reserve output atomically and deliver the complete worker capsule", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open", {
+    args: ["--context-file"],
+  }), "CREATED");
+  const started = expectSuccess(execute(projectRoot, "begin", {
+    args: ["--context-file"],
+    payload: {
+      ...expected(opened),
+      route: "data_audit",
+      intent_summary: "Audit the data and save a compact table.",
+      artifact_reservation: {
+        kind: "file",
+        slug: "combined-audit",
+        extension: "csv",
+      },
+    },
+  }), "BEGAN_WORKER");
+  assert.equal(started.revision, opened.revision + 1);
+  assert.equal(typeof started.temporary_path, "string");
+  assert.equal(typeof started.manifest_path, "string");
+
+  const worker = readPhaseContext(projectRoot);
+  assert.deepEqual(worker.turn_context.operation.artifact_intent, started.artifact_intent);
+  assert.equal(worker.turn_context.artifact_status.temporary_path, started.temporary_path);
+  assert.equal(worker.turn_context.artifact_status.manifest_path, started.manifest_path);
+  assert.ok(worker.required_references.includes("references/artifact_output_policy.md"));
+  assertContextReference(started, worker, "worker");
+  expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
+test("invalid begin-time reservation leaves state unchanged", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const before = fs.readFileSync(statePath(projectRoot));
+  expectFailure(execute(projectRoot, "begin", {
+    payload: {
+      ...expected(opened),
+      route: "team_lead",
+      intent_summary: "Do not reserve output for lead-only work.",
+      artifact_reservation: {
+        kind: "file",
+        slug: "invalid-lead-output",
+        extension: "txt",
+      },
+    },
+  }), "OWNERSHIP_VIOLATION");
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+});
+
+test("inline phase-capsule CLI returns a full capsule at every stage boundary", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open", {
+    args: ["--context-protocol", PHASE_CONTEXT_PROTOCOL],
+  }), "CREATED");
+  assert.equal(opened.phase_capsule.kind, "full");
+  assert.equal(opened.phase_capsule.phase, "router");
+
+  const started = expectSuccess(execute(projectRoot, "begin", {
+    args: ["--context-protocol", PHASE_CONTEXT_PROTOCOL],
+    payload: {
+      ...expected(opened),
+      route: "data_audit",
+      intent_summary: "Audit the supplied data.",
+    },
+  }), "BEGAN_WORKER");
+  assert.equal(started.phase_capsule.kind, "full");
+  assert.equal(started.phase_capsule.phase, "worker");
+
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    args: ["--context-protocol", PHASE_CONTEXT_PROTOCOL],
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "data_audit",
+      updates: {
+        data_facts: {
+          data_checked: "passing",
+          data_sources: ["data/input.csv"],
+          audit_scope: "Current supplied inputs",
+          unit_of_observation: "Participant",
+        },
+        council_chamber: {
+          data_audit: {
+            current_status: "complete",
+            summary: "The supplied inputs passed the requested audit.",
+            questions_for_user: [],
+            feedback_to_route: [],
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+  assert.equal(applied.phase_capsule.kind, "full");
+  assert.equal(applied.phase_capsule.phase, "lead");
+  expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+});
+
+test("context-file preflight failures leave state unchanged", async (t) => {
+  await t.test("a non-directory context path blocks before begin", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    fs.writeFileSync(path.join(projectRoot, ".statectl-tmp"), "not a directory\n", "utf8");
+    const before = fs.readFileSync(statePath(projectRoot));
+    expectFailure(execute(projectRoot, "begin", {
+      args: ["--context-file"],
+      payload: {
+        ...expected(opened),
+        route: "data_audit",
+        intent_summary: "This must not begin.",
+      },
+    }), "CONTEXT_FILE_PREFLIGHT_FAILED");
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+  });
+
+  await t.test("a linked context directory is rejected", (subtest) => {
+    const projectRoot = temporaryProject(t);
+    const linkedDirectory = temporaryProject(t);
+    try {
+      fs.symlinkSync(
+        linkedDirectory,
+        path.join(projectRoot, ".statectl-tmp"),
+        process.platform === "win32" ? "junction" : "dir",
+      );
+    } catch (error) {
+      subtest.skip(`directory links are unavailable: ${error.code || error.message}`);
+      return;
+    }
+    expectFailure(execute(projectRoot, "open", {
+      args: ["--context-file"],
+    }), "CONTEXT_FILE_PREFLIGHT_FAILED");
+    assert.equal(fs.existsSync(statePath(projectRoot)), false);
+  });
+
+  await t.test("an in-project context directory casing variant is accepted", (subtest) => {
+    if (process.platform !== "win32") {
+      subtest.skip("case-variant path behavior is Windows-specific");
+      return;
+    }
+    const projectRoot = temporaryProject(t);
+    fs.mkdirSync(path.join(projectRoot, ".STATECTL-TMP"));
+    const opened = expectSuccess(execute(projectRoot, "open", {
+      args: ["--context-file"],
+    }), "CREATED");
+    assert.equal(opened.context_ref.path, PHASE_CONTEXT_RELATIVE_PATH);
+  });
+});
+
+test("late context delivery and cleanup failures remain nonfatal after controller commits", async (t) => {
+  await t.test("late write failure returns the full capsule and preserves the prior file", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open", {
+      args: ["--context-file"],
+    }), "CREATED");
+    const priorBytes = fs.readFileSync(phaseContextPath(projectRoot));
+    const started = expectSuccess(execute(projectRoot, "begin", {
+      args: ["--context-file"],
+      env: { STATECTL_FAIL_CONTEXT_WRITE: "1" },
+      payload: {
+        ...expected(opened),
+        route: "data_audit",
+        intent_summary: "Commit even if context-file delivery fails.",
+      },
+    }), "BEGAN_WORKER");
+    assert.equal(started.phase_capsule.kind, "full");
+    assert.equal(started.phase_capsule.phase, "worker");
+    assert.equal(started.context_ref, undefined);
+    assert.deepEqual(started.delivery_warnings, [{
+      code: "CONTEXT_FILE_WRITE_FAILED",
+      message: "could not atomically write .statectl-tmp/phase-context.json: injected phase-context write failure",
+    }]);
+    assert.deepEqual(fs.readFileSync(phaseContextPath(projectRoot)), priorBytes);
+    assert.equal(readState(projectRoot).state_meta.active_operation.id, started.operation_id);
+    assert.deepEqual(
+      fs.readdirSync(path.join(projectRoot, ".statectl-tmp")),
+      ["phase-context.json"],
+    );
+    expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+  });
+
+  await t.test("finish leaves another project's capsule unchanged", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open", {
+      args: ["--context-file"],
+    }), "CREATED");
+    const started = expectSuccess(execute(projectRoot, "begin", {
+      args: ["--context-file"],
+      payload: {
+        ...expected(opened),
+        route: "team_lead",
+        intent_summary: "Close this operation without touching another project's context.",
+      },
+    }), "BEGAN_LEAD");
+
+    const otherRoot = temporaryProject(t);
+    expectSuccess(execute(otherRoot, "open", { args: ["--context-file"] }), "CREATED");
+    const otherBytes = fs.readFileSync(phaseContextPath(otherRoot));
+    fs.writeFileSync(phaseContextPath(projectRoot), otherBytes);
+
+    const closed = expectSuccess(finish(projectRoot, started), "OPERATION_FINISHED");
+    assert.deepEqual(closed.delivery_warnings, [{
+      code: "CONTEXT_FILE_CLEANUP_FAILED",
+      message: ".statectl-tmp/phase-context.json belongs to a different project and was left unchanged",
+    }]);
+    assert.deepEqual(fs.readFileSync(phaseContextPath(projectRoot)), otherBytes);
+    assert.equal(readState(projectRoot).state_meta.active_operation, null);
+  });
+
+  await t.test("finish reports cleanup failure without reversing closeout", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open", {
+      args: ["--context-file"],
+    }), "CREATED");
+    const started = expectSuccess(execute(projectRoot, "begin", {
+      args: ["--context-file"],
+      payload: {
+        ...expected(opened),
+        route: "data_audit",
+        intent_summary: "Cancel after testing cleanup.",
+      },
+    }), "BEGAN_WORKER");
+    const closed = expectSuccess(finish(projectRoot, started, {}, {
+      cancel: true,
+      env: { STATECTL_FAIL_CONTEXT_CLEANUP: "1" },
+    }), "OPERATION_CANCELLED");
+    assert.deepEqual(closed.delivery_warnings, [{
+      code: "CONTEXT_FILE_CLEANUP_FAILED",
+      message: "injected phase-context cleanup failure",
+    }]);
+    assert.equal(readState(projectRoot).state_meta.active_operation, null);
+    assert.equal(fs.existsSync(phaseContextPath(projectRoot)), true);
+  });
+});
+test("artifact reservation rejects unsafe paths and late collisions without state mutation", async (t) => {
+  const removeDirectoryLink = (linkPath) => {
+    if (process.platform === "win32") fs.rmdirSync(linkPath);
+    else fs.unlinkSync(linkPath);
+  };
+
+  await t.test("a non-string file extension is an input error", (subtest) => {
+    const projectRoot = temporaryProject(subtest);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const before = fs.readFileSync(statePath(projectRoot));
+
+    expectFailure(execute(projectRoot, "begin", {
+      payload: {
+        ...expected(opened),
+        route: "data_audit",
+        intent_summary: "Reject an invalid artifact extension.",
+        artifact_reservation: {
+          kind: "file",
+          slug: "numeric-extension",
+          extension: 7,
+        },
+      },
+    }), "INVALID_INPUT");
+
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+    assert.equal(readState(projectRoot).state_meta.active_operation, null);
+  });
+
+  await t.test("an output root linked outside the project is rejected", (subtest) => {
+    const projectRoot = temporaryProject(subtest);
+    const outsideRoot = temporaryProject(subtest);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const outputRoot = path.join(projectRoot, "output");
+    try {
+      fs.symlinkSync(outsideRoot, outputRoot, process.platform === "win32" ? "junction" : "dir");
+    } catch (error) {
+      if (["EPERM", "EACCES", "ENOTSUP"].includes(error.code)) {
+        subtest.skip(`directory links are unavailable: ${error.code}`);
+        return;
+      }
+      throw error;
+    }
+
+    const before = fs.readFileSync(statePath(projectRoot));
+    try {
+      expectFailure(execute(projectRoot, "begin", {
+        payload: {
+          ...expected(opened),
+          route: "data_audit",
+          intent_summary: "Do not reserve output outside the project.",
+          artifact_reservation: {
+            kind: "file",
+            slug: "outside-output",
+            extension: "csv",
+          },
+        },
+      }), "INVALID_ARTIFACT_PATH");
+      assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+      assert.equal(readState(projectRoot).state_meta.active_operation, null);
+      assert.deepEqual(fs.readdirSync(outsideRoot), []);
+    } finally {
+      removeDirectoryLink(outputRoot);
+    }
+  });
+
+
+  await t.test("an output root linked elsewhere inside the project is rejected", (subtest) => {
+    const projectRoot = temporaryProject(subtest);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const redirectedRoot = path.join(projectRoot, "redirected-output");
+    fs.mkdirSync(redirectedRoot);
+    const outputRoot = path.join(projectRoot, "output");
+    try {
+      fs.symlinkSync(
+        redirectedRoot,
+        outputRoot,
+        process.platform === "win32" ? "junction" : "dir",
+      );
+    } catch (error) {
+      if (["EPERM", "EACCES", "ENOTSUP"].includes(error.code)) {
+        subtest.skip(`directory links are unavailable: ${error.code}`);
+        return;
+      }
+      throw error;
+    }
+
+    const before = fs.readFileSync(statePath(projectRoot));
+    try {
+      expectFailure(execute(projectRoot, "begin", {
+        payload: {
+          ...expected(opened),
+          route: "data_audit",
+          intent_summary: "Keep generated output inside the output directory.",
+          artifact_reservation: {
+            kind: "file",
+            slug: "inside-project-redirect",
+            extension: "csv",
+          },
+        },
+      }), "INVALID_ARTIFACT_PATH");
+      assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+      assert.equal(readState(projectRoot).state_meta.active_operation, null);
+      assert.deepEqual(fs.readdirSync(redirectedRoot), []);
+    } finally {
+      removeDirectoryLink(outputRoot);
+    }
+  });
+  await t.test("a dangling output-root link is rejected", (subtest) => {
+    const projectRoot = temporaryProject(subtest);
+    const outsideRoot = temporaryProject(subtest);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const outputRoot = path.join(projectRoot, "output");
+    const missingTarget = path.join(outsideRoot, "missing-output");
+    try {
+      fs.symlinkSync(missingTarget, outputRoot, process.platform === "win32" ? "junction" : "dir");
+    } catch (error) {
+      subtest.skip(`dangling directory links are unavailable: ${error.code || error.message}`);
+      return;
+    }
+
+    const before = fs.readFileSync(statePath(projectRoot));
+    try {
+      expectFailure(execute(projectRoot, "begin", {
+        payload: {
+          ...expected(opened),
+          route: "data_audit",
+          intent_summary: "Reject a dangling output root.",
+          artifact_reservation: {
+            kind: "directory",
+            slug: "dangling-output",
+          },
+        },
+      }), "INVALID_ARTIFACT_PATH");
+      assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+      assert.equal(readState(projectRoot).state_meta.active_operation, null);
+    } finally {
+      removeDirectoryLink(outputRoot);
+    }
+  });
+
+  await t.test("begin rejects a collision found by its final inspection", (subtest) => {
+    const projectRoot = temporaryProject(subtest);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const outputRoot = path.join(projectRoot, "output");
+    fs.mkdirSync(outputRoot);
+    const before = fs.readFileSync(statePath(projectRoot));
+    const originalLstat = fs.lstatSync;
+    let target = null;
+    let targetInspections = 0;
+    fs.lstatSync = function lstatWithBeginReservationRace(filePath, ...args) {
+      const candidate = path.resolve(filePath);
+      const isTarget = (
+        path.dirname(candidate) === outputRoot
+        && /^begin-race-[0-9a-f]{8}\.csv$/.test(path.basename(candidate))
+      );
+      if (!isTarget) return originalLstat.call(fs, filePath, ...args);
+      target ??= candidate;
+      targetInspections += 1;
+      try {
+        return originalLstat.call(fs, filePath, ...args);
+      } catch (error) {
+        if (
+          candidate === target
+          && targetInspections === 1
+          && error
+          && ["ENOENT", "ENOTDIR"].includes(error.code)
+        ) {
+          fs.writeFileSync(target, "late collision\n", "utf8");
+        }
+        throw error;
+      }
+    };
+    try {
+      assert.throws(
+        () => beginSourceOperation({
+          projectRoot,
+          payload: {
+            ...expected(opened),
+            route: "data_audit",
+            intent_summary: "Reject a late begin-time collision.",
+            artifact_reservation: {
+              kind: "file",
+              slug: "begin-race",
+              extension: "csv",
+            },
+          },
+        }),
+        (error) => error && error.code === "ARTIFACT_COLLISION",
+      );
+    } finally {
+      fs.lstatSync = originalLstat;
+    }
+
+    assert.ok(targetInspections >= 2);
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+    assert.equal(readState(projectRoot).state_meta.active_operation, null);
+    if (target !== null) fs.rmSync(target, { force: true });
+  });
+
+  await t.test("reserve-artifact rejects a collision found by its final inspection", (subtest) => {
+    const projectRoot = temporaryProject(subtest);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const started = expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+    const outputRoot = path.join(projectRoot, "output");
+    fs.mkdirSync(outputRoot);
+    const target = path.join(
+      outputRoot,
+      `reserve-race-${started.operation_id.slice(0, 8)}.csv`,
+    );
+    const before = fs.readFileSync(statePath(projectRoot));
+    const originalLstat = fs.lstatSync;
+    let targetInspections = 0;
+    fs.lstatSync = function lstatWithReservationRace(filePath, ...args) {
+      if (path.resolve(filePath) !== target) {
+        return originalLstat.call(fs, filePath, ...args);
+      }
+      targetInspections += 1;
+      try {
+        return originalLstat.call(fs, filePath, ...args);
+      } catch (error) {
+        if (
+          targetInspections === 1
+          && error
+          && ["ENOENT", "ENOTDIR"].includes(error.code)
+        ) {
+          fs.writeFileSync(target, "late collision\n", "utf8");
+        }
+        throw error;
+      }
+    };
+    try {
+      assert.throws(
+        () => reserveSourceArtifact({
+          projectRoot,
+          payload: {
+            ...expected(started),
+            operation_id: started.operation_id,
+            kind: "file",
+            slug: "reserve-race",
+            extension: "csv",
+          },
+        }),
+        (error) => error && error.code === "ARTIFACT_COLLISION",
+      );
+    } finally {
+      fs.lstatSync = originalLstat;
+    }
+
+    assert.ok(targetInspections >= 2);
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+    const state = readState(projectRoot);
+    assert.equal(state.state_meta.revision, started.revision);
+    assert.equal(state.state_meta.active_operation.artifact_intent, null);
+    fs.rmSync(target, { force: true });
+    expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+  });
+});
+test("context-file mode supports a team-lead-only lifecycle", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open", {
+    args: ["--context-file"],
+  }), "CREATED");
+  const started = expectSuccess(execute(projectRoot, "begin", {
+    args: ["--context-file"],
+    payload: {
+      ...expected(opened),
+      route: "team_lead",
+      intent_summary: "Close one lead-only operation.",
+    },
+  }), "BEGAN_LEAD");
+
+  const lead = readPhaseContext(projectRoot);
+  assert.equal(lead.phase, "lead");
+  assert.equal(lead.completion_command, "finish");
+  assert.equal(lead.turn_context.actor, "team_lead");
+  assert.equal(lead.turn_context.stage, "lead_pending");
+  assertRequiredReferences(lead, ["references/team_lead.md"]);
+  assertContextReference(started, lead, "lead");
+
+  const stateBytes = fs.readFileSync(statePath(projectRoot));
+  const contextBytes = fs.readFileSync(phaseContextPath(projectRoot));
+  const resumed = expectSuccess(execute(projectRoot, "open", {
+    args: ["--context-file"],
+  }), "RESUME_LEAD");
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), stateBytes);
+  assert.deepEqual(fs.readFileSync(phaseContextPath(projectRoot)), contextBytes);
+  assert.deepEqual(resumed.context_ref, started.context_ref);
+
+  expectSuccess(finish(projectRoot, started), "OPERATION_FINISHED");
+  assert.equal(fs.existsSync(phaseContextPath(projectRoot)), false);
+});
+
+test("exact analysis and report scopes reach their worker capsules", async (t) => {
+  const scenarios = [
+    {
+      name: "analysis",
+      prepare: (projectRoot) => prepareAnalysisScope(
+        projectRoot,
+        "single_time_observational",
+        "statistical-validity",
+      ),
+      route: "analysis_execution.single_time_observational",
+      actor: "analysis_execution.single_time_observational",
+      support: "statistical-validity",
+      references: [
+        "references/design_execution_contract.md",
+        "references/design/single_time_observational.md",
+        "references/support/statistical-validity.md",
+        "references/artifact_output_policy.md",
+      ],
+    },
+    {
+      name: "report",
+      prepare: (projectRoot) => prepareReportScope(projectRoot),
+      route: "report_writer",
+      actor: "report_writer",
+      support: null,
+      references: [
+        "references/report_writer.md",
+        "references/artifact_output_policy.md",
+      ],
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, (subtest) => {
+      const projectRoot = temporaryProject(subtest);
+      const prepared = scenario.prepare(projectRoot);
+      const opened = expectSuccess(execute(projectRoot, "open", {
+        args: ["--context-file"],
+      }), "OPENED");
+      const started = expectSuccess(execute(projectRoot, "begin", {
+        args: ["--context-file"],
+        payload: {
+          ...expected(opened),
+          route: scenario.route,
+          intent_summary: "Execute the exact ready scope.",
+          ...(scenario.support === null ? {} : { support: scenario.support }),
+          scope_ref: prepared.scope_ref,
+        },
+      }), "BEGAN_WORKER");
+
+      const worker = readPhaseContext(projectRoot);
+      assert.equal(worker.phase, "worker");
+      assert.equal(worker.turn_context.actor, scenario.actor);
+      assert.deepEqual(worker.turn_context.operation.scope_ref, prepared.scope_ref);
+      assert.deepEqual(worker.operation_packet.scope_ref, prepared.scope_ref);
+      assertRequiredReferences(worker, scenario.references);
+      assertContextReference(started, worker, "worker");
+      expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+    });
+  }
+});
+
+test("numbered selection can reserve its selected worker output in one begin", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open", {
+    args: ["--context-file"],
+  }), "CREATED");
+  const lead = expectSuccess(execute(projectRoot, "begin", {
+    args: ["--context-file"],
+    payload: {
+      ...expected(opened),
+      route: "team_lead",
+      intent_summary: "Offer one durable next choice.",
+    },
+  }), "BEGAN_LEAD");
+  const menu = expectSuccess(finish(projectRoot, lead, {}, {
+    presentation: optionsPresentation([
+      decisionOption("Audit the data", "data_audit"),
+      decisionOption("Review the domain", "domain_expert"),
+    ]),
+  }), "OPERATION_FINISHED");
+
+  const selected = expectSuccess(execute(projectRoot, "begin", {
+    args: ["--context-file"],
+    payload: {
+      ...expected(menu),
+      selection: {
+        decision_id: menu.pending_decision.decision_id,
+        option_number: 1,
+      },
+      artifact_reservation: {
+        kind: "file",
+        slug: "selected-audit",
+        extension: "csv",
+      },
+    },
+  }), "BEGAN_WORKER");
+
+  assert.equal(selected.revision, menu.revision + 1);
+  const worker = readPhaseContext(projectRoot);
+  assert.equal(worker.turn_context.actor, "data_audit");
+  assert.equal(worker.turn_context.operation.intent_summary, "Exercise audit the data");
+  assert.deepEqual(
+    worker.turn_context.operation.artifact_intent,
+    selected.artifact_intent,
+  );
+  assert.equal(worker.turn_context.artifact_status.temporary_path, selected.temporary_path);
+  assert.ok(worker.required_references.includes("references/artifact_output_policy.md"));
+  assert.equal(readState(projectRoot).pending_decision, null);
+  assertContextReference(selected, worker, "worker");
+  expectSuccess(finish(projectRoot, selected, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
+test("legacy, inline capsule, and context-file open modes are equivalent at every stage", (t) => {
+  const projectRoot = temporaryProject(t);
+  expectSuccess(execute(projectRoot, "open"), "CREATED");
+
+  const compareModes = (expectedCode) => {
+    const stateBytes = fs.readFileSync(statePath(projectRoot));
+    const legacy = expectSuccess(execute(projectRoot, "open"), expectedCode);
+    const inline = expectSuccess(execute(projectRoot, "open", {
+      args: ["--context-protocol", PHASE_CONTEXT_PROTOCOL],
+    }), expectedCode);
+    const compact = expectSuccess(execute(projectRoot, "open", {
+      args: ["--context-file"],
+    }), expectedCode);
+    const capsule = readPhaseContext(projectRoot);
+
+    assert.deepEqual(capsule, inline.phase_capsule);
+    assert.deepEqual(capsule.turn_context, legacy.turn_context);
+    assert.deepEqual(capsule.operation_packet, legacy.operation_packet);
+    assert.deepEqual(capsule.required_references, legacy.required_references);
+    assert.equal(compact.context_ref.context_id, capsule.context_id);
+    assert.equal(capsuleContextId(capsule), capsule.context_id);
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), stateBytes);
+
+    const tampered = structuredClone(capsule);
+    tampered.turn_context.revision += 1;
+    assert.notEqual(capsuleContextId(tampered), tampered.context_id);
+    const contextBytes = fs.readFileSync(phaseContextPath(projectRoot));
+    assert.throws(
+      () => writeFullCapsule(projectRoot, tampered),
+      (error) => error && error.code === "CONTEXT_FILE_WRITE_FAILED",
+    );
+    assert.deepEqual(fs.readFileSync(phaseContextPath(projectRoot)), contextBytes);
+    return legacy;
+  };
+
+  const idle = compareModes("OPENED");
+  const started = expectSuccess(begin(projectRoot, idle, "data_audit"), "BEGAN_WORKER");
+  compareModes("RESUME_WORKER");
+
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "data_audit",
+      updates: {
+        data_facts: {
+          data_checked: "passing",
+          data_sources: ["data/input.csv"],
+          audit_scope: "Phase transport equivalence",
+          unit_of_observation: "Participant",
+        },
+        council_chamber: {
+          data_audit: {
+            current_status: "complete",
+            summary: "The phase transport evidence is equivalent.",
+            questions_for_user: [],
+            feedback_to_route: [],
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+
+  compareModes("RESUME_LEAD");
+  expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
 });
