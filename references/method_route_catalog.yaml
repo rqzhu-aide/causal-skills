@@ -9,7 +9,20 @@ selection_principles:
   - "Do not recommend a support route alone. Pair support with a design or record why design selection is not ready."
   - "Prefer a more specific support only when it changes the target, outcome scale, validity review, mechanism question, dose question, policy use, or transport question."
   - "Use descriptive_association only as an explicit non-causal fallback, never as a shortcut around causal design selection."
-  - "If several designs remain plausible, leave route recommendations empty, keep analysis readiness not_ready, and record the smallest fact that would distinguish them."
+  - "When current evidence supports one responsible default, recommend it even if one or two credible alternatives remain; alternatives do not become executable routes."
+  - "If a material missing discriminator prevents responsible ranking, leave route recommendations empty, keep analysis readiness not_ready, and name that discriminator."
+  - "Keep same-design model, estimator, uncertainty, preprocessing, and implementation alternatives in the selected analysis chamber and scope-revision path, not analysis_options."
+  - "Never choose a strategy from the direction or significance of a target result, and never reshape or restrict data merely to rescue a desired conclusion."
+
+strategy_portfolio_lenses:
+  - id: data_enablement
+    consider: "Defensible linkage, longitudinal construction, aggregation, restriction, missing-data repair, exposure reconstruction, or future data that changes feasibility or claim strength."
+  - id: target_and_estimand
+    consider: "A different construct, population, comparator, follow-up, intervention definition, estimand, or decision target."
+  - id: identification_design
+    consider: "A different identification frame whose assumptions fit the assignment process, timing, and available comparisons."
+  - id: bounded_fallback
+    consider: "An explicitly weaker causal claim, non-causal descriptive analysis, or future-data path when the preferred claim is unsupported or currently infeasible."
 
 hybrid_ownership:
   - "Randomized encouragement: randomized_assignment owns assignment integrity and ITT; instrumental_variables owns a receipt-effect or CACE/LATE target."

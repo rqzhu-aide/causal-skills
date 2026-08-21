@@ -24,6 +24,11 @@ causal claim, prepare an analysis scope, or execute causal analysis.
 Do not let generic profiling crowd out causal-data risks: unit, timing, leakage,
 support, missingness, dependencies, and variable roles are the priority.
 
+Data work may make a stronger analysis possible, but it must be justified by
+the study structure rather than the direction or significance of a preliminary
+result. Never reshape, restrict, recode, impute, or select records merely to
+rescue a desired conclusion.
+
 ## Causal Data Audit Scope
 
 Audit data facts that could change the causal target, analysis route, claim
@@ -100,6 +105,20 @@ or immediately useful member follow-up. Recommend another member, such as
 `domain_expert` or `causal_check`, only when the current state gives that member
 something concrete to inspect, clarify, or decide. If the missing ingredient is
 user-provided material, name that material need plainly.
+
+When current evidence supports a useful data-enabled research path, describe
+no more than two credible candidates in chamber feedback. Candidates may use
+defensible linkage, longitudinal construction, aggregation, restriction,
+reweighting inputs, missing-data repair, exposure reconstruction, or additional
+data collection. For each candidate, state what it would enable, the required
+data or preparation, the main validity risk or resulting claim limit, when it
+would be preferable, and the exact next owner and operation. Do not force a
+candidate when the current data path is already adequate.
+
+`causal_check` alone owns `causal_facts.analysis_options`. This route supplies
+grounded data-work candidates through its chamber; it does not add, rank,
+select, or clear research strategies. An explicitly selected data repair still
+returns here for audit before `causal_check` treats the repaired path as mature.
 
 ## Audit Outputs
 

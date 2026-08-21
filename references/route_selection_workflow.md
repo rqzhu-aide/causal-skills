@@ -71,8 +71,20 @@ cue, and current router phase context, not from keywords alone.
 A choice binds only when the message unambiguously identifies one option. A
 bare number additionally requires that menu in the immediately preceding
 response. Without a matching pending decision, use normal routing. A generic
-confirmation binds only when the preceding next step asked one explicit yes/no
-question about an action, approval, or clarification.
+confirmation binds only to the exact non-null
+`turn_context.previous_response_cue.direct_assignment` from the immediately
+preceding explicit yes/no question. Pass that assignment through normal live
+validation; never reconstruct it from approval prose. Without that durable
+assignment, use normal routing.
+
+Use a numbered decision only when two or more materially different next
+operations require the user's choice and every option maps to one exact
+controller-routable assignment. Do not create filler options for ordinary
+discussion, continuing, repeating, deferring, or taking no action. When there
+is one proposed action, ask one direct yes/no question or one focused
+clarification instead of manufacturing a menu. A ready analysis or report scope
+is one exact action and keeps direct yes/no approval; explanatory alternatives
+may invite revision but do not become competing approval options.
 
 Analysis or report execution requires one uniquely identified ready scope whose
 identity and revision remain current. If it was already noncurrent before this

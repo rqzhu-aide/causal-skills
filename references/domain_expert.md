@@ -78,6 +78,21 @@ immediately useful member follow-up. Recommend another member, such as
 `data_audit` or `causal_check`, only when the current state gives that member
 something concrete to inspect, clarify, or decide.
 
+When domain evidence supports a materially different research path, describe
+no more than two credible candidates in chamber feedback. Candidates may
+change the construct, endpoint, comparator, target population, follow-up,
+measurement strategy, or decision use. For each candidate, state what it would
+enable, the required interpretation or material, the main validity risk or
+resulting claim limit, when it would be preferable, and the exact next owner
+and operation. Do not manufacture alternatives when one formulation clearly
+fits the user's question.
+
+`causal_check` alone owns `causal_facts.analysis_options`. This route supplies
+domain-grounded candidates through its chamber; it does not add, rank, select,
+or clear research strategies. A candidate does not replace the user's current
+target unless the user explicitly adopts it and causal review reconciles the
+new target.
+
 ## Domain Source Recording
 
 Do not create output folders or `artifact_records` entries from `domain_expert`

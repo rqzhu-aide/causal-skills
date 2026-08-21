@@ -47,6 +47,27 @@ A worker never infers approval from generic execution language. Without an
 exact bound ready scope reference, prepare, revise, or block only. Block when
 analysis cannot responsibly be scoped or executed.
 
+## Research Strategy Context
+
+Treat the current preferred `causal_facts.analysis_options` item and matching
+`recommended_method_routes` as the default identification strategy. Other
+portfolio items are decision context, not parallel scopes or authorization.
+This route does not update, promote, or clear the portfolio.
+
+During scope preparation, consider materially different formulations inside
+the selected design, including model, estimator, uncertainty, preprocessing,
+and implementation choices. Put routine diagnostics and safeguards inside the
+default scope. Surface no more than two credible formulation alternatives, and
+only when the choice could change the answer or claim. In chamber feedback,
+state what each would enable, what it requires, its main validity risk or claim
+limit, when it would be preferable, and the exact next analysis operation. Do
+not force an alternative when the complete default is adequate.
+
+A requested change to target, estimand, identification design, data
+construction, or domain interpretation returns to its owning core route. A
+same-design formulation may return here as scope preparation or revision. Name
+the concrete path and owner instead of returning generic advice to revise.
+
 ## Scope Identity And Handoff
 
 Store scope feedback only in
@@ -54,7 +75,10 @@ Store scope feedback only in
 `scope_transition: new` for a new independent scope, `revise` for a material
 change to the existing scope, or `preserve` when its identity and revision stay
 valid. The controller assigns `scope_id`, initializes or increments
-`scope_revision`, and sets timestamps. Never invent IDs or revision numbers.
+`scope_revision`, records a controller-owned `causal_basis_hash`, and sets
+timestamps. Never submit or invent IDs, hashes, or revision numbers. The
+matching `scope_snapshot` reports `basis_current`; a false value requires scope
+revision before approval or execution.
 
 Use these analysis scope handoff fields:
 
@@ -65,9 +89,10 @@ Use these analysis scope handoff fields:
   execution_requirements, output_type, claim_boundary}`. Use trimmed strings
   and unique nonempty string arrays. New or revised `ready` scopes require a
   complete contract. Every unresolved condition that could invalidate
-  identification must appear inside `claim_boundary` as a condition on the
-  supported claim until committed evidence resolves it; listing it only as a
-  diagnostic, limitation, or future check is insufficient.
+  identification must become either a checkable item in
+  `execution_requirements` that can resolve it or an explicit condition on the supported claim inside
+  `claim_boundary`. Listing it only as a diagnostic, limitation, or future
+  check is insufficient.
 - `summary`: compact scope, blocker, or completed-output description.
 - `questions_for_user`: 0-3 current questions, choices, or approval points for
   `ready` or `blocked` handoffs. Use `[]` for `done`; team lead derives later
@@ -80,8 +105,12 @@ or model family, diagnostics, main output, and claim boundary.
 The structured contract carries these as minimum execution requirements;
 additional useful diagnostics or sensitivities are allowed when they do not add
 a new target or cross the claim boundary. A migrated ready slot may have a null
-contract and run under completion protocol 0; any later revision must add the
-structured contract.
+contract and causal basis. Preserve it as prior scope context, but revise it
+before new approval or execution. A pre-migration operation already bound to
+that scope may still resume under its legacy completion protocol.
+Specifications in `method_plan` govern every applicable execution requirement.
+A shorter local requirement cannot silently omit or weaken them. Resolve any
+conflict or exception explicitly before marking the scope `ready`.
 `questions_for_user` may offer revisions to that default, but must not leave a
 material scope element undecided. Do not store analysis scope in
 `discovery_sidecar`, `report_assembly`, pending artifact records, output
@@ -93,8 +122,9 @@ identification frame should become primary.
 
 ## Approved Execution
 
-Before reserving output, confirm that the bound scope still fits the live inputs
-and current durable evidence. If a mismatch requires a different support route,
+Before writing to an existing begin-time reservation, or before reserving late,
+confirm that the bound scope still fits the live inputs and current durable
+evidence. If a mismatch requires a different support route,
 preserve the bound scope and return `blocked` without output; a later operation
 must revise and reroute it. Other material changes may return a revised `ready`
 or `blocked` handoff without output while retaining the planned support. This is
@@ -105,6 +135,11 @@ When the approved scope remains current, follow
 execute and validate every operation-packet requirement, and submit one silent
 owner-scoped `apply`. Requirements are minimum coverage; supplemental work is
 allowed only inside the approved target and claim boundary.
+
+Prefer one reproducible execution pass that produces the contracted analysis,
+diagnostics, and outputs together. Use a targeted correction or rerun only when
+validation exposes a concrete error or unmet requirement; do not fragment the
+scope into repeated exploratory passes or repeat completed core review.
 
 For completion, preserve the scope, update only the matching analysis chamber
 slot to `done`, and submit a `completion` receipt covering every requirement.

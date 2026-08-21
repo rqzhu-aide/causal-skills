@@ -41,18 +41,21 @@ execution nuance; handle it only under Turn Protocol step 5.
 Each isolated invocation normally executes only its named phase and
 `completion_command`, then returns the compact `context_ref` to the
 orchestrator, or the controller-rendered response after `finish`. A worker may
-first call `reserve-artifact` and reload its refreshed capsule. Explicit
+call `reserve-artifact` and reload its refreshed capsule when output was not
+already reserved at `begin`. Explicit
 cancellation overrides the named phase and `completion_command`: do not run or
 resume worker work; load `references/team_lead.md` and follow the current-stage
 cancellation rule.
 No isolated phase reroutes or launches another phase.
 
 If isolated invocations are unavailable, use the same full capsules in one
-session. If the protocol is unavailable, use the standalone `turn_context`;
-workflow, gates, and ownership do not change. `open` is the recovery and resume
-boundary. A receiving phase resolves `context_ref.path` under the project root
-and requires matching protocol and a `context_id` derived from the capsule
-content; otherwise regenerate it with `open --context-file`.
+continuous session through inline `phase-capsule-v1`; do not create a context
+file merely to read it back in that session. If the protocol is unavailable,
+use the standalone `turn_context`; workflow, gates, and ownership do not
+change. `open` is the recovery and resume boundary. A fresh receiving
+invocation resolves `context_ref.path` under the project root and requires
+matching protocol and a `context_id` derived from the capsule content;
+otherwise regenerate it with `open --context-file` for that fresh handoff.
 
 Read `<project-root>/project_state.yaml` only when relevant detail or an exact
 finish-recovery receipt is genuinely omitted; this is a read-only fallback,
@@ -60,11 +63,12 @@ not a routine step. If an `operation_packet_ref` is returned but its matching
 full packet is unavailable, run `open` once to recover it.
 
 Here, **load** means ensure a returned reference is available in the current
-phase. Reuse an unchanged reference only within the same invocation. Load only
+phase. Reuse already loaded, unchanged references within the same invocation;
+a fresh invocation loads its returned references anew. Load only
 `required_references`, conditional references expressly required by a loaded
 active reference, and `references/team_lead.md` when explicit cancellation
-overrides the capsule. When several are missing, read them in one tool call when
-the host permits.
+overrides the capsule. When several are missing, read them in one tool call
+when the host permits.
 
 Controller stage, identity, scope, warnings, and next-action fields are
 authoritative. Capsules are derived from committed state and are never another
@@ -84,13 +88,15 @@ state store.
 3. Normally start with `statectl open`. One fast path is allowed in a continuous
    session after the immediately preceding successful `finish` for the same
    project root: an unambiguous selection or direct continuation of that exact
-   response may call `begin` with the returned project ID and revision, without
-   rereading state or unchanged references. In capsule mode, use
-   `--context-file` so `begin` writes the full next-phase capsule. Do not
-   use this path for reset, cancellation, a new topic, ambiguous wording,
-   uncertain session continuity, or any missing prior result. A rejected
-   fast-path `begin` changes nothing; run `open` once and follow its committed
-   stage.
+   response may call `begin` with the returned pending selection or
+   `direct_assignment`, project ID, and revision, without
+   rereading state or unchanged references. Use `--context-file` only when the
+   successful `begin` result will be handed to a genuinely fresh model
+   invocation; otherwise request and use the inline `phase-capsule-v1` result
+   in the continuous session. Do not use this path for reset, cancellation, a
+   new topic, ambiguous wording, uncertain session continuity, or any missing
+   prior result. A rejected fast-path `begin` changes nothing; run `open` once
+   and follow its committed stage.
 4. On successful `open`, follow the active `turn_context.stage` before
    considering the new request:
    - explicit cancellation of the persisted operation: load team lead and use
@@ -121,10 +127,14 @@ state store.
    reference. If relevant route work requires detail omitted from
    `turn_context`, use the full-state fallback before deciding or acting.
 8. When the worker will create durable output, load
-   `references/artifact_output_policy.md`, reserve before writing, validate the
-   returned temporary output, and submit the required artifact receipt through
-   `apply`. Reuse the current operation packet when the controller reports its
-   contract unchanged; do not reread or reinterpret the same requirements.
+   `references/artifact_output_policy.md`. Use the reservation returned by
+   `begin` when present; otherwise reserve before writing. Aim to satisfy the
+   frozen contract in one reproducible execution pass, then make only targeted
+   corrections that validation shows are necessary. Reuse unchanged verified
+   inputs, evidence, references, and the current operation packet when the
+   controller reports its contract unchanged, but revalidate anything affected
+   by changed data, code, settings, assumptions, or scope. Validate the returned
+   temporary output and submit the required artifact receipt through `apply`.
 9. At `lead_pending`, load the returned lead references. Team lead uses the
    committed lead phase context, submits its semantic summary and presentation
    through `statectl finish`, and emits only the controller-rendered response.
@@ -156,11 +166,14 @@ Pass mutation JSON by file or stdin, never as shell-escaped YAML:
 node <skill-root>/scripts/statectl.cjs <command> --project-root <root> --input <json-file|->
 ```
 
-For `open`, `begin`, `reserve-artifact`, or `apply` that hands work to a
-fresh phase, prefer `--context-file`. The controller writes the full capsule to
-`.statectl-tmp/phase-context.json` and returns only its compact `context_ref`;
-give that reference to the next invocation. The file is consumable only when
-the same command returned its matching reference.
+Use `--context-file` for `open`, `begin`, `reserve-artifact`, or `apply` only
+when the result will be handed to a genuinely fresh model invocation. The
+controller writes the full capsule to `.statectl-tmp/phase-context.json` and
+returns only its compact `context_ref`; give that reference to the next
+invocation. The file is consumable only when the same command returned its
+matching reference. When router, worker, and lead remain in one continuous
+session, use `--context-protocol phase-capsule-v1` and consume the returned full
+capsule inline.
 
 If context-file preflight fails, retry that unchanged call with
 `--context-protocol phase-capsule-v1`. If a successful `open`, `begin`,
@@ -175,11 +188,12 @@ Use the expected project ID and revision from the current result. `begin` uses
 an exact pending `selection` or normal `route`, compact `intent_summary`,
 optional `support`, and any required scope reference. When an artifact-capable
 assignment already authorizes output and its kind, slug, and, for a file,
-extension are known, `begin` may add `artifact_reservation` with those
-fields and reserve atomically. Otherwise let the worker call
-`reserve-artifact`. A new or revised discovery run must use that later call so
-its contract is frozen with the reservation. Later calls use these compact
-envelopes:
+extension are known, include `artifact_reservation` in `begin` and reserve
+atomically. This is the default for exact approved analysis and report
+execution. Omit it when output is not authorized or those fields are not yet
+known, then let the worker call `reserve-artifact` if output becomes required.
+A new or revised discovery run must use that later call so its contract is
+frozen with the reservation. Later calls use these compact envelopes:
 
 - `reserve-artifact`: active `operation_id`, `kind`, `slug`, and file
   `extension` or route-required `discovery_scope` when applicable;

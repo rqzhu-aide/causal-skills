@@ -30,8 +30,12 @@ For `done`, require an available operation-matched report `completion`
 artifact. If absent or unavailable, treat it as a missing handoff. Otherwise
 classify it accurately as report output, revised report, or derivative
 communication artifact and summarize it. A derivative artifact uses existing
-evidence and creates no new analysis. Trust the worker's committed handoff on
-whether a refinement stayed within scope or required redesign.
+evidence and creates no new analysis. Inspect the rendered artifact at the
+`requirement_evidence` locators against the frozen structure, evidence basis,
+cardinality, wording constraints, limitations, and claim boundary. A completed
+ID or summary is not semantic proof. Reconcile every disclosed deviation before
+describing the report as exact; if an omission or substitution remains, name it
+and offer repair rather than saying every requirement was met.
 
 For `blocked`, explain the smallest useful clarification, missing asset, scope
 revision, or fallback. Operation-matched `infeasibility_evidence` means the

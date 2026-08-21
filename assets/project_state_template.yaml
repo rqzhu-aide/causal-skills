@@ -1,5 +1,5 @@
 state_meta:
-  schema_version: 5
+  schema_version: 6
   project_id: null
   revision: 0
   created_at: null
@@ -106,6 +106,7 @@ causal_facts:
   support_status: null
   recommended_checks: []
   recommended_method_routes: []
+  analysis_options: []
 
 discovery_sidecar:
   last_updated: null

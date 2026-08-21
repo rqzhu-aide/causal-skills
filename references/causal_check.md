@@ -59,25 +59,78 @@ Use two readiness layers:
 - `analysis_readiness`: analysis-route readiness status, `ready`, `limited`,
   `not_ready`, or `blocked`.
 
-When the assignment assesses an alternative without changing the current
-target, preserve the current target-specific causal facts, readiness, and
-`recommended_method_routes`; record the alternative's feasibility, limitations,
-and decision discriminators in chamber feedback. An alternative becomes current
-only when the user explicitly adopts it. Whenever the current target or method
-decision changes, keep its target-defining facts, readiness, support status,
-checks, and route recommendations mutually consistent; replace superseded
-values rather than carrying them forward.
+## Research Strategy Portfolio
 
-Use at most one primary `design` item and, only when materially useful, one
-separate `support` item. Never retain a previous target's route or encode
-selected support only in `route_cautions`. Use `statistical-validity` only when
-unresolved concerns exceed the selected design's normal diagnostics. Do not
-recommend support-only execution or add support by default.
+When causal readiness or method selection is assessed, maintain
+`causal_facts.analysis_options` as compact decision support for the current
+research target. It is not a list of parallel executable routes, a prepared
+scope, or approval.
 
-If more than one design remains plausible, leave `recommended_method_routes`
-empty, keep `analysis_readiness: not_ready`, and record the smallest fact or
-decision that would distinguish them. Do not recommend another `causal_check`
-turn without naming that missing discriminator.
+Use at most three items: one `preferred` strategy when current evidence can
+rank a responsible default, plus no more than two credible `alternative` or
+`fallback` strategies when they could materially change the research decision.
+Do not force alternatives. A portfolio containing only the preferred strategy
+is correct when other paths add no meaningful value. When more than two
+nonpreferred paths are credible, retain the two with the greatest current
+decision impact and feasible next step; keep omitted candidates out of the
+durable portfolio rather than silently implying they were rejected.
+
+Each item contains `role`, `target`, `approach`, optional `design`, optional
+`support`, `data_work`, `requirements`, `main_risk`, and `prefer_when`. Use
+catalog IDs for `design` and `support`; support requires a design. Together
+these fields must say what the path enables, what data, assumptions, or
+preparation it requires, its principal validity risk or claim limit, and the
+fact or preference that would make it preferable. Put its exact next owner and
+one-operation assignment in causal chamber feedback rather than this array.
+Keep each scalar or list item within 500 characters, use at most four
+`data_work` and four `requirements` items, and keep total decision text within
+2,500 characters per strategy.
+
+Consider distinct, scientifically meaningful paths across:
+
+- defensible data restructuring, linkage, restriction, or additional data;
+- a different target, population, comparator, follow-up, estimand, or design;
+- an explicitly non-causal descriptive fallback; or
+- a future-data path that could support a stronger claim.
+
+Same-design model, estimator, uncertainty, preprocessing, and implementation
+alternatives stay outside `analysis_options`. When one is decision-relevant,
+send it through causal chamber feedback to the selected design worker for scope
+preparation or revision. This avoids a causal-review turn when the target and
+identification strategy are unchanged.
+
+Ordinary diagnostics, estimator safeguards, and sensitivities required by one
+strategy belong in its eventual scope rather than separate options. Never rank
+or create strategies from the direction, significance, or desirability of a
+target result. A failed analysis may reveal a design or data problem, but it
+does not justify outcome-driven target switching or data manipulation.
+
+When one strategy is defensibly preferred, make it consistent with the current
+target and `recommended_method_routes`. Other portfolio items remain
+non-executable and do not by themselves make the default `not_ready`. Use at
+most one primary `design` route and, only when materially useful, one separate
+`support` route. Never retain a previous target's route or encode selected
+support only in `route_cautions`. Use `statistical-validity` only when unresolved
+concerns exceed the selected design's normal diagnostics. Do not recommend
+support-only execution or add support by default.
+
+Distinguish rankable alternatives from unresolved ambiguity. If available
+evidence cannot responsibly prefer one strategy because a material
+discriminator is missing, use no `preferred` item, leave
+`recommended_method_routes` empty, keep `analysis_readiness: not_ready`, and
+record the smallest fact or decision that would distinguish the candidates.
+Do not recommend another `causal_check` turn without naming that discriminator.
+
+`causal_check` alone adds, ranks, selects, and clears `analysis_options`.
+Evaluate data- and domain-chamber suggestions before adding them. When assessing
+an unselected alternative, preserve the current preferred target, readiness,
+and route while updating only that candidate's evidence and discriminator.
+An alternative becomes current only after the user explicitly adopts it and
+causal review confirms it remains supportable. Then promote it, reconcile all
+target-defining facts and routes, and remove incompatible or superseded items.
+Clear an item when it is rejected, infeasible, dominated, duplicative, or no
+longer decision-relevant. Rebuild or clear the portfolio when the target is
+replaced; never append stale options from an earlier target.
 
 `recommended_method_routes` identifies the design eligible for later scope
 review by `analysis_execution`; it is not a prepared scope, approval, or proof
@@ -96,6 +149,12 @@ recommended. Use `limited` when a bounded causal route or explicit non-causal
 fallback is mature enough for scope review. Use `not_ready` when data, domain,
 or causal clarification could repair the path. Use `blocked` when no acceptable
 causal or non-causal fallback should proceed.
+
+A blocked portfolio has no `preferred` strategy or executable method
+recommendation. It may retain at most two nonpreferred future-data or future-
+design paths only as clearly unavailable decision context. Do not label a path
+`blocked` if a currently feasible causal or descriptive fallback can
+responsibly proceed.
 
 Use `descriptive_association` only as an explicit non-causal fallback when
 causal identification is not supportable but association summaries are still
@@ -123,6 +182,9 @@ Submit supported `causal_facts` fields when supported by the request:
 - `recommended_checks`: checks that would change the claim or route.
 - `recommended_method_routes`: concise route items with `id`, `category`,
   and `route_cautions`.
+- `analysis_options`: one current preferred project-level strategy when
+  rankable and up to two credible alternatives or fallbacks, following the
+  portfolio rules above.
 
 Use `causal_checked: passing` only when the causal question, treatment/exposure,
 comparator, outcome, time zero, target population, estimand, main assumptions,
@@ -149,6 +211,13 @@ or current uncertainty, and free of schema labels. When
 analysis readiness or method selection was requested, summarize the recommended
 design/support direction, why only a non-causal fallback is mature, or why no
 method reaches the limited threshold.
+
+When a portfolio choice is actionable, use chamber feedback to name its exact
+next owner and one-operation assignment. Use `data_audit` for data construction
+or repair, `domain_expert` for construct or population interpretation,
+`causal_check` for target, estimand, or design reassessment, and the selected
+design worker for same-design scope formulation. Do not reduce a concrete
+candidate to generic advice to reopen or revise.
 
 Recommend another member, such as `data_audit` or `domain_expert`, only when the
 current state gives that member something concrete to inspect, clarify, or

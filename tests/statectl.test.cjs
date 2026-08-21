@@ -12,6 +12,7 @@ const {
   applyWorker: applySourceWorker,
   beginOperation: beginSourceOperation,
   reserveArtifact: reserveSourceArtifact,
+  validateTemplate: validateSourceTemplate,
 } = require("../scripts/statectl-src/core.cjs");
 
 const { capsuleContextId, writeFullCapsule } = require("../scripts/statectl-src/context-file.cjs");
@@ -91,8 +92,9 @@ function writeState(projectRoot, state) {
 
 function downgradeCurrentStateToV2(projectRoot) {
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 5);
+  assert.equal(state.state_meta.schema_version, 6);
   state.state_meta.schema_version = 2;
+  delete state.causal_facts.analysis_options;
   delete state.state_meta.startup_notice;
   delete state.pending_decision;
   delete state.response_receipt;
@@ -101,6 +103,7 @@ function downgradeCurrentStateToV2(projectRoot) {
   delete state.discovery_sidecar.execution_contract;
   for (const slot of Object.values(state.council_chamber.analysis_execution)) {
     delete slot.execution_contract;
+    delete slot.causal_basis_hash;
   }
   if (state.state_meta.active_operation !== null) {
     delete state.state_meta.active_operation.discovery_scope;
@@ -117,13 +120,16 @@ function downgradeCurrentStateToV2(projectRoot) {
 
 function downgradeCurrentStateToV3(projectRoot) {
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 5);
+  assert.equal(state.state_meta.schema_version, 6);
   state.state_meta.schema_version = 3;
+  delete state.causal_facts.analysis_options;
+  if (state.response_receipt !== null) delete state.response_receipt.direct_assignment;
   delete state.discovery_sidecar.scope_id;
   delete state.discovery_sidecar.scope_revision;
   delete state.discovery_sidecar.execution_contract;
   for (const slot of Object.values(state.council_chamber.analysis_execution)) {
     delete slot.execution_contract;
+    delete slot.causal_basis_hash;
   }
   if (state.state_meta.active_operation !== null) {
     delete state.state_meta.active_operation.discovery_scope;
@@ -140,10 +146,13 @@ function downgradeCurrentStateToV3(projectRoot) {
 
 function downgradeCurrentStateToV4(projectRoot) {
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 5);
+  assert.equal(state.state_meta.schema_version, 6);
   state.state_meta.schema_version = 4;
+  delete state.causal_facts.analysis_options;
+  if (state.response_receipt !== null) delete state.response_receipt.direct_assignment;
   for (const slot of Object.values(state.council_chamber.analysis_execution)) {
     delete slot.execution_contract;
+    delete slot.causal_basis_hash;
   }
   if (state.state_meta.active_operation !== null) {
     delete state.state_meta.active_operation.completion_protocol;
@@ -153,6 +162,19 @@ function downgradeCurrentStateToV4(projectRoot) {
     delete record.artifact_role;
     delete record.execution_receipt;
   }
+  writeState(projectRoot, state);
+  return state;
+}
+
+function downgradeCurrentStateToV5(projectRoot) {
+  const state = readState(projectRoot);
+  assert.equal(state.state_meta.schema_version, 6);
+  state.state_meta.schema_version = 5;
+  delete state.causal_facts.analysis_options;
+  for (const slot of Object.values(state.council_chamber.analysis_execution)) {
+    delete slot.causal_basis_hash;
+  }
+  if (state.response_receipt !== null) delete state.response_receipt.direct_assignment;
   writeState(projectRoot, state);
   return state;
 }
@@ -213,7 +235,7 @@ function assertTurnContext(projectRoot, result, expectedContext) {
   assert.equal("turn_context" in state, false);
   assert.equal("required_references" in state, false);
   assert.equal("operation_packet_ref" in state, false);
-  assert.equal(state.state_meta.schema_version, 5);
+  assert.equal(state.state_meta.schema_version, 6);
 }
 
 function begin(projectRoot, prior, route, extras = {}) {
@@ -233,6 +255,7 @@ const DEFAULT_PRESENTATION = Object.freeze({
   options: [],
   boundary: "No additional boundary changed.",
   next_steps: "Continue with the next requested step.",
+  direct_assignment: null,
 });
 
 const DEFAULT_DISCOVERY_CONTRACT = Object.freeze({
@@ -282,6 +305,7 @@ function optionsPresentation(options) {
     options,
     boundary: "Each choice starts one operation and preserves the current evidence boundary.",
     next_steps: "Choose one of the options.",
+    direct_assignment: null,
   };
 }
 
@@ -298,7 +322,37 @@ function beginSelection(projectRoot, prior, decisionId, optionNumber, extras = {
   });
 }
 
+function readyDirectAssignment(projectRoot) {
+  const state = readState(projectRoot);
+  const operation = state.state_meta.active_operation;
+  if (operation === null || operation.stage !== "lead_pending" || operation.scope_ref === null) {
+    return null;
+  }
+  const route = state.next_step_plan[0]?.id;
+  const support = state.next_step_plan[0]?.support ?? null;
+  const status = typeof route === "string" && route.startsWith("analysis_execution.")
+    ? state.council_chamber.analysis_execution[route.slice("analysis_execution.".length)]?.current_status
+    : route === "report_writer"
+      ? state.council_chamber.report_writer.current_status
+      : null;
+  if (status !== "ready") return null;
+  return {
+    route,
+    support,
+    intent_summary: `Execute the exact ready ${operation.scope_ref.kind} scope.`,
+    scope_ref: structuredClone(operation.scope_ref),
+  };
+}
+
 function finish(projectRoot, prior, updates = {}, options = {}) {
+  const defaultPresentation = structuredClone(DEFAULT_PRESENTATION);
+  if (!options.cancel) {
+    defaultPresentation.direct_assignment = readyDirectAssignment(projectRoot);
+    if (defaultPresentation.direct_assignment !== null) {
+      const kind = defaultPresentation.direct_assignment.scope_ref.kind;
+      defaultPresentation.next_steps = `Do you approve executing this exact ready ${kind} scope?`;
+    }
+  }
   return execute(projectRoot, "finish", {
     args: options.cancel ? ["--cancel"] : [],
     env: options.env,
@@ -306,7 +360,7 @@ function finish(projectRoot, prior, updates = {}, options = {}) {
       ...expected(prior),
       operation_id: prior.operation_id,
       updates,
-      presentation: options.presentation ?? DEFAULT_PRESENTATION,
+      presentation: options.presentation ?? defaultPresentation,
     },
   });
 }
@@ -321,6 +375,13 @@ function analysisSlot(status, summary, support = null, executionContract = DEFAU
   };
   if (status === "ready") slot.execution_contract = structuredClone(executionContract);
   return slot;
+}
+
+function rawAnalysisSlot(status, summary, support = null, executionContract = DEFAULT_ANALYSIS_EXECUTION_CONTRACT) {
+  return {
+    ...analysisSlot(status, summary, support, executionContract),
+    causal_basis_hash: null,
+  };
 }
 
 function packetFor(result) {
@@ -341,16 +402,53 @@ function executionReceipt(result, options = {}) {
   const unmetRequirements = options.unmet_requirements ?? [];
   const completedRequirements = options.completed_requirements
     ?? requirementIds.filter((id) => !unmetRequirements.includes(id));
+  const evidenceFiles = [...(
+    options.evidence_files
+    ?? (result.artifact_intent ? [result.artifact_intent.location] : [])
+  )];
   return {
     contract_hash: options.contract_hash ?? packet.contract_hash,
     completed_requirements: [...completedRequirements],
     unmet_requirements: [...unmetRequirements],
     supplemental_work: [...(options.supplemental_work ?? [])],
-    evidence_files: [...(
-      options.evidence_files
-      ?? (result.artifact_intent ? [result.artifact_intent.location] : [])
-    )],
+    evidence_files: evidenceFiles,
+    requirement_evidence: structuredClone(
+      options.requirement_evidence
+      ?? completedRequirements.map((requirementId) => ({
+        requirement_id: requirementId,
+        file: evidenceFiles[0],
+        locator: `Evidence for ${requirementId}`,
+      })),
+    ),
+    deviations: [...(options.deviations ?? [])],
   };
+}
+
+function legacyExecutionReceipt(result, options = {}) {
+  const receipt = executionReceipt(result, options);
+  delete receipt.requirement_evidence;
+  delete receipt.deviations;
+  return receipt;
+}
+
+function writeLegacySchema2Completion(projectRoot, result, actor, summary, receipt) {
+  const finalPath = path.join(projectRoot, ...result.artifact_intent.location.split("/"));
+  fs.mkdirSync(path.dirname(finalPath), { recursive: true });
+  fs.writeFileSync(finalPath, "estimate,se\n0.8,0.1\n", "utf8");
+  const manifestPath = path.join(projectRoot, ...result.manifest_path.split("/"));
+  const manifest = {
+    schema_version: 2,
+    operation_id: result.operation_id,
+    route: actor.startsWith("analysis_execution.") ? "analysis_execution" : actor,
+    scope_ref: structuredClone(result.scope_ref ?? null),
+    artifact_role: "completion",
+    execution_receipt: structuredClone(receipt),
+    files: [result.artifact_intent.location],
+    completed_at: new Date().toISOString(),
+    summary,
+  };
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  return { finalPath, manifestPath, manifest };
 }
 
 function scopedArtifact(result, summary, options = {}) {
@@ -372,8 +470,25 @@ function writeReservedTemporary(projectRoot, reserved, contents = "diagnostic,va
 }
 
 function causalCheckUpdates(causalFacts, summary = "Causal review completed.") {
+  const facts = structuredClone(causalFacts);
+  const decisionFields = [
+    "analysis_readiness",
+    "support_status",
+    "recommended_checks",
+    "recommended_method_routes",
+  ];
+  if (
+    decisionFields.some((field) => Object.prototype.hasOwnProperty.call(facts, field))
+    && !Object.prototype.hasOwnProperty.call(facts, "analysis_options")
+  ) {
+    const design = facts.recommended_method_routes?.find((route) => route.category === "design")?.id;
+    const support = facts.recommended_method_routes?.find((route) => route.category === "support")?.id;
+    facts.analysis_options = ["ready", "limited"].includes(facts.analysis_readiness) && design
+      ? [analysisOption("preferred", design, support)]
+      : [];
+  }
   return {
-    causal_facts: causalFacts,
+    causal_facts: facts,
     council_chamber: {
       causal_check: {
         current_status: "review_complete",
@@ -382,6 +497,21 @@ function causalCheckUpdates(causalFacts, summary = "Causal review completed.") {
         feedback_to_route: [],
       },
     },
+  };
+}
+
+function analysisOption(role, design, support = null, overrides = {}) {
+  return {
+    role,
+    target: "Estimate the configured treatment effect.",
+    approach: `Use the ${design} design route.`,
+    design,
+    ...(support === null ? {} : { support }),
+    data_work: [],
+    requirements: ["Respect the stated unit, timing, and support conditions."],
+    main_risk: "The identifying assumptions may remain only partly testable.",
+    prefer_when: "The current design assumptions and data support remain credible.",
+    ...overrides,
   };
 }
 
@@ -400,6 +530,7 @@ function seedAnalysisEligibility(projectRoot, options = {}) {
     { id: design, category: "design", route_cautions: [] },
     ...(support === null ? [] : [{ id: support, category: "support", route_cautions: [] }]),
   ];
+  state.causal_facts.analysis_options = [analysisOption("preferred", design, support)];
   writeState(projectRoot, state);
 }
 
@@ -493,7 +624,7 @@ test("open creates a valid state and a normal open is a byte-preserving no-op", 
   const firstBytes = fs.readFileSync(statePath(projectRoot), "utf8");
   const state = readState(projectRoot);
 
-  assert.equal(state.state_meta.schema_version, 5);
+  assert.equal(state.state_meta.schema_version, 6);
   assert.equal(state.state_meta.project_id, created.project_id);
   assert.equal(state.state_meta.revision, 0);
   assert.equal(state.state_meta.active_operation, null);
@@ -511,6 +642,15 @@ test("open creates a valid state and a normal open is a byte-preserving no-op", 
   assert.equal(reopened.mode, "idle");
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), firstBytes);
   expectSuccess(execute(projectRoot, "validate"), "VALID");
+});
+
+test("template validation advertises strategy and requirement-evidence support", () => {
+  const result = validateSourceTemplate({ skillRoot: SKILL_ROOT });
+  assert.equal(result.schema_version, 6);
+  assert.equal(result.capabilities.analysis_options, 1);
+  assert.equal(result.capabilities.requirement_evidence, 1);
+  assert.equal(result.capabilities.direct_assignment, 1);
+  assert.equal(result.capabilities.causal_scope_basis, 1);
 });
 
 test("begin treats a historical manifest lstat race as an availability warning", (t) => {
@@ -696,7 +836,7 @@ test("idle open returns exact routing context and a compact previous-response cu
   const discoveryId = crypto.randomUUID();
   const reportId = crypto.randomUUID();
   seeded.council_chamber.analysis_execution.single_time_observational = {
-    ...analysisSlot("ready", "Exact analysis scope sentinel."),
+    ...rawAnalysisSlot("ready", "Exact analysis scope sentinel."),
     last_updated: null,
     scope_id: analysisId,
     scope_revision: 2,
@@ -738,6 +878,7 @@ test("idle open returns exact routing context and a compact previous-response cu
       ],
       boundary: "Exact boundary cue.",
       next_steps: "This is replaced when options exist.",
+      direct_assignment: null,
     },
   }), "OPERATION_FINISHED");
   const before = fs.readFileSync(statePath(projectRoot), "utf8");
@@ -764,6 +905,7 @@ test("idle open returns exact routing context and a compact previous-response cu
   assert.deepEqual(reopened.turn_context.previous_response_cue, {
     operation_id: finished.operation_id,
     revision: finished.revision,
+    direct_assignment: null,
     consultant_options: [
       "    1. Audit the supplied data",
       "       Consultant read: Inspect the current dataset structure.",
@@ -789,20 +931,20 @@ test("validate exposes a deterministic scope snapshot without mutating state", (
   const differenceId = crypto.randomUUID();
   const reportId = crypto.randomUUID();
   state.council_chamber.analysis_execution.single_time_observational = {
-    ...analysisSlot("ready", "Single-time scope."),
+    ...rawAnalysisSlot("ready", "Single-time scope."),
     last_updated: null,
     scope_id: singleId,
     scope_revision: 2,
   };
   state.council_chamber.analysis_execution.difference_in_differences = {
-    ...analysisSlot("blocked", "Difference-in-differences scope.", "statistical-validity"),
+    ...rawAnalysisSlot("blocked", "Difference-in-differences scope.", "statistical-validity"),
     execution_contract: null,
     last_updated: null,
     scope_id: differenceId,
     scope_revision: 1,
   };
   state.council_chamber.analysis_execution.randomized_assignment = {
-    ...analysisSlot("requested", "No scope identity yet."),
+    ...rawAnalysisSlot("requested", "No scope identity yet."),
     execution_contract: null,
     last_updated: null,
     scope_id: null,
@@ -826,6 +968,7 @@ test("validate exposes a deterministic scope snapshot without mutating state", (
         scope_revision: 1,
         current_status: "blocked",
         support: "statistical-validity",
+        basis_current: false,
         last_updated: null,
       },
       single_time_observational: {
@@ -833,6 +976,7 @@ test("validate exposes a deterministic scope snapshot without mutating state", (
         scope_revision: 2,
         current_status: "ready",
         support: null,
+        basis_current: false,
         last_updated: null,
       },
     },
@@ -891,7 +1035,7 @@ test("supported v4.5 migration preserves evidence, adds identities, and is idemp
   }]);
 
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 5);
+  assert.equal(state.state_meta.schema_version, 6);
   assert.equal(state.state_meta.startup_notice, null);
   assert.equal(state.pending_decision, null);
   assert.equal(state.response_receipt, null);
@@ -1076,6 +1220,119 @@ test("method recommendations require one unique design with at most one support"
   }
 });
 
+test("analysis options use a compact canonical portfolio schema", async (t) => {
+  const preferred = analysisOption("preferred", "single_time_observational");
+  const alternative = analysisOption("alternative", "difference_in_differences", null, {
+    target: "Estimate a change-based effect after constructing a valid panel.",
+  });
+  const fallback = analysisOption("fallback", "descriptive_association", null, {
+    target: "Describe the adjusted association without a causal claim.",
+  });
+  const cases = [
+    {
+      name: "more than three",
+      options: [preferred, alternative, fallback, { ...alternative, target: "A fourth strategy." }],
+    },
+    {
+      name: "two preferred",
+      options: [preferred, { ...alternative, role: "preferred" }],
+    },
+    {
+      name: "invalid role",
+      options: [{ ...preferred, role: "candidate" }],
+    },
+    {
+      name: "unknown design",
+      options: [{ ...preferred, design: "unknown_design" }],
+    },
+    {
+      name: "support without design",
+      options: [{ ...preferred, design: undefined, support: "statistical-validity" }],
+      clean: (options) => { delete options[0].design; },
+    },
+    {
+      name: "missing risk",
+      options: [{ ...preferred }],
+      clean: (options) => { delete options[0].main_risk; },
+    },
+    {
+      name: "non-list requirements",
+      options: [{ ...preferred, requirements: "one requirement" }],
+    },
+    {
+      name: "overlong text",
+      options: [{ ...preferred, approach: "x".repeat(501) }],
+    },
+    {
+      name: "too many requirement items",
+      options: [{
+        ...preferred,
+        requirements: ["one", "two", "three", "four", "five"],
+      }],
+    },
+    {
+      name: "excess total decision text",
+      options: [{
+        ...preferred,
+        target: "t".repeat(500),
+        approach: "a".repeat(500),
+        main_risk: "r".repeat(500),
+        prefer_when: "p".repeat(500),
+        data_work: ["d".repeat(500)],
+        requirements: ["q"],
+      }],
+    },
+  ];
+  for (const scenario of cases) {
+    await t.test(scenario.name, () => {
+      const projectRoot = temporaryProject(t);
+      expectSuccess(execute(projectRoot, "open"), "CREATED");
+      const state = readState(projectRoot);
+      state.causal_facts.analysis_options = structuredClone(scenario.options);
+      scenario.clean?.(state.causal_facts.analysis_options);
+      writeState(projectRoot, state);
+      expectFailure(execute(projectRoot, "validate"), "INVALID_STATE");
+    });
+  }
+
+  const projectRoot = temporaryProject(t);
+  expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const state = readState(projectRoot);
+  state.causal_facts.analysis_readiness = "ready";
+  state.causal_facts.recommended_method_routes = [
+    { id: "single_time_observational", category: "design", route_cautions: [] },
+  ];
+  state.causal_facts.analysis_options = [preferred, alternative, fallback];
+  writeState(projectRoot, state);
+  expectSuccess(execute(projectRoot, "validate"), "VALID");
+
+  const boundaryRoot = temporaryProject(t);
+  expectSuccess(execute(boundaryRoot, "open"), "CREATED");
+  const boundaryState = readState(boundaryRoot);
+  boundaryState.causal_facts.analysis_readiness = "ready";
+  boundaryState.causal_facts.recommended_method_routes = [
+    { id: "single_time_observational", category: "design", route_cautions: [] },
+  ];
+  boundaryState.causal_facts.analysis_options = [
+    {
+      ...preferred,
+      target: "t".repeat(500),
+      approach: "a".repeat(500),
+      main_risk: "r".repeat(500),
+      prefer_when: "p".repeat(500),
+      data_work: ["d".repeat(500)],
+      requirements: [],
+    },
+    {
+      ...alternative,
+      data_work: ["a", "b", "c", "d"],
+      requirements: ["w", "x", "y", "z"],
+    },
+  ];
+  writeState(boundaryRoot, boundaryState);
+  expectSuccess(execute(boundaryRoot, "validate"), "VALID");
+});
+
 test("analysis begin rejects an unmet route-entry gate without mutating state", async (t) => {
   const cases = [
     {
@@ -1096,18 +1353,28 @@ test("analysis begin rejects an unmet route-entry gate without mutating state", 
     {
       name: "analysis not ready",
       field: "causal_facts.analysis_readiness",
-      mutate: (state) => { state.causal_facts.analysis_readiness = "not_ready"; },
+      mutate: (state) => {
+        state.causal_facts.analysis_readiness = "not_ready";
+        state.causal_facts.recommended_method_routes = [];
+        state.causal_facts.analysis_options = [];
+      },
     },
     {
       name: "missing design recommendation",
       field: "causal_facts.recommended_method_routes.design",
-      mutate: (state) => { state.causal_facts.recommended_method_routes = []; },
+      mutate: (state) => {
+        state.causal_facts.recommended_method_routes = [];
+        state.causal_facts.analysis_options = [];
+      },
     },
     {
       name: "wrong design recommendation",
       field: "causal_facts.recommended_method_routes.design",
       mutate: (state) => {
         state.causal_facts.recommended_method_routes[0].id = "difference_in_differences";
+        state.causal_facts.analysis_options = [
+          analysisOption("preferred", "difference_in_differences"),
+        ];
       },
     },
     {
@@ -1171,8 +1438,16 @@ test("analysis begin accepts the supported route-entry boundaries", async (t) =>
       setup: () => {},
     },
     {
-      name: "omitted optional support",
+      name: "omitted support inherits the preferred recommendation",
       recommendedSupport: "statistical-validity",
+      expectedSupport: "statistical-validity",
+      setup: () => {},
+    },
+    {
+      name: "explicit null selects a same-design formulation without support",
+      recommendedSupport: "statistical-validity",
+      extras: { support: null },
+      expectedSupport: null,
       setup: () => {},
     },
   ];
@@ -1191,11 +1466,54 @@ test("analysis begin accepts the supported route-entry boundaries", async (t) =>
       scenario.setup(state);
       writeState(projectRoot, state);
 
-      const started = expectSuccess(begin(projectRoot, opened, `analysis_execution.${design}`), "BEGAN_WORKER");
-      assert.equal(started.plan[0].support, null);
+      const started = expectSuccess(begin(
+        projectRoot,
+        opened,
+        `analysis_execution.${design}`,
+        scenario.extras ?? {},
+      ), "BEGAN_WORKER");
+      assert.equal(started.plan[0].support, scenario.expectedSupport ?? null);
       expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
     });
   }
+});
+
+test("nonpreferred research strategies remain advisory until causal review promotes them", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  seedAnalysisEligibility(projectRoot, {
+    design: "single_time_observational",
+    support: null,
+  });
+  const state = readState(projectRoot);
+  state.causal_facts.analysis_options.push(
+    analysisOption("alternative", "difference_in_differences", null, {
+      target: "Estimate a change-based effect if a valid panel becomes available.",
+      approach: "Use a difference-in-differences design after checking pretrends.",
+      requirements: ["Construct repeated outcomes and a credible comparison trend."],
+      main_risk: "Parallel trends may not be credible.",
+      prefer_when: "Longitudinal data and a defensible comparison become available.",
+    }),
+  );
+  writeState(projectRoot, state);
+  const before = fs.readFileSync(statePath(projectRoot));
+
+  const blocked = expectFailure(begin(
+    projectRoot,
+    opened,
+    "analysis_execution.difference_in_differences",
+  ), "ANALYSIS_GATE_FAILED");
+  assert.ok(blocked.details.failures.some(
+    (item) => item.field === "causal_facts.recommended_method_routes.design",
+  ));
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+
+  const preferred = expectSuccess(begin(
+    projectRoot,
+    opened,
+    "analysis_execution.single_time_observational",
+  ), "BEGAN_WORKER");
+  expectSuccess(finish(projectRoot, preferred, {}, { cancel: true }), "OPERATION_CANCELLED");
 });
 
 test("analysis begin applies the same gate to an exact ready scope", (t) => {
@@ -1328,7 +1646,7 @@ test("begin returns comprehensive actor context and exact route references", asy
     );
     const state = readState(projectRoot);
     state.council_chamber.analysis_execution.difference_in_differences = {
-      ...analysisSlot("blocked", "Unrelated analysis scope sentinel."),
+      ...rawAnalysisSlot("blocked", "Unrelated analysis scope sentinel."),
       last_updated: null,
       scope_id: crypto.randomUUID(),
       scope_revision: 1,
@@ -1717,6 +2035,37 @@ test("causal-check cannot create or revise an analysis scope", (t) => {
   expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
 });
 
+test("analysis workers cannot write the controller-owned causal scope basis", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  seedAnalysisEligibility(projectRoot);
+  const actor = "analysis_execution.single_time_observational";
+  const started = expectSuccess(begin(projectRoot, opened, actor), "BEGAN_WORKER");
+  const before = fs.readFileSync(statePath(projectRoot));
+
+  const failure = expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor,
+      scope_transition: "new",
+      updates: {
+        council_chamber: {
+          analysis_execution: {
+            single_time_observational: {
+              ...analysisSlot("ready", "The worker must not own the causal basis."),
+              causal_basis_hash: "0".repeat(64),
+            },
+          },
+        },
+      },
+    },
+  }), "OWNERSHIP_VIOLATION");
+  assert.match(failure.message, /causal_basis_hash/);
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+  expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
 test("every core worker apply requires a matching chamber handoff with status", async (t) => {
   for (const actor of ["data_audit", "domain_expert", "causal_check", "causal_discovery"]) {
     await t.test(actor, () => {
@@ -1769,6 +2118,7 @@ test("domain, causal-check, and discovery workers can update only their owned se
         recommended_method_routes: [
           { id: "single_time_observational", category: "design", route_cautions: [] },
         ],
+        analysis_options: [analysisOption("preferred", "single_time_observational")],
       },
     },
     {
@@ -2401,6 +2751,9 @@ test("causal-check actionable readiness requires a recommended design", async (t
       updates.causal_facts.recommended_method_routes = [
         { id: "single_time_observational", category: "design", route_cautions: [] },
       ];
+      updates.causal_facts.analysis_options = [
+        analysisOption("preferred", "single_time_observational"),
+      ];
       const applied = expectSuccess(execute(projectRoot, "apply", {
         payload: {
           ...expected(started),
@@ -2440,6 +2793,90 @@ test("causal-check readiness reassessment requires one complete decision bundle"
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
 
   updates.causal_facts.recommended_checks = [];
+  delete updates.causal_facts.analysis_options;
+  const missingOptions = expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "causal_check",
+      updates,
+    },
+  }), "INVALID_INPUT");
+  assert.match(missingOptions.message, /complete decision bundle.*analysis_options/);
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+
+  updates.causal_facts.analysis_options = [
+    analysisOption("preferred", "single_time_observational"),
+  ];
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "causal_check",
+      updates,
+    },
+  }), "WORKER_APPLIED");
+  expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+});
+
+test("actionable causal readiness requires the preferred option to mirror executable routes", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "causal_check"), "BEGAN_WORKER");
+  const updates = causalCheckUpdates({
+    causal_checked: "limited",
+    analysis_readiness: "limited",
+    support_status: "A bounded route is ready for scope review.",
+    recommended_checks: [],
+    recommended_method_routes: [
+      { id: "single_time_observational", category: "design", route_cautions: [] },
+      { id: "statistical-validity", category: "support", route_cautions: [] },
+    ],
+    analysis_options: [analysisOption("preferred", "difference_in_differences")],
+  });
+  const before = fs.readFileSync(statePath(projectRoot));
+  const mismatch = expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "causal_check",
+      updates,
+    },
+  }), "INVALID_INPUT");
+  assert.match(mismatch.message, /preferred analysis option must mirror/);
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+
+  updates.causal_facts.analysis_options = [
+    analysisOption("preferred", "single_time_observational", "statistical-validity"),
+    analysisOption("alternative", "difference_in_differences"),
+  ];
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "causal_check",
+      updates,
+    },
+  }), "WORKER_APPLIED");
+  assert.deepEqual(readState(projectRoot).causal_facts.analysis_options, updates.causal_facts.analysis_options);
+  expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+});
+
+test("nonactionable causal readiness may preserve alternatives without a preferred route", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "causal_check"), "BEGAN_WORKER");
+  const updates = causalCheckUpdates({
+    causal_checked: "limited",
+    analysis_readiness: "not_ready",
+    support_status: "A design discriminator remains unresolved.",
+    recommended_checks: ["Resolve treatment timing."],
+    recommended_method_routes: [],
+    analysis_options: [
+      analysisOption("alternative", "difference_in_differences"),
+      analysisOption("fallback", "descriptive_association"),
+    ],
+  });
   const applied = expectSuccess(execute(projectRoot, "apply", {
     payload: {
       ...expected(started),
@@ -2505,7 +2942,7 @@ test("causal-check nonactionable readiness rejects method recommendations atomic
   }
 });
 
-test("causal-check descriptive fallback is limited and nondecision updates remain independent", (t) => {
+test("causal-check descriptive fallback is limited and chamber-only updates remain independent", (t) => {
   const projectRoot = temporaryProject(t);
   const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
   const started = expectSuccess(begin(projectRoot, opened, "causal_check"), "BEGAN_WORKER");
@@ -2544,6 +2981,7 @@ test("causal-check descriptive fallback is limited and nondecision updates remai
   const staleDecision = readState(projectRoot);
   staleDecision.causal_facts.analysis_readiness = "ready";
   staleDecision.causal_facts.recommended_method_routes = [];
+  staleDecision.causal_facts.analysis_options = [];
   writeState(projectRoot, staleDecision);
 
   const reopened = expectSuccess(execute(projectRoot, "open"), "OPENED");
@@ -2553,10 +2991,16 @@ test("causal-check descriptive fallback is limited and nondecision updates remai
       ...expected(next),
       operation_id: next.operation_id,
       actor: "causal_check",
-      updates: causalCheckUpdates(
-        { assumptions: ["No unmeasured confounding is not established."] },
-        "One causal assumption was clarified.",
-      ),
+      updates: {
+        council_chamber: {
+          causal_check: {
+            current_status: "review_complete",
+            summary: "The existing causal decision remains unchanged.",
+            questions_for_user: [],
+            feedback_to_route: [],
+          },
+        },
+      },
     },
   }), "WORKER_APPLIED");
   expectSuccess(finish(projectRoot, independent), "OPERATION_FINISHED");
@@ -2882,7 +3326,7 @@ test("operation packets stay contract-stable while reserve and apply compact unc
   assert.equal(workerPacket.actor, actor);
   assert.equal(workerPacket.support, prepared.support);
   assert.deepEqual(workerPacket.scope_ref, prepared.scope_ref);
-  assert.equal(workerPacket.completion_protocol, 1);
+  assert.equal(workerPacket.completion_protocol, 2);
   assert.match(workerPacket.contract_hash, /^[0-9a-f]{64}$/);
   assert.ok(workerPacket.requirements.length > 0);
   assert.equal(
@@ -2899,7 +3343,7 @@ test("operation packets stay contract-stable while reserve and apply compact unc
   }
 
   const durableOperation = readState(projectRoot).state_meta.active_operation;
-  assert.equal(durableOperation.completion_protocol, 1);
+  assert.equal(durableOperation.completion_protocol, 2);
   assert.equal(durableOperation.contract_hash, workerPacket.contract_hash);
   assert.deepEqual(
     expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER").operation_packet,
@@ -2928,6 +3372,7 @@ test("operation packets stay contract-stable while reserve and apply compact unc
 
   const artifact = scopedArtifact(reserved, "Bound analysis with supplemental diagnostics.", {
     supplemental_work: ["Produced a supplemental influence diagnostic."],
+    deviations: [],
   });
   const applied = expectSuccess(execute(projectRoot, "apply", {
     payload: {
@@ -2976,12 +3421,22 @@ test("operation packets stay contract-stable while reserve and apply compact unc
     path.join(projectRoot, ...reserved.manifest_path.split("/")),
     "utf8",
   ));
-  assert.equal(manifest.schema_version, 2);
+  assert.equal(manifest.schema_version, 3);
+  assert.deepEqual(manifest.requirements, workerPacket.requirements);
   assert.equal(manifest.artifact_role, "completion");
   assert.deepEqual(manifest.execution_receipt, artifact.execution_receipt);
   assert.deepEqual(manifest.execution_receipt.supplemental_work, [
     "Produced a supplemental influence diagnostic.",
   ]);
+  assert.equal(
+    manifest.execution_receipt.requirement_evidence.length,
+    manifest.execution_receipt.completed_requirements.length,
+  );
+  assert.ok(manifest.execution_receipt.requirement_evidence.every(
+    (item) => item.file === reserved.artifact_intent.location && item.locator,
+  ));
+  assert.deepEqual(manifest.execution_receipt.deviations, []);
+  assert.deepEqual(applied.turn_context.artifact_status.execution_receipt, manifest.execution_receipt);
   assert.equal(applied.artifact_record.artifact_role, "completion");
   const closed = expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
   assert.equal(closed.operation_packet, null);
@@ -3018,7 +3473,7 @@ test("apply returns a full replacement packet when a new scope changes the work 
   assert.ok(applied.operation_packet);
   assert.equal(applied.operation_packet.stage, "lead_pending");
   assert.equal(applied.operation_packet.action, "finish");
-  assert.equal(applied.operation_packet.completion_protocol, 1);
+  assert.equal(applied.operation_packet.completion_protocol, 2);
   assert.match(applied.operation_packet.contract_hash, /^[0-9a-f]{64}$/);
   assert.ok(applied.operation_packet.requirements.length > 0);
   assertTurnContext(projectRoot, applied, {
@@ -3125,6 +3580,42 @@ test("scoped completion rejects incomplete, inconsistent, or uninventoried recei
     evidence_files: ["output/missing-evidence.csv"],
   })), "INVALID_ARTIFACT_RECEIPT");
 
+  expectAtomicFailure(applyWith(scopedArtifact(reserved, "Missing requirement map.", {
+    requirement_evidence: [],
+  })), "INVALID_ARTIFACT_RECEIPT");
+
+  const absentRequirementMap = scopedArtifact(reserved, "Absent requirement map.");
+  delete absentRequirementMap.execution_receipt.requirement_evidence;
+  expectAtomicFailure(applyWith(absentRequirementMap), "INVALID_ARTIFACT_RECEIPT");
+
+  const duplicateEvidence = executionReceipt(reserved).requirement_evidence;
+  duplicateEvidence[1] = { ...duplicateEvidence[0] };
+  expectAtomicFailure(applyWith(scopedArtifact(reserved, "Duplicate requirement map.", {
+    requirement_evidence: duplicateEvidence,
+  })), "INVALID_ARTIFACT_RECEIPT");
+
+  const unknownEvidence = executionReceipt(reserved).requirement_evidence;
+  unknownEvidence[0].requirement_id = "unknown.requirement";
+  expectAtomicFailure(applyWith(scopedArtifact(reserved, "Unknown mapped requirement.", {
+    requirement_evidence: unknownEvidence,
+  })), "INVALID_ARTIFACT_RECEIPT");
+
+  const multilineLocator = executionReceipt(reserved).requirement_evidence;
+  multilineLocator[0].locator = "Methods section\nsecond line";
+  expectAtomicFailure(applyWith(scopedArtifact(reserved, "Multiline locator.", {
+    requirement_evidence: multilineLocator,
+  })), "INVALID_ARTIFACT_RECEIPT");
+
+  const longLocator = executionReceipt(reserved).requirement_evidence;
+  longLocator[0].locator = "x".repeat(501);
+  expectAtomicFailure(applyWith(scopedArtifact(reserved, "Overlong locator.", {
+    requirement_evidence: longLocator,
+  })), "INVALID_ARTIFACT_RECEIPT");
+
+  expectAtomicFailure(applyWith(scopedArtifact(reserved, "Duplicate deviations.", {
+    deviations: ["One deviation.", "One deviation."],
+  })), "INVALID_ARTIFACT_RECEIPT");
+
   const uninventoriedLocation = "output/uninventoried-evidence.csv";
   fs.writeFileSync(
     path.join(projectRoot, ...uninventoriedLocation.split("/")),
@@ -3139,6 +3630,20 @@ test("scoped completion rejects incomplete, inconsistent, or uninventoried recei
     completed_requirements: requirements,
     unmet_requirements: [requirements[0]],
   })), "INVALID_ARTIFACT_RECEIPT");
+
+  const unmetEvidence = executionReceipt(reserved, {
+    unmet_requirements: [requirements[0]],
+  }).requirement_evidence;
+  unmetEvidence.push({
+    requirement_id: requirements[0],
+    file: reserved.artifact_intent.location,
+    locator: "Evidence for an unmet requirement.",
+  });
+  expectAtomicFailure(applyWith(scopedArtifact(reserved, "Evidence claimed for unmet work.", {
+    artifact_role: "infeasibility_evidence",
+    unmet_requirements: [requirements[0]],
+    requirement_evidence: unmetEvidence,
+  }), blockedUpdates), "INVALID_ARTIFACT_RECEIPT");
 
   expectAtomicFailure(applyWith(
     scopedArtifact(reserved, "Completion cannot accompany blocked.", {
@@ -3175,6 +3680,172 @@ test("scoped completion rejects incomplete, inconsistent, or uninventoried recei
   ), "WORKER_APPLIED");
   assert.equal(applied.artifact_record.artifact_role, "completion");
   expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+});
+
+test("approved analysis can reserve once at begin and hand the lead requirement-level evidence", (t) => {
+  const projectRoot = temporaryProject(t);
+  const prepared = prepareAnalysisScope(projectRoot);
+  const actor = `analysis_execution.${prepared.design}`;
+  const started = expectSuccess(begin(projectRoot, prepared, actor, {
+    support: prepared.support,
+    scope_ref: prepared.scope_ref,
+    artifact_reservation: {
+      kind: "directory",
+      slug: "verified-analysis",
+    },
+  }), "BEGAN_WORKER");
+  assert.equal(packetFor(started).completion_protocol, 2);
+  assert.equal(started.artifact_intent.kind, "directory");
+
+  const temporary = path.join(projectRoot, ...started.temporary_path.split("/"));
+  fs.mkdirSync(temporary, { recursive: true });
+  const bodies = {
+    "methods.md": "# Methods\nThe bound design, inputs, and estimator are specified here.\n",
+    "analysis.js": "export function estimate() { return { estimate: 1.2, se: 0.3 }; }\n",
+    "results.csv": "contrast,estimate,se\napproved,1.2,0.3\n",
+    "diagnostics.csv": "diagnostic,status\nuncertainty,passed\nsupport,passed\n",
+    "limitations.md": "# Claim boundary\nInterpret only within the approved causal scope.\n",
+  };
+  for (const [name, contents] of Object.entries(bodies)) {
+    fs.writeFileSync(path.join(temporary, name), contents, "utf8");
+  }
+
+  const location = started.artifact_intent.location;
+  const evidenceFiles = Object.keys(bodies).map((name) => `${location}/${name}`);
+  const fileByKind = {
+    target: `${location}/results.csv`,
+    input_ref: `${location}/methods.md`,
+    method_plan: `${location}/analysis.js`,
+    execution_requirement: `${location}/diagnostics.csv`,
+    output_type: `${location}/results.csv`,
+    claim_boundary: `${location}/limitations.md`,
+  };
+  const locatorByKind = {
+    target: "results.csv: approved contrast row",
+    input_ref: "methods.md: Methods input description",
+    method_plan: "analysis.js: estimate function",
+    execution_requirement: "diagnostics.csv: diagnostic status rows",
+    output_type: "results.csv: estimate and standard-error columns",
+    claim_boundary: "limitations.md: Claim boundary section",
+  };
+  const packet = packetFor(started);
+  const receipt = {
+    contract_hash: packet.contract_hash,
+    completed_requirements: packet.requirements.map((requirement) => requirement.id),
+    unmet_requirements: [],
+    supplemental_work: [],
+    evidence_files: evidenceFiles,
+    requirement_evidence: packet.requirements.map((requirement) => ({
+      requirement_id: requirement.id,
+      file: fileByKind[requirement.kind],
+      locator: locatorByKind[requirement.kind],
+    })),
+    deviations: [],
+  };
+  assert.ok(receipt.requirement_evidence.every((item) => item.file && item.locator));
+
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor,
+      scope_transition: "preserve",
+      updates: {
+        council_chamber: {
+          analysis_execution: {
+            [prepared.design]: {
+              current_status: "done",
+              summary: "The exact approved analysis and diagnostics are complete.",
+            },
+          },
+        },
+      },
+      artifact: {
+        summary: "Verified analysis package with methods, code, results, diagnostics, and limits.",
+        artifact_role: "completion",
+        execution_receipt: receipt,
+      },
+    },
+  }), "WORKER_APPLIED");
+
+  const manifest = JSON.parse(fs.readFileSync(
+    path.join(projectRoot, ...started.manifest_path.split("/")),
+    "utf8",
+  ));
+  assert.equal(manifest.schema_version, 3);
+  assert.deepEqual([...manifest.files].sort(), [...evidenceFiles].sort());
+  assert.deepEqual(manifest.requirements, packet.requirements);
+  assert.deepEqual(manifest.execution_receipt, receipt);
+  assert.deepEqual(applied.turn_context.artifact_status.execution_receipt, receipt);
+  assert.equal(
+    new Set(receipt.requirement_evidence.map((item) => item.requirement_id)).size,
+    packet.requirements.length,
+  );
+  const originalRequirements = structuredClone(manifest.requirements);
+  const closed = expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+
+  const revisedContract = {
+    ...structuredClone(DEFAULT_ANALYSIS_EXECUTION_CONTRACT),
+    method_plan: "Fit a revised estimator under the same design.",
+    execution_requirements: [
+      "Estimate the approved contrast with the revised estimator.",
+      "Report revised diagnostics and uncertainty.",
+    ],
+  };
+  const revising = expectSuccess(begin(projectRoot, closed, actor, {
+    support: prepared.support,
+  }), "BEGAN_WORKER");
+  const revised = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(revising),
+      operation_id: revising.operation_id,
+      actor,
+      scope_transition: "revise",
+      updates: {
+        council_chamber: {
+          analysis_execution: {
+            [prepared.design]: analysisSlot(
+              "ready",
+              "A later analysis scope revision is ready.",
+              prepared.support,
+              revisedContract,
+            ),
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+  expectSuccess(finish(projectRoot, revised), "OPERATION_FINISHED");
+
+  const historicalManifest = JSON.parse(fs.readFileSync(
+    path.join(projectRoot, ...started.manifest_path.split("/")),
+    "utf8",
+  ));
+  assert.deepEqual(historicalManifest.requirements, originalRequirements);
+  const mappedIds = new Set(
+    historicalManifest.execution_receipt.requirement_evidence
+      .map((item) => item.requirement_id),
+  );
+  assert.ok(originalRequirements.every((requirement) => mappedIds.has(requirement.id)));
+  assert.deepEqual(expectSuccess(execute(projectRoot, "open"), "OPENED").warnings, []);
+
+  historicalManifest.requirements[0].description += " Tampered.";
+  fs.writeFileSync(
+    path.join(projectRoot, ...started.manifest_path.split("/")),
+    `${JSON.stringify(historicalManifest, null, 2)}\n`,
+    "utf8",
+  );
+  const warnings = expectSuccess(execute(projectRoot, "open"), "OPENED").warnings;
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].code, "INVALID_HISTORICAL_ARTIFACT_MANIFEST");
+
+  historicalManifest.requirements = originalRequirements;
+  fs.writeFileSync(
+    path.join(projectRoot, ...started.manifest_path.split("/")),
+    `${JSON.stringify(historicalManifest, null, 2)}\n`,
+    "utf8",
+  );
+  assert.deepEqual(expectSuccess(execute(projectRoot, "validate"), "VALID").warnings, []);
 });
 
 test("bound analysis, report, and discovery scopes preserve infeasibility evidence as blocked", async (t) => {
@@ -3235,7 +3906,7 @@ test("bound analysis, report, and discovery scopes preserve infeasibility eviden
       path.join(projectRoot, ...reserved.manifest_path.split("/")),
       "utf8",
     ));
-    assert.equal(manifest.schema_version, 2);
+    assert.equal(manifest.schema_version, 3);
     assert.equal(manifest.artifact_role, "infeasibility_evidence");
     assert.deepEqual(manifest.execution_receipt, artifact.execution_receipt);
     assert.deepEqual(manifest.scope_ref, prepared.scope_ref);
@@ -3328,7 +3999,7 @@ test("bound analysis, report, and discovery scopes preserve infeasibility eviden
       path.join(projectRoot, ...reserved.manifest_path.split("/")),
       "utf8",
     ));
-    assert.equal(manifest.schema_version, 2);
+    assert.equal(manifest.schema_version, 3);
     assert.equal(manifest.artifact_role, "infeasibility_evidence");
     assert.deepEqual(manifest.execution_receipt, artifact.execution_receipt);
     assert.deepEqual(manifest.scope_ref, prepared.scope_ref);
@@ -3357,7 +4028,7 @@ test("bound analysis, report, and discovery scopes preserve infeasibility eviden
       reserved,
       "diagnostic,value\nbootstrap_runs,0\n",
     );
-    assert.equal(reserved.operation_packet.completion_protocol, 1);
+    assert.equal(reserved.operation_packet.completion_protocol, 2);
     assert.deepEqual(reserved.operation_packet.scope_ref, reserved.scope_ref);
     const requirements = packetRequirementIds(reserved);
     const artifact = scopedArtifact(reserved, "Evidence that the frozen discovery run is infeasible.", {
@@ -3421,7 +4092,7 @@ test("bound analysis, report, and discovery scopes preserve infeasibility eviden
       path.join(projectRoot, ...reserved.manifest_path.split("/")),
       "utf8",
     ));
-    assert.equal(manifest.schema_version, 2);
+    assert.equal(manifest.schema_version, 3);
     assert.equal(manifest.artifact_role, "infeasibility_evidence");
     assert.deepEqual(manifest.execution_receipt, artifact.execution_receipt);
     assert.deepEqual(manifest.scope_ref, reserved.scope_ref);
@@ -3495,7 +4166,7 @@ test("completed infeasibility manifest retries preserve role and receipt and rec
   assert.equal(fs.existsSync(manifestPath), true);
 
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-  assert.equal(manifest.schema_version, 2);
+  assert.equal(manifest.schema_version, 3);
   assert.equal(manifest.artifact_role, "infeasibility_evidence");
   assert.deepEqual(manifest.execution_receipt, artifact.execution_receipt);
 
@@ -3532,7 +4203,7 @@ test("completed infeasibility manifest retries preserve role and receipt and rec
   );
 });
 
-test("historical manifest schema 1 remains an implicit completion artifact", (t) => {
+test("historical manifest schemas 2 and 1 remain compatible", (t) => {
   const projectRoot = temporaryProject(t);
   const prepared = prepareAnalysisScope(projectRoot);
   const actor = "analysis_execution." + prepared.design;
@@ -3571,10 +4242,18 @@ test("historical manifest schema 1 remains an implicit completion artifact", (t)
   expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
 
   const manifestPath = path.join(projectRoot, ...reserved.manifest_path.split("/"));
-  const schema2 = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-  assert.equal(schema2.schema_version, 2);
-  assert.equal(schema2.artifact_role, "completion");
-  assert.deepEqual(schema2.execution_receipt, artifact.execution_receipt);
+  const schema3 = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  assert.equal(schema3.schema_version, 3);
+  assert.equal(schema3.artifact_role, "completion");
+  assert.deepEqual(schema3.execution_receipt, artifact.execution_receipt);
+  assert.deepEqual(schema3.requirements, packetFor(reserved).requirements);
+  const schema2 = structuredClone(schema3);
+  schema2.schema_version = 2;
+  delete schema2.execution_receipt.requirement_evidence;
+  delete schema2.execution_receipt.deviations;
+  delete schema2.requirements;
+  fs.writeFileSync(manifestPath, JSON.stringify(schema2, null, 2) + "\n", "utf8");
+  assert.deepEqual(expectSuccess(execute(projectRoot, "open"), "OPENED").warnings, []);
   const schema1 = {
     schema_version: 1,
     operation_id: schema2.operation_id,
@@ -3592,6 +4271,231 @@ test("historical manifest schema 1 remains an implicit completion artifact", (t)
   assert.equal(readState(projectRoot).project_summary.analysis_output, "exist");
   assert.deepEqual(expectSuccess(execute(projectRoot, "validate"), "VALID").warnings, []);
 });
+
+test("current completion protocol 2 rejects an active schema-2 completion atomically", (t) => {
+  const projectRoot = temporaryProject(t);
+  const prepared = prepareAnalysisScope(projectRoot);
+  const actor = `analysis_execution.${prepared.design}`;
+  const started = expectSuccess(begin(projectRoot, prepared, actor, {
+    support: prepared.support,
+    scope_ref: prepared.scope_ref,
+  }), "BEGAN_WORKER");
+  const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      kind: "file",
+      slug: "current-protocol-legacy-receipt",
+      extension: "csv",
+    },
+  }), "ARTIFACT_RESERVED");
+  assert.equal(packetFor(reserved).completion_protocol, 2);
+  const summary = "Legacy receipt cannot complete a current protocol-2 operation.";
+  const receipt = legacyExecutionReceipt(reserved);
+  writeLegacySchema2Completion(projectRoot, reserved, actor, summary, receipt);
+  const before = fs.readFileSync(statePath(projectRoot));
+
+  const failure = expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: started.operation_id,
+      actor,
+      scope_transition: "preserve",
+      updates: {
+        council_chamber: {
+          analysis_execution: {
+            [prepared.design]: { current_status: "done" },
+          },
+        },
+      },
+      artifact: {
+        summary,
+        artifact_role: "completion",
+        execution_receipt: receipt,
+      },
+    },
+  }), "INVALID_ARTIFACT_RECEIPT");
+  assert.match(failure.message, /completion protocol 2 requires requirement_evidence/);
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+});
+
+test("migrated protocol-1 analysis completion remains recoverable without weakening new reservations", async (t) => {
+  function prepareLegacyOperation(subtest, slug, artifactState) {
+    const projectRoot = temporaryProject(subtest);
+    const prepared = prepareAnalysisScope(projectRoot);
+    const actor = `analysis_execution.${prepared.design}`;
+    const started = expectSuccess(begin(projectRoot, prepared, actor, {
+      support: prepared.support,
+      scope_ref: prepared.scope_ref,
+    }), "BEGAN_WORKER");
+    const reserved = artifactState === "none"
+      ? null
+      : expectSuccess(execute(projectRoot, "reserve-artifact", {
+          payload: {
+            ...expected(started),
+            operation_id: started.operation_id,
+            kind: "file",
+            slug,
+            extension: "csv",
+          },
+        }), "ARTIFACT_RESERVED");
+    const summary = `Migrated ${artifactState} protocol-1 completion.`;
+    const legacyArtifact = reserved === null
+      ? null
+      : {
+          summary,
+          artifact_role: "completion",
+          execution_receipt: legacyExecutionReceipt(reserved),
+        };
+    if (artifactState === "temp") {
+      writeReservedTemporary(projectRoot, reserved, "estimate,se\n0.8,0.1\n");
+    } else if (artifactState === "final") {
+      writeLegacySchema2Completion(
+        projectRoot,
+        reserved,
+        actor,
+        summary,
+        legacyArtifact.execution_receipt,
+      );
+    }
+    const v5 = downgradeCurrentStateToV5(projectRoot);
+    v5.state_meta.active_operation.completion_protocol = 1;
+    writeState(projectRoot, v5);
+    const original = fs.readFileSync(statePath(projectRoot));
+    const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V5");
+    assert.deepEqual(fs.readFileSync(migrated.archive_path), original);
+    assert.equal(migrated.operation_packet.completion_protocol, 1);
+    return {
+      projectRoot,
+      prepared,
+      actor,
+      started,
+      reserved,
+      summary,
+      legacyArtifact,
+      migrated,
+    };
+  }
+
+  function applyCompletion(context, prior, artifact, env = undefined) {
+    return execute(context.projectRoot, "apply", {
+      env,
+      payload: {
+        ...expected(prior),
+        operation_id: context.started.operation_id,
+        actor: context.actor,
+        scope_transition: "preserve",
+        updates: {
+          council_chamber: {
+            analysis_execution: {
+              [context.prepared.design]: { current_status: "done" },
+            },
+          },
+        },
+        artifact,
+      },
+    });
+  }
+
+  await t.test("existing schema-2 final is resumable and idempotent", (subtest) => {
+    const context = prepareLegacyOperation(subtest, "legacy-final", "final");
+    assert.equal(context.migrated.artifact_status.status, "complete");
+    const migratedBytes = fs.readFileSync(statePath(context.projectRoot));
+    const archiveDirectory = path.join(context.projectRoot, "project_state.archives");
+    const archiveNames = fs.readdirSync(archiveDirectory).sort();
+    const reopened = expectSuccess(execute(context.projectRoot, "open"), "RESUME_WORKER");
+    assert.deepEqual(fs.readFileSync(statePath(context.projectRoot)), migratedBytes);
+    assert.deepEqual(fs.readdirSync(archiveDirectory).sort(), archiveNames);
+
+    const applied = expectSuccess(
+      applyCompletion(context, reopened, context.legacyArtifact),
+      "WORKER_APPLIED",
+    );
+    assert.equal(readState(context.projectRoot).artifact_records.length, 1);
+    expectSuccess(finish(context.projectRoot, applied), "OPERATION_FINISHED");
+  });
+
+  await t.test("schema-2 temp recovery is resumable and records once", (subtest) => {
+    const context = prepareLegacyOperation(subtest, "legacy-temp", "temp");
+    const before = fs.readFileSync(statePath(context.projectRoot));
+    expectFailure(
+      applyCompletion(
+        context,
+        context.migrated,
+        context.legacyArtifact,
+        { STATECTL_FAIL_BEFORE_RENAME: "1" },
+      ),
+      "INJECTED_WRITE_FAILURE",
+    );
+    assert.deepEqual(fs.readFileSync(statePath(context.projectRoot)), before);
+    const finalPath = path.join(
+      context.projectRoot,
+      ...context.reserved.artifact_intent.location.split("/"),
+    );
+    const manifestPath = path.join(
+      context.projectRoot,
+      ...context.reserved.manifest_path.split("/"),
+    );
+    assert.equal(fs.existsSync(finalPath), true);
+    assert.equal(JSON.parse(fs.readFileSync(manifestPath, "utf8")).schema_version, 2);
+
+    const reopened = expectSuccess(execute(context.projectRoot, "open"), "RESUME_WORKER");
+    assert.equal(reopened.artifact_status.status, "complete");
+    const applied = expectSuccess(
+      applyCompletion(context, reopened, context.legacyArtifact),
+      "WORKER_APPLIED",
+    );
+    assert.equal(readState(context.projectRoot).artifact_records.length, 1);
+    expectSuccess(finish(context.projectRoot, applied), "OPERATION_FINISHED");
+  });
+
+  await t.test("a migrated unreserved operation upgrades on reserve and rejects a legacy receipt", (subtest) => {
+    const context = prepareLegacyOperation(subtest, "upgrade-on-reserve", "none");
+    const reserved = expectSuccess(execute(context.projectRoot, "reserve-artifact", {
+      payload: {
+        ...expected(context.migrated),
+        operation_id: context.started.operation_id,
+        kind: "file",
+        slug: "upgrade-on-reserve",
+        extension: "csv",
+      },
+    }), "ARTIFACT_RESERVED");
+    assert.equal(reserved.operation_packet.completion_protocol, 2);
+    writeReservedTemporary(context.projectRoot, reserved, "estimate,se\n0.8,0.1\n");
+    const artifact = {
+      summary: "A legacy receipt cannot complete the upgraded reservation.",
+      artifact_role: "completion",
+      execution_receipt: legacyExecutionReceipt(reserved),
+    };
+    const before = fs.readFileSync(statePath(context.projectRoot));
+    expectFailure(
+      applyCompletion(context, reserved, artifact),
+      "INVALID_ARTIFACT_RECEIPT",
+    );
+    assert.deepEqual(fs.readFileSync(statePath(context.projectRoot)), before);
+  });
+
+  await t.test("a mapped receipt on protocol 1 emits a schema-3 manifest", (subtest) => {
+    const context = prepareLegacyOperation(subtest, "mapped-protocol-one", "temp");
+    const artifact = scopedArtifact(
+      context.reserved,
+      "Mapped receipt on a migrated protocol-1 operation.",
+    );
+    const applied = expectSuccess(
+      applyCompletion(context, context.migrated, artifact),
+      "WORKER_APPLIED",
+    );
+    const manifestPath = path.join(
+      context.projectRoot,
+      ...context.reserved.manifest_path.split("/"),
+    );
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    assert.equal(manifest.schema_version, 3);
+    assert.deepEqual(manifest.execution_receipt, artifact.execution_receipt);
+    expectSuccess(finish(context.projectRoot, applied), "OPERATION_FINISHED");
+  });
+});
+
 test("artifact reservation rejects a pre-existing temporary path without mutation", (t) => {
   const projectRoot = temporaryProject(t);
   const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
@@ -3740,12 +4644,13 @@ test("artifact reservation, manifest verification, resume, and recording are one
 
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   assert.deepEqual(manifest, {
-    schema_version: 2,
+    schema_version: 3,
     operation_id: execution.operation_id,
     route: "analysis_execution",
     scope_ref: prepared.scope_ref,
     artifact_role: "completion",
     execution_receipt: executionReceipt(reserved),
+    requirements: packetFor(reserved).requirements,
     files: [reserved.artifact_intent.location],
     completed_at: manifest.completed_at,
     summary: "Treatment-effect estimates.",
@@ -3773,6 +4678,37 @@ test("artifact reservation, manifest verification, resume, and recording are one
   }), "INVALID_ARTIFACT_MANIFEST");
   assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeInvalidManifest);
   manifest.files = [reserved.artifact_intent.location];
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+  const canonicalRequirements = structuredClone(manifest.requirements);
+  delete manifest.requirements;
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: execution.operation_id,
+      actor: `analysis_execution.${prepared.design}`,
+      scope_transition: "preserve",
+      updates: workerPatch,
+      artifact: scopedArtifact(reserved, manifest.summary),
+    },
+  }), "INVALID_ARTIFACT_MANIFEST");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeInvalidManifest);
+
+  manifest.requirements = [...canonicalRequirements].reverse();
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: execution.operation_id,
+      actor: `analysis_execution.${prepared.design}`,
+      scope_transition: "preserve",
+      updates: workerPatch,
+      artifact: scopedArtifact(reserved, manifest.summary),
+    },
+  }), "INVALID_ARTIFACT_MANIFEST");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), beforeInvalidManifest);
+  manifest.requirements = canonicalRequirements;
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 
   const applied = expectSuccess(execute(projectRoot, "apply", {
@@ -4189,6 +5125,18 @@ test("directory artifacts require a real in-directory deliverable and reject par
   assert.equal(fs.existsSync(target), false);
   fs.rmSync(workerManifestPath);
 
+  const orphanManifestTemp = path.join(temporary, ".artifact-manifest.json.tmp-orphan");
+  fs.writeFileSync(orphanManifestTemp, "orphan controller temporary\n", "utf8");
+  const orphanFailure = expectFailure(
+    execute(projectRoot, "apply", { payload: applyPayload }),
+    "INVALID_ARTIFACT_PATH",
+  );
+  assert.match(orphanFailure.message, /controller-owned manifest temporary file/);
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), stateBeforeFailures);
+  assert.equal(fs.existsSync(temporary), true);
+  assert.equal(fs.existsSync(target), false);
+  fs.rmSync(orphanManifestTemp);
+
   expectFailure(execute(projectRoot, "apply", {
     env: { STATECTL_FAIL_BEFORE_RENAME: "1" },
     payload: applyPayload,
@@ -4230,6 +5178,95 @@ test("directory artifacts require a real in-directory deliverable and reject par
     location: reserved.artifact_intent.location,
     file: `${reserved.artifact_intent.location}/results.csv`,
   }]);
+});
+
+test("active manifests must exactly inventory the reserved artifact body", async (t) => {
+  const scenarios = [
+    {
+      name: "file manifest adds an unrelated output",
+      kind: "file",
+      extension: "csv",
+      writeTemporary(projectRoot, reserved) {
+        writeReservedTemporary(projectRoot, reserved, "field,value\nrows,12\n");
+      },
+      mutateManifest(projectRoot, _reserved, manifest) {
+        const unrelated = "output/unrelated-active-output.csv";
+        fs.writeFileSync(
+          path.join(projectRoot, ...unrelated.split("/")),
+          "field,value\nextra,1\n",
+          "utf8",
+        );
+        manifest.files.push(unrelated);
+      },
+    },
+    {
+      name: "directory manifest omits an actual deliverable",
+      kind: "directory",
+      extension: undefined,
+      writeTemporary(projectRoot, reserved) {
+        const temporary = path.join(projectRoot, ...reserved.temporary_path.split("/"));
+        fs.mkdirSync(temporary, { recursive: true });
+        fs.writeFileSync(path.join(temporary, "results.csv"), "field,value\nrows,12\n", "utf8");
+        fs.writeFileSync(path.join(temporary, "diagnostics.csv"), "check,value\nvalid,1\n", "utf8");
+      },
+      mutateManifest(_projectRoot, _reserved, manifest) {
+        manifest.files = manifest.files.filter((file) => !file.endsWith("/diagnostics.csv"));
+      },
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, (subtest) => {
+      const projectRoot = temporaryProject(subtest);
+      const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+      const started = expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+      const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+        payload: {
+          ...expected(started),
+          operation_id: started.operation_id,
+          kind: scenario.kind,
+          slug: "exact-active-inventory",
+          ...(scenario.extension === undefined ? {} : { extension: scenario.extension }),
+        },
+      }), "ARTIFACT_RESERVED");
+      scenario.writeTemporary(projectRoot, reserved);
+      const applyPayload = {
+        ...expected(reserved),
+        operation_id: started.operation_id,
+        actor: "data_audit",
+        updates: {
+          data_facts: { data_checked: "passing" },
+          council_chamber: {
+            data_audit: {
+              current_status: "complete",
+              summary: "The active inventory test audit is complete.",
+              questions_for_user: [],
+              feedback_to_route: [],
+            },
+          },
+        },
+        artifact: { summary: "Exact active inventory output." },
+      };
+      const before = fs.readFileSync(statePath(projectRoot));
+      expectFailure(execute(projectRoot, "apply", {
+        env: { STATECTL_FAIL_BEFORE_RENAME: "1" },
+        payload: applyPayload,
+      }), "INJECTED_WRITE_FAILURE");
+      assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+
+      const manifestPath = path.join(projectRoot, ...reserved.manifest_path.split("/"));
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+      scenario.mutateManifest(projectRoot, reserved, manifest);
+      fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+      const failure = expectFailure(
+        execute(projectRoot, "apply", { payload: applyPayload }),
+        "INVALID_ARTIFACT_MANIFEST",
+      );
+      assert.match(failure.message, /exactly match the reserved artifact inventory/);
+      assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+      assert.equal(readState(projectRoot).state_meta.active_operation.stage, "worker_pending");
+    });
+  }
 });
 
 test("existing artifact manifests cannot use links outside the reserved location", (t) => {
@@ -4637,7 +5674,7 @@ test("new scope transitions clear only the replaced scope state", async (t) => {
     oldSlot.feedback_to_route = ["Old analysis feedback"];
     const otherDesign = "difference_in_differences";
     seeded.council_chamber.analysis_execution[otherDesign] = {
-      ...analysisSlot("ready", "Independent design scope."),
+      ...rawAnalysisSlot("ready", "Independent design scope."),
       last_updated: null,
       scope_id: crypto.randomUUID(),
       scope_revision: 1,
@@ -4826,6 +5863,9 @@ test("changing analysis support requires a new or revised scope identity", (t) =
   const design = "single_time_observational";
   const prepared = prepareAnalysisScope(projectRoot, design, "statistical-validity");
   seedAnalysisEligibility(projectRoot, { design, support: "heterogeneous-effects" });
+  const rerouted = readState(projectRoot);
+  rerouted.response_receipt = null;
+  writeState(projectRoot, rerouted);
   const started = expectSuccess(begin(projectRoot, prepared, `analysis_execution.${design}`, {
     support: "heterogeneous-effects",
   }), "BEGAN_WORKER");
@@ -4871,6 +5911,280 @@ test("changing analysis support requires a new or revised scope identity", (t) =
   expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
 });
 
+test("a same-design model alternative revises the analysis scope without rerunning causal selection", (t) => {
+  const projectRoot = temporaryProject(t);
+  const prepared = prepareAnalysisScope(projectRoot);
+  const actor = `analysis_execution.${prepared.design}`;
+  const causalBefore = structuredClone(readState(projectRoot).causal_facts);
+  const revisedContract = {
+    ...structuredClone(DEFAULT_ANALYSIS_EXECUTION_CONTRACT),
+    method_plan: "Fit the approved design with a doubly robust estimator and robust uncertainty.",
+    execution_requirements: [
+      ...DEFAULT_ANALYSIS_EXECUTION_CONTRACT.execution_requirements,
+      "Compare the revised estimator with the original formulation.",
+    ],
+  };
+
+  const started = expectSuccess(begin(projectRoot, prepared, actor, {
+    support: prepared.support,
+  }), "BEGAN_WORKER");
+  assert.equal(readState(projectRoot).state_meta.active_operation.scope_ref, null);
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor,
+      scope_transition: "revise",
+      updates: {
+        council_chamber: {
+          analysis_execution: {
+            [prepared.design]: analysisSlot(
+              "ready",
+              "A materially different model formulation is ready for direct approval.",
+              prepared.support,
+              revisedContract,
+            ),
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+
+  const state = readState(projectRoot);
+  const slot = state.council_chamber.analysis_execution[prepared.design];
+  assert.deepEqual(state.causal_facts, causalBefore);
+  assert.equal(slot.scope_id, prepared.scope_ref.id);
+  assert.equal(slot.scope_revision, prepared.scope_ref.revision + 1);
+  assert.equal(slot.execution_contract.method_plan, revisedContract.method_plan);
+  assert.equal(
+    expectSuccess(execute(projectRoot, "validate"), "VALID")
+      .scope_snapshot.analysis[prepared.design].basis_current,
+    true,
+  );
+
+  const closed = expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+  const revisedRef = {
+    kind: "analysis",
+    id: prepared.scope_ref.id,
+    revision: prepared.scope_ref.revision + 1,
+  };
+  assert.deepEqual(closed.direct_assignment.scope_ref, revisedRef);
+  const approved = expectSuccess(begin(projectRoot, closed, actor, {
+    support: prepared.support,
+    scope_ref: revisedRef,
+  }), "BEGAN_WORKER");
+  expectSuccess(finish(projectRoot, approved, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
+test("causal target changes require a rebuilt strategy portfolio and invalidate the old exact analysis scope", (t) => {
+  const projectRoot = temporaryProject(t);
+  const prepared = prepareAnalysisScope(projectRoot);
+  const actor = `analysis_execution.${prepared.design}`;
+  const oldState = readState(projectRoot);
+  const oldBasis = oldState.council_chamber.analysis_execution[prepared.design].causal_basis_hash;
+  const priorFacts = oldState.causal_facts;
+  const started = expectSuccess(begin(projectRoot, prepared, "causal_check"), "BEGAN_WORKER");
+  const stalePortfolio = {
+    causal_question: "What is the treatment effect in the revised target population?",
+    estimand: "Average treatment effect in the revised target population",
+    analysis_readiness: priorFacts.analysis_readiness,
+    support_status: priorFacts.support_status,
+    recommended_checks: structuredClone(priorFacts.recommended_checks),
+    recommended_method_routes: structuredClone(priorFacts.recommended_method_routes),
+    analysis_options: structuredClone(priorFacts.analysis_options),
+  };
+  const before = fs.readFileSync(statePath(projectRoot));
+
+  const staleFailure = expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "causal_check",
+      updates: causalCheckUpdates(stalePortfolio),
+    },
+  }), "INVALID_INPUT");
+  assert.match(staleFailure.message, /rebuilt or cleared strategy portfolio/);
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+
+  const rebuiltPortfolio = {
+    ...stalePortfolio,
+    recommended_checks: ["Recheck support in the revised target population."],
+    analysis_options: [analysisOption("preferred", prepared.design, prepared.support, {
+      target: "Estimate the effect in the revised target population.",
+      approach: "Rebuild the approved design for the revised target population.",
+    })],
+  };
+  const reassessed = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "causal_check",
+      updates: causalCheckUpdates(rebuiltPortfolio),
+    },
+  }), "WORKER_APPLIED");
+  const closed = expectSuccess(finish(projectRoot, reassessed), "OPERATION_FINISHED");
+  const staleSnapshot = expectSuccess(execute(projectRoot, "validate"), "VALID");
+  assert.equal(staleSnapshot.scope_snapshot.analysis[prepared.design].basis_current, false);
+
+  const beforeExact = fs.readFileSync(statePath(projectRoot));
+  const exactFailure = expectFailure(begin(projectRoot, closed, actor, {
+    support: prepared.support,
+    scope_ref: prepared.scope_ref,
+  }), "SCOPE_MISMATCH");
+  assert.match(exactFailure.message, /older causal basis/);
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), beforeExact);
+
+  const revising = expectSuccess(begin(projectRoot, closed, actor, {
+    support: prepared.support,
+  }), "BEGAN_WORKER");
+  const revised = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(revising),
+      operation_id: revising.operation_id,
+      actor,
+      scope_transition: "revise",
+      updates: {
+        council_chamber: {
+          analysis_execution: {
+            [prepared.design]: analysisSlot(
+              "ready",
+              "The analysis scope now reflects the revised causal target.",
+              prepared.support,
+            ),
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+  const refreshed = readState(projectRoot).council_chamber.analysis_execution[prepared.design];
+  assert.equal(refreshed.scope_id, prepared.scope_ref.id);
+  assert.equal(refreshed.scope_revision, prepared.scope_ref.revision + 1);
+  assert.match(refreshed.causal_basis_hash, /^[0-9a-f]{64}$/);
+  assert.notEqual(refreshed.causal_basis_hash, oldBasis);
+  assert.equal(
+    expectSuccess(execute(projectRoot, "validate"), "VALID")
+      .scope_snapshot.analysis[prepared.design].basis_current,
+    true,
+  );
+  expectSuccess(finish(projectRoot, revised), "OPERATION_FINISHED");
+});
+
+test("causal basis hashing is stable under reordered set-like arrays and object keys", (t) => {
+  const projectRoot = temporaryProject(t);
+  const design = "single_time_observational";
+  const support = "statistical-validity";
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  seedAnalysisEligibility(projectRoot, { design, support });
+  const seeded = readState(projectRoot);
+  seeded.causal_facts.assumptions = ["Exchangeability", "Consistency"];
+  seeded.causal_facts.threats = ["Limited overlap", "Unmeasured confounding"];
+  seeded.causal_facts.recommended_checks = ["Inspect overlap", "Assess balance"];
+  seeded.causal_facts.recommended_method_routes = [
+    {
+      category: "support",
+      id: support,
+      route_cautions: ["Use robust uncertainty", "Inspect influential observations"],
+    },
+    {
+      category: "design",
+      id: design,
+      route_cautions: ["Respect treatment timing", "Do not adjust for descendants"],
+    },
+  ];
+  writeState(projectRoot, seeded);
+
+  const started = expectSuccess(begin(projectRoot, opened, `analysis_execution.${design}`, {
+    support,
+  }), "BEGAN_WORKER");
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: `analysis_execution.${design}`,
+      scope_transition: "new",
+      updates: {
+        council_chamber: {
+          analysis_execution: {
+            [design]: analysisSlot("ready", "Canonical causal-basis scope.", support),
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+  const scoped = readState(projectRoot).council_chamber.analysis_execution[design];
+  const scopeRef = { kind: "analysis", id: scoped.scope_id, revision: scoped.scope_revision };
+  const basis = scoped.causal_basis_hash;
+  const closed = expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+
+  const reordered = readState(projectRoot);
+  reordered.causal_facts.assumptions.reverse();
+  reordered.causal_facts.threats.reverse();
+  reordered.causal_facts.recommended_checks.reverse();
+  reordered.causal_facts.recommended_method_routes = reordered.causal_facts.recommended_method_routes
+    .reverse()
+    .map((route) => ({
+      route_cautions: [...route.route_cautions].reverse(),
+      category: route.category,
+      id: route.id,
+    }));
+  writeState(projectRoot, reordered);
+
+  const validated = expectSuccess(execute(projectRoot, "validate"), "VALID");
+  assert.equal(validated.scope_snapshot.analysis[design].basis_current, true);
+  assert.equal(readState(projectRoot).council_chamber.analysis_execution[design].causal_basis_hash, basis);
+  const exact = expectSuccess(begin(projectRoot, closed, `analysis_execution.${design}`, {
+    support,
+    scope_ref: scopeRef,
+  }), "BEGAN_WORKER");
+  expectSuccess(finish(projectRoot, exact, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
+test("active exact analysis operations fail closed when their causal basis changes out of band", async (t) => {
+  for (const stage of ["worker_pending", "lead_pending"]) {
+    await t.test(stage, (subtest) => {
+      const projectRoot = temporaryProject(subtest);
+      const prepared = prepareAnalysisScope(projectRoot);
+      const actor = `analysis_execution.${prepared.design}`;
+      const started = expectSuccess(begin(projectRoot, prepared, actor, {
+        support: prepared.support,
+        scope_ref: prepared.scope_ref,
+      }), "BEGAN_WORKER");
+      if (stage === "lead_pending") {
+        expectSuccess(execute(projectRoot, "apply", {
+          payload: {
+            ...expected(started),
+            operation_id: started.operation_id,
+            actor,
+            scope_transition: "preserve",
+            updates: {
+              council_chamber: {
+                analysis_execution: {
+                  [prepared.design]: analysisSlot(
+                    "ready",
+                    "The exact analysis remains ready for approval.",
+                    prepared.support,
+                  ),
+                },
+              },
+            },
+          },
+        }), "WORKER_APPLIED");
+      }
+
+      const changed = readState(projectRoot);
+      assert.equal(changed.state_meta.active_operation.stage, stage);
+      changed.causal_facts.threats.push("Out-of-band causal-basis change.");
+      writeState(projectRoot, changed);
+      const invalidBytes = fs.readFileSync(statePath(projectRoot));
+
+      expectFailure(execute(projectRoot, "validate"), "SCOPE_MISMATCH");
+      assert.deepEqual(fs.readFileSync(statePath(projectRoot)), invalidBytes);
+      expectFailure(execute(projectRoot, "open"), "SCOPE_MISMATCH");
+      assert.deepEqual(fs.readFileSync(statePath(projectRoot)), invalidBytes);
+    });
+  }
+});
+
 test("--discard-legacy-plan is rejected when no legacy v4.5 state exists", async (t) => {
   await t.test("missing state", () => {
     const projectRoot = temporaryProject(t);
@@ -4881,7 +6195,7 @@ test("--discard-legacy-plan is rejected when no legacy v4.5 state exists", async
     assert.equal(fs.existsSync(statePath(projectRoot)), false);
   });
 
-  await t.test("current v5 state", () => {
+  await t.test("current v6 state", () => {
     const projectRoot = temporaryProject(t);
     expectSuccess(execute(projectRoot, "open"), "CREATED");
     const before = fs.readFileSync(statePath(projectRoot), "utf8");
@@ -5265,7 +6579,7 @@ test("ready analysis and report handoffs require direct approval without options
         finish(projectRoot, applied, {}, { presentation: menu }),
         "INVALID_INPUT",
       );
-      assert.match(failure.message, /direct approval without options/);
+      assert.match(failure.message, /direct approval/);
       assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
       const pending = readState(projectRoot);
       assert.equal(pending.state_meta.revision, applied.revision);
@@ -5273,14 +6587,28 @@ test("ready analysis and report handoffs require direct approval without options
 
       const presentation = {
         ...DEFAULT_PRESENTATION,
-        next_steps: "Do you approve this scope? If not, tell me what you would revise.",
+        next_steps: `Do you approve executing this exact ready ${name} scope?`,
+        direct_assignment: readyDirectAssignment(projectRoot),
       };
       const closed = expectSuccess(
         finish(projectRoot, applied, {}, { presentation }),
         "OPERATION_FINISHED",
       );
       assert.equal(closed.pending_decision, null);
+      assert.deepEqual(closed.direct_assignment, presentation.direct_assignment);
       assert.equal(closed.response_markdown.includes("[+ Consultant Options]"), false);
+
+      const approved = expectSuccess(execute(projectRoot, "begin", {
+        payload: {
+          ...expected(closed),
+          ...closed.direct_assignment,
+        },
+      }), "BEGAN_WORKER");
+      assert.deepEqual(
+        readState(projectRoot).state_meta.active_operation.scope_ref,
+        presentation.direct_assignment.scope_ref,
+      );
+      expectSuccess(finish(projectRoot, approved, {}, { cancel: true }), "OPERATION_CANCELLED");
     });
   }
 
@@ -5383,59 +6711,40 @@ test("numbered selection derives one stored assignment and normal begin supersed
   });
 });
 
-test("choice-based execution revalidates the exact current scope before binding approval", async (t) => {
-  await t.test("current scope", () => {
-    const projectRoot = temporaryProject(t);
-    const prepared = prepareAnalysisScope(projectRoot);
-    const lead = expectSuccess(begin(projectRoot, prepared, "team_lead"), "BEGAN_LEAD");
-    const menu = expectSuccess(finish(projectRoot, lead, {}, {
-      presentation: optionsPresentation([
-        decisionOption("Run the prepared analysis", `analysis_execution.${prepared.design}`, {
-          support: prepared.support,
-          scope_ref: prepared.scope_ref,
-        }),
-        decisionOption("Audit the data again", "data_audit"),
-      ]),
-    }), "OPERATION_FINISHED");
-
-    const selected = expectSuccess(
-      beginSelection(projectRoot, menu, menu.pending_decision.decision_id, 1),
-      "BEGAN_WORKER",
-    );
-    const state = readState(projectRoot);
-    assert.deepEqual(state.state_meta.active_operation.scope_ref, prepared.scope_ref);
-    assert.deepEqual(state.next_step_plan, [
-      { id: `analysis_execution.${prepared.design}`, support: prepared.support },
-      { id: "team_lead" },
-    ]);
-    expectSuccess(finish(projectRoot, selected, {}, { cancel: true }), "OPERATION_CANCELLED");
-  });
-
-  await t.test("scope changed after presentation", () => {
-    const projectRoot = temporaryProject(t);
-    const prepared = prepareAnalysisScope(projectRoot);
-    const lead = expectSuccess(begin(projectRoot, prepared, "team_lead"), "BEGAN_LEAD");
-    const menu = expectSuccess(finish(projectRoot, lead, {}, {
-      presentation: optionsPresentation([
-        decisionOption("Run the prepared analysis", `analysis_execution.${prepared.design}`, {
-          support: prepared.support,
-          scope_ref: prepared.scope_ref,
-        }),
-        decisionOption("Audit the data again", "data_audit"),
-      ]),
-    }), "OPERATION_FINISHED");
-
-    const changed = readState(projectRoot);
-    changed.council_chamber.analysis_execution[prepared.design].scope_revision += 1;
-    writeState(projectRoot, changed);
-    const before = fs.readFileSync(statePath(projectRoot), "utf8");
-    expectFailure(
-      beginSelection(projectRoot, menu, menu.pending_decision.decision_id, 1),
-      "SCOPE_MISMATCH",
-    );
-    assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
-    assert.deepEqual(readState(projectRoot).pending_decision, menu.pending_decision);
-  });
+test("exact analysis and report execution cannot be stored as numbered choices", async (t) => {
+  const scenarios = [
+    {
+      name: "analysis",
+      prepare: prepareAnalysisScope,
+      route(prepared) { return `analysis_execution.${prepared.design}`; },
+      extras(prepared) { return { support: prepared.support }; },
+    },
+    {
+      name: "report",
+      prepare: prepareReportScope,
+      route() { return "report_writer"; },
+      extras() { return {}; },
+    },
+  ];
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, () => {
+      const projectRoot = temporaryProject(t);
+      const prepared = scenario.prepare(projectRoot);
+      const lead = expectSuccess(begin(projectRoot, prepared, "team_lead"), "BEGAN_LEAD");
+      const before = fs.readFileSync(statePath(projectRoot));
+      const failure = expectFailure(finish(projectRoot, lead, {}, {
+        presentation: optionsPresentation([
+          decisionOption("Run the exact prepared scope", scenario.route(prepared), {
+            ...scenario.extras(prepared),
+            scope_ref: prepared.scope_ref,
+          }),
+          decisionOption("Audit the data again", "data_audit"),
+        ]),
+      }), "INVALID_INPUT");
+      assert.match(failure.message, /requires direct approval/);
+      assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+    });
+  }
 });
 
 test("malformed discovery migration containers fail without mutation or archive", async (t) => {
@@ -5516,6 +6825,10 @@ test("schema-4 migration archives exact bytes, preserves identity, and is idempo
     v4.council_chamber.analysis_execution[prepared.design].execution_contract,
     undefined,
   );
+  assert.equal(
+    v4.council_chamber.analysis_execution[prepared.design].causal_basis_hash,
+    undefined,
+  );
   assert.equal(v4.artifact_records[0].artifact_role, undefined);
 
   const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V4");
@@ -5526,13 +6839,17 @@ test("schema-4 migration archives exact bytes, preserves identity, and is idempo
   assert.deepEqual(migrated.warnings, []);
 
   const current = readState(projectRoot);
-  assert.equal(current.state_meta.schema_version, 5);
+  assert.equal(current.state_meta.schema_version, 6);
   assert.equal(current.state_meta.project_id, v4.state_meta.project_id);
   assert.equal(current.state_meta.active_operation.completion_protocol, 0);
   assert.equal(current.state_meta.active_operation.contract_hash, null);
   assert.equal(
     current.council_chamber.analysis_execution[prepared.design].execution_contract,
     null,
+  );
+  assert.equal(
+    typeof current.council_chamber.analysis_execution[prepared.design].causal_basis_hash,
+    "string",
   );
   assert.equal(current.artifact_records[0].artifact_role, "completion");
   assert.equal(current.artifact_records[0].operation_id, legacyOperationId);
@@ -5551,6 +6868,201 @@ test("schema-4 migration archives exact bytes, preserves identity, and is idempo
     operation_id: started.operation_id,
   }, {}, { cancel: true }), "OPERATION_CANCELLED");
 });
+
+test("schema-5 migration adds an empty strategy portfolio without invalidating prior readiness", (t) => {
+  const projectRoot = temporaryProject(t);
+  expectSuccess(execute(projectRoot, "open"), "CREATED");
+  seedAnalysisEligibility(projectRoot, {
+    design: "single_time_observational",
+    support: "statistical-validity",
+    readiness: "ready",
+  });
+  const v5 = downgradeCurrentStateToV5(projectRoot);
+  const original = fs.readFileSync(statePath(projectRoot));
+
+  const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V5");
+  assert.deepEqual(fs.readFileSync(migrated.archive_path), original);
+  const current = readState(projectRoot);
+  assert.equal(current.state_meta.schema_version, 6);
+  assert.deepEqual(current.causal_facts.analysis_options, []);
+  assert.equal(current.causal_facts.analysis_readiness, v5.causal_facts.analysis_readiness);
+  assert.deepEqual(
+    current.causal_facts.recommended_method_routes,
+    v5.causal_facts.recommended_method_routes,
+  );
+  expectSuccess(execute(projectRoot, "validate"), "VALID");
+
+  const migratedBytes = fs.readFileSync(statePath(projectRoot));
+  expectSuccess(execute(projectRoot, "open"), "OPENED");
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), migratedBytes);
+});
+
+test("an idle migrated ready analysis scope must be revised onto the current causal basis", (t) => {
+  const projectRoot = temporaryProject(t);
+  const prepared = prepareAnalysisScope(projectRoot);
+  const actor = `analysis_execution.${prepared.design}`;
+  downgradeCurrentStateToV5(projectRoot);
+  const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V5");
+  assert.equal(
+    expectSuccess(execute(projectRoot, "validate"), "VALID")
+      .scope_snapshot.analysis[prepared.design].basis_current,
+    false,
+  );
+  assert.equal(
+    readState(projectRoot).council_chamber.analysis_execution[prepared.design]
+      .causal_basis_hash,
+    null,
+  );
+
+  const beforeExact = fs.readFileSync(statePath(projectRoot));
+  expectFailure(begin(projectRoot, migrated, actor, {
+    support: prepared.support,
+    scope_ref: prepared.scope_ref,
+  }), "SCOPE_MISMATCH");
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), beforeExact);
+
+  const revising = expectSuccess(begin(projectRoot, migrated, actor, {
+    support: prepared.support,
+  }), "BEGAN_WORKER");
+  const revised = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(revising),
+      operation_id: revising.operation_id,
+      actor,
+      scope_transition: "revise",
+      updates: {
+        council_chamber: {
+          analysis_execution: {
+            [prepared.design]: analysisSlot(
+              "ready",
+              "The migrated scope is now bound to the current causal basis.",
+              prepared.support,
+            ),
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+  const slot = readState(projectRoot).council_chamber.analysis_execution[prepared.design];
+  assert.equal(slot.scope_id, prepared.scope_ref.id);
+  assert.equal(slot.scope_revision, prepared.scope_ref.revision + 1);
+  assert.match(slot.causal_basis_hash, /^[0-9a-f]{64}$/);
+  assert.equal(
+    expectSuccess(execute(projectRoot, "validate"), "VALID")
+      .scope_snapshot.analysis[prepared.design].basis_current,
+    true,
+  );
+  expectSuccess(finish(projectRoot, revised), "OPERATION_FINISHED");
+});
+
+test("schema-5 migration grandfathers an active bound ready analysis lead through closeout", (t) => {
+  const projectRoot = temporaryProject(t);
+  const prepared = prepareAnalysisScope(projectRoot);
+  const actor = `analysis_execution.${prepared.design}`;
+  const started = expectSuccess(begin(projectRoot, prepared, actor, {
+    support: prepared.support,
+    scope_ref: prepared.scope_ref,
+  }), "BEGAN_WORKER");
+  const applied = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor,
+      scope_transition: "preserve",
+      updates: {
+        council_chamber: {
+          analysis_execution: {
+            [prepared.design]: analysisSlot(
+              "ready",
+              "The already-bound analysis remains ready for lead closeout.",
+              prepared.support,
+            ),
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+  const v5 = downgradeCurrentStateToV5(projectRoot);
+  v5.state_meta.active_operation.completion_protocol = 1;
+  writeState(projectRoot, v5);
+  const original = fs.readFileSync(statePath(projectRoot));
+
+  const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V5");
+  assert.equal(migrated.mode, "resume_lead");
+  assert.deepEqual(fs.readFileSync(migrated.archive_path), original);
+  assert.equal(migrated.operation_packet.completion_protocol, 1);
+  const current = readState(projectRoot);
+  assert.match(
+    current.council_chamber.analysis_execution[prepared.design].causal_basis_hash,
+    /^[0-9a-f]{64}$/,
+  );
+  assert.equal(
+    expectSuccess(execute(projectRoot, "validate"), "VALID")
+      .scope_snapshot.analysis[prepared.design].basis_current,
+    true,
+  );
+
+  const closed = expectSuccess(finish(projectRoot, {
+    ...migrated,
+    operation_id: applied.operation_id,
+  }), "OPERATION_FINISHED");
+  assert.deepEqual(closed.direct_assignment.scope_ref, prepared.scope_ref);
+  const closedBytes = fs.readFileSync(statePath(projectRoot));
+  expectSuccess(execute(projectRoot, "open"), "OPENED");
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), closedBytes);
+});
+
+test("schema-3 through schema-5 migration preserves response receipts and pending decisions exactly", async (t) => {
+  const scenarios = [
+    { version: 3, downgrade: downgradeCurrentStateToV3 },
+    { version: 4, downgrade: downgradeCurrentStateToV4 },
+    { version: 5, downgrade: downgradeCurrentStateToV5 },
+  ];
+  for (const scenario of scenarios) {
+    await t.test(`schema ${scenario.version}`, () => {
+      const projectRoot = temporaryProject(t);
+      const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+      const started = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+      const closed = expectSuccess(finish(projectRoot, started, {}, {
+        presentation: optionsPresentation([
+          decisionOption("Audit the data", "data_audit"),
+          decisionOption("Review the domain", "domain_expert"),
+        ]),
+      }), "OPERATION_FINISHED");
+      const legacy = scenario.downgrade(projectRoot);
+      const legacyReceipt = structuredClone(legacy.response_receipt);
+      const legacyDecision = structuredClone(legacy.pending_decision);
+      const original = fs.readFileSync(statePath(projectRoot));
+      const archiveDirectory = path.join(projectRoot, "project_state.archives");
+
+      const migrated = expectSuccess(
+        execute(projectRoot, "open"),
+        `MIGRATED_V${scenario.version}`,
+      );
+      assert.deepEqual(fs.readFileSync(migrated.archive_path), original);
+      const current = readState(projectRoot);
+      assert.equal(current.state_meta.revision, legacy.state_meta.revision + 1);
+      assert.equal(current.response_receipt.revision, current.state_meta.revision);
+      assert.equal(current.response_receipt.operation_id, legacyReceipt.operation_id);
+      assert.equal(current.response_receipt.created_at, legacyReceipt.created_at);
+      assert.equal(current.response_receipt.response_markdown, closed.response_markdown);
+      assert.equal(current.response_receipt.response_markdown, legacyReceipt.response_markdown);
+      assert.equal(current.response_receipt.direct_assignment, null);
+      assert.deepEqual(current.pending_decision, legacyDecision);
+      assert.equal(
+        current.pending_decision.source_operation_id,
+        current.response_receipt.operation_id,
+      );
+
+      const migratedBytes = fs.readFileSync(statePath(projectRoot));
+      const archiveNames = fs.readdirSync(archiveDirectory).sort();
+      expectSuccess(execute(projectRoot, "open"), "OPENED");
+      assert.deepEqual(fs.readFileSync(statePath(projectRoot)), migratedBytes);
+      assert.deepEqual(fs.readdirSync(archiveDirectory).sort(), archiveNames);
+    });
+  }
+});
+
 test("schema-2 migration preserves idle and active route boundaries", async (t) => {
   for (const scenario of [
     { name: "idle", route: null, mode: "idle" },
@@ -5566,9 +7078,9 @@ test("schema-2 migration preserves idle and active route boundaries", async (t) 
           scenario.route === "team_lead" ? "BEGAN_LEAD" : "BEGAN_WORKER",
         );
       }
-      const currentV5 = readState(projectRoot);
-      const priorOperation = currentV5.state_meta.active_operation;
-      const priorPlan = currentV5.next_step_plan;
+      const currentV6 = readState(projectRoot);
+      const priorOperation = currentV6.state_meta.active_operation;
+      const priorPlan = currentV6.next_step_plan;
       const v2 = downgradeCurrentStateToV2(projectRoot);
       const original = fs.readFileSync(statePath(projectRoot), "utf8");
 
@@ -5581,7 +7093,7 @@ test("schema-2 migration preserves idle and active route boundaries", async (t) 
       assert.deepEqual(migrated.plan, priorPlan);
 
       const current = readState(projectRoot);
-      assert.equal(current.state_meta.schema_version, 5);
+      assert.equal(current.state_meta.schema_version, 6);
       assert.equal(current.state_meta.project_id, v2.state_meta.project_id);
       assert.equal(current.state_meta.revision, v2.state_meta.revision + 1);
       assert.equal(current.state_meta.startup_notice, null);
@@ -5593,15 +7105,19 @@ test("schema-2 migration preserves idle and active route boundaries", async (t) 
         "project_summary",
         "data_facts",
         "domain_knowledge",
-        "causal_facts",
         "report_assembly",
         "artifact_records",
       ]) {
         assert.deepEqual(current[section], v2[section], `${section} changed during v2 migration`);
       }
+      assert.deepEqual(current.causal_facts, {
+        ...v2.causal_facts,
+        analysis_options: [],
+      });
       const expectedCouncil = structuredClone(v2.council_chamber);
       for (const slot of Object.values(expectedCouncil.analysis_execution)) {
         slot.execution_contract = null;
+        slot.causal_basis_hash = null;
       }
       assert.deepEqual(current.council_chamber, expectedCouncil);
       assert.deepEqual(current.discovery_sidecar, {

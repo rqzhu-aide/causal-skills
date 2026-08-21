@@ -46,32 +46,53 @@ The internal team is:
   response, mediation, transportability, non-continuous outcomes, and
   statistical validity.
 
-The runtime keeps the deterministic schema-5 state protocol and adds a
-provider-neutral phase-capsule transport. On hosts that support isolated model
-invocations, the controller writes one complete router, worker, or lead capsule
-to the ephemeral `.statectl-tmp/phase-context.json`; the orchestrator receives
-only a compact reference and starts the next phase without carrying prior model
-reasoning or tool transcripts. The next phase still receives the exact
-stage-relevant state, work packet, and references. Hosts without isolation use
-the same full capsule inline or retain the legacy context interface.
-Isolated phases must share the project root. This reduces replayed context; it
-does not require or guarantee fewer model calls.
+For a research decision, the consultant keeps one accountable executable
+default and, when they are genuinely useful, up to two credible alternatives or
+fallbacks. Alternatives may involve different data construction, target,
+estimand, identification design, or claim strength. The consultant explains
+what each path enables, what it requires, its main risk, and when it would be
+preferable. Same-design model or estimator choices remain with the selected
+analysis route. Alternatives are advisory until the user adopts one and its
+scientific owner prepares or revises the exact scope.
+
+The runtime uses the deterministic schema-6 state protocol and a
+provider-neutral phase-capsule transport. When a host actually hands the next
+phase to a fresh isolated model invocation, the controller writes one complete
+router, worker, or lead capsule to the ephemeral
+`.statectl-tmp/phase-context.json`; the orchestrator receives only a compact
+reference and starts that invocation without carrying prior model reasoning or
+tool transcripts. The next invocation still receives the exact stage-relevant
+state, work packet, and references. A host that keeps the phases in one
+continuous session uses the same full capsule inline and should not create a
+context file merely to read it back. Hosts without capsule support retain the
+legacy context interface. Isolated phases must share the project root. Context
+transport does not require or guarantee fewer model calls.
 
 This changes only internal context delivery. The user-facing workflow and
 durable recovery boundaries remain unchanged: strict YAML validation, supported
 migration, revision-checked owner-scoped updates, exact analysis, report, and
 discovery scope identities, controller work packets, coverage receipts,
-verified artifact manifests, and worker/lead boundary recovery. Known output
-can be reserved atomically with `begin`, saving one controller round without
-combining scientific routing, worker judgment, or team-lead synthesis. Runtime
-use requires Node.js 18 or newer. The committed bundle needs no `npm install`
-or global packages.
+requirement-level evidence locators, explicit deviation records, verified
+artifact manifests, causal-basis freshness checks for analysis scopes, and
+worker/lead boundary recovery. Exact approved analysis
+and report output is reserved atomically with `begin` when its output fields are
+known, avoiding a separate `reserve-artifact` command without combining
+scientific routing, worker judgment, or team-lead synthesis. Runtime use
+requires Node.js 18 or newer. The committed bundle needs no `npm install` or
+global packages.
 
 ```text
-User <-> host orchestrator
-          -> open --context-file -> fresh router phase
-          -> begin [optional reservation] --context-file -> fresh worker or team-lead phase
-          -> apply --context-file when a worker ran -> fresh team-lead phase
+Fresh-invocation host:
+User <-> orchestrator
+          -> open --context-file -> fresh router invocation
+          -> begin [approved-output reservation] --context-file -> fresh worker or lead invocation
+          -> apply --context-file when a worker ran -> fresh lead invocation
+          -> finish -> recoverable controller-rendered response
+
+Continuous-session host:
+User <-> one session
+          -> open/begin/apply --context-protocol phase-capsule-v1
+          -> consume each returned capsule inline
           -> finish -> recoverable controller-rendered response
 
 project_state.yaml remains the sole durable state; phase-context.json is ephemeral.
@@ -105,6 +126,12 @@ requests like "do your best" or "give me a report" are treated as invitations to
 recommend the safest next move, not permission to skip the causal consulting
 process. If a prior operation was interrupted, the next explicit invocation on
 the same project resumes its worker or team-lead boundary before new routing.
+Numbered choices are reserved for materially different next operations. One
+proposed action, including one exact ready analysis or report scope, uses direct
+yes/no approval rather than a menu with filler choices. During approved
+output-producing work, the worker aims for one reproducible execution pass and
+reuses unchanged verified evidence while rerunning anything affected by changed
+data, code, settings, assumptions, or scope.
 
 ## Activation
 

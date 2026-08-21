@@ -85,8 +85,11 @@ if (
   template.capabilities?.analysis_contract !== 1
   || template.capabilities?.completion_protocol !== 1
   || template.capabilities?.artifact_roles !== 1
+  || template.capabilities?.analysis_options !== 1
+  || template.capabilities?.causal_scope_basis !== 1
+  || template.capabilities?.requirement_evidence !== 1
 ) {
-  throw new Error("state controller must advertise work-contract and artifact-role capabilities");
+  throw new Error("state controller must advertise research-strategy, work-contract, and artifact-evidence capabilities");
 }
 if (
   template.capabilities?.turn_context !== 1
@@ -101,8 +104,9 @@ if (
   template.capabilities?.response_rendering !== 1
   || template.capabilities?.pending_decision !== 1
   || template.capabilities?.response_receipt !== 1
+  || template.capabilities?.direct_assignment !== 1
   || template.capabilities?.startup_notice !== 1
 ) {
-  throw new Error("state controller must advertise response rendering and persistence capabilities");
+  throw new Error("state controller must advertise response rendering, direct assignment, and persistence capabilities");
 }
 process.stdout.write("skill package is valid\n");
