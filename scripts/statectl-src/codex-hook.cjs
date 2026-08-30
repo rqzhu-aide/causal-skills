@@ -3,4 +3,4 @@
 
 const { runHook } = require("./hook-runner.cjs");
 
-runHook("claude");
+runHook("codex", { runtimeFile: __filename });

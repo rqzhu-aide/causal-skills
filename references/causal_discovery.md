@@ -174,21 +174,24 @@ Submit supported `discovery_sidecar` fields when supported by the request:
 
 ## Council Chamber Updates
 
+<!-- partial:chamber-slot -->
 Submit only this route's chamber slot:
 
 - `current_status`: one short handoff disposition.
-- `summary`: compact synthesis of what was scoped, reviewed, created, or
-  blocked.
+- `summary`: compact synthesis of this route's finding, blocker, or
+  uncertainty.
 - `questions_for_user`: 0-3 questions or choices that would improve the next
   decision.
-- `feedback_to_route`: 0-3 route-facing suggestions, such as useful data,
-  domain, causal, report, or analysis follow-up.
+- `feedback_to_route`: 0-3 route-facing suggestions for useful member
+  follow-up.
 
-Keep it short, decision-facing, grounded in `discovery_sidecar` or current
-uncertainty, and free of schema labels. Focus on exploratory limits,
-diagnostics, created or inspected discovery outputs, and which reviewer should
-inspect implications before they affect adjustment, methods, claims, or report
-wording.
+Keep it short, decision-facing, grounded in route-owned state or current
+uncertainty, and free of schema labels.
+<!-- /partial:chamber-slot -->
+
+Focus on exploratory limits, diagnostics, created or inspected discovery
+outputs, and which reviewer should inspect implications before they affect
+adjustment, methods, claims, or report wording.
 
 ## Discovery Artifacts
 

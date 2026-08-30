@@ -1,6 +1,10 @@
 # Planning Report Template
 
-Use when the current report scope lacks relevant, available analysis artifacts.
+Use when `report_assembly.analysis_artifact_ids` is intentionally empty.
+
+Keep the report in planning mode even when unrelated historical analysis
+records exist. Do not use any analysis result as report evidence while the
+binding is empty.
 
 This report is for planning, framing, and decision support. It must not describe completed analysis results, estimates, diagnostics, or empirical findings that do not exist inside the causal-consultant workflow.
 

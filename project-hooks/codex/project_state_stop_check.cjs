@@ -102,17 +102,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path2) {
-      const ctrl = callVisitor(key, node, visitor, path2);
+    function visit_(key, node, visitor, path) {
+      const ctrl = callVisitor(key, node, visitor, path);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path2, ctrl);
-        return visit_(key, ctrl, visitor, path2);
+        replaceNode(key, path, ctrl);
+        return visit_(key, ctrl, visitor, path);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path2 = Object.freeze(path2.concat(node));
+          path = Object.freeze(path.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = visit_(i, node.items[i], visitor, path2);
+            const ci = visit_(i, node.items[i], visitor, path);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -123,13 +123,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path2 = Object.freeze(path2.concat(node));
-          const ck = visit_("key", node.key, visitor, path2);
+          path = Object.freeze(path.concat(node));
+          const ck = visit_("key", node.key, visitor, path);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path2);
+          const cv = visit_("value", node.value, visitor, path);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -150,17 +150,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path2) {
-      const ctrl = await callVisitor(key, node, visitor, path2);
+    async function visitAsync_(key, node, visitor, path) {
+      const ctrl = await callVisitor(key, node, visitor, path);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path2, ctrl);
-        return visitAsync_(key, ctrl, visitor, path2);
+        replaceNode(key, path, ctrl);
+        return visitAsync_(key, ctrl, visitor, path);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path2 = Object.freeze(path2.concat(node));
+          path = Object.freeze(path.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = await visitAsync_(i, node.items[i], visitor, path2);
+            const ci = await visitAsync_(i, node.items[i], visitor, path);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -171,13 +171,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path2 = Object.freeze(path2.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path2);
+          path = Object.freeze(path.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path2);
+          const cv = await visitAsync_("value", node.value, visitor, path);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -204,23 +204,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path2) {
+    function callVisitor(key, node, visitor, path) {
       if (typeof visitor === "function")
-        return visitor(key, node, path2);
+        return visitor(key, node, path);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path2);
+        return visitor.Map?.(key, node, path);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path2);
+        return visitor.Seq?.(key, node, path);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path2);
+        return visitor.Pair?.(key, node, path);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path2);
+        return visitor.Scalar?.(key, node, path);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path2);
+        return visitor.Alias?.(key, node, path);
       return void 0;
     }
-    function replaceNode(key, path2, node) {
-      const parent = path2[path2.length - 1];
+    function replaceNode(key, path, node) {
+      const parent = path[path.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -830,10 +830,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path2, value) {
+    function collectionFromPath(schema, path, value) {
       let v = value;
-      for (let i = path2.length - 1; i >= 0; --i) {
-        const k = path2[i];
+      for (let i = path.length - 1; i >= 0; --i) {
+        const k = path[i];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a = [];
           a[k] = v;
@@ -852,7 +852,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path2) => path2 == null || typeof path2 === "object" && !!path2[Symbol.iterator]().next().done;
+    var isEmptyPath = (path) => path == null || typeof path === "object" && !!path[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -882,11 +882,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path2, value) {
-        if (isEmptyPath(path2))
+      addIn(path, value) {
+        if (isEmptyPath(path))
           this.add(value);
         else {
-          const [key, ...rest] = path2;
+          const [key, ...rest] = path;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -900,8 +900,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path2) {
-        const [key, ...rest] = path2;
+      deleteIn(path) {
+        const [key, ...rest] = path;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -915,8 +915,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path2, keepScalar) {
-        const [key, ...rest] = path2;
+      getIn(path, keepScalar) {
+        const [key, ...rest] = path;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -934,8 +934,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path2) {
-        const [key, ...rest] = path2;
+      hasIn(path) {
+        const [key, ...rest] = path;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -945,8 +945,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path2, value) {
-        const [key, ...rest] = path2;
+      setIn(path, value) {
+        const [key, ...rest] = path;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -3461,9 +3461,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path2, value) {
+      addIn(path, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path2, value);
+          this.contents.addIn(path, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -3538,14 +3538,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path2) {
-        if (Collection.isEmptyPath(path2)) {
+      deleteIn(path) {
+        if (Collection.isEmptyPath(path)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path2) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -3560,10 +3560,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path2, keepScalar) {
-        if (Collection.isEmptyPath(path2))
+      getIn(path, keepScalar) {
+        if (Collection.isEmptyPath(path))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path2, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -3574,10 +3574,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path2) {
-        if (Collection.isEmptyPath(path2))
+      hasIn(path) {
+        if (Collection.isEmptyPath(path))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path2) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -3594,13 +3594,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path2, value) {
-        if (Collection.isEmptyPath(path2)) {
+      setIn(path, value) {
+        if (Collection.isEmptyPath(path)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path2), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path2, value);
+          this.contents.setIn(path, value);
         }
       }
       /**
@@ -5560,9 +5560,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path2) => {
+    visit.itemAtPath = (cst, path) => {
       let item = cst;
-      for (const [field, index] of path2) {
+      for (const [field, index] of path) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -5571,23 +5571,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path2) => {
-      const parent = visit.itemAtPath(cst, path2.slice(0, -1));
-      const field = path2[path2.length - 1][0];
+    visit.parentCollection = (cst, path) => {
+      const parent = visit.itemAtPath(cst, path.slice(0, -1));
+      const field = path[path.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path2, item, visitor) {
-      let ctrl = visitor(item, path2);
+    function _visit(path, item, visitor) {
+      let ctrl = visitor(item, path);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path2.concat([[field, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path.concat([[field, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -5598,10 +5598,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path2);
+            ctrl = ctrl(item, path);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path2) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path) : ctrl;
     }
     exports2.visit = visit;
   }
@@ -6903,14 +6903,14 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs2 = this.flowScalar(this.type);
+              const fs = this.flowScalar(this.type);
               if (atNextItem || it.value) {
-                map.items.push({ start, key: fs2, sep: [] });
+                map.items.push({ start, key: fs, sep: [] });
                 this.onKeyLine = true;
               } else if (it.sep) {
-                this.stack.push(fs2);
+                this.stack.push(fs);
               } else {
-                Object.assign(it, { key: fs2, sep: [] });
+                Object.assign(it, { key: fs, sep: [] });
                 this.onKeyLine = true;
               }
               return;
@@ -7038,13 +7038,13 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs2 = this.flowScalar(this.type);
+              const fs = this.flowScalar(this.type);
               if (!it || it.value)
-                fc.items.push({ start: [], key: fs2, sep: [] });
+                fc.items.push({ start: [], key: fs, sep: [] });
               else if (it.sep)
-                this.stack.push(fs2);
+                this.stack.push(fs);
               else
-                Object.assign(it, { key: fs2, sep: [] });
+                Object.assign(it, { key: fs, sep: [] });
               return;
             }
             case "flow-map-end":
@@ -7392,12 +7392,12 @@ var require_core = __commonJS({
   "scripts/statectl-src/core.cjs"(exports2, module2) {
     "use strict";
     var crypto = require("node:crypto");
-    var fs2 = require("node:fs");
-    var path2 = require("node:path");
+    var fs = require("node:fs");
+    var path = require("node:path");
     var { isDeepStrictEqual } = require("node:util");
     var YAML = require_dist();
     var ROUTES = require_route_catalog();
-    var SCHEMA_VERSION = 6;
+    var SCHEMA_VERSION = 7;
     var MANIFEST_VERSION = 3;
     var RECEIPT_MANIFEST_VERSION = 2;
     var LEGACY_MANIFEST_VERSION = 1;
@@ -7449,7 +7449,8 @@ var require_core = __commonJS({
       "planned_structure",
       "key_points",
       "wording_constraints",
-      "current_format"
+      "current_format",
+      "analysis_artifact_id"
     ]);
     var ARTIFACT_ROLES = ["completion", "infeasibility_evidence"];
     var EXECUTION_RECEIPT_KEYS = /* @__PURE__ */ new Set([
@@ -7484,6 +7485,15 @@ var require_core = __commonJS({
       "exploration_complete",
       "analysis_output",
       "report_output"
+    ];
+    var REPORT_SCOPE_MATERIAL_FIELDS = [
+      "report_goal",
+      "audience",
+      "target_section",
+      "planned_structure",
+      "key_points",
+      "wording_constraints",
+      "analysis_artifact_ids"
     ];
     var REQUIRED_TOP_LEVEL = [
       "state_meta",
@@ -7600,6 +7610,7 @@ var require_core = __commonJS({
         "planned_structure",
         "key_points",
         "wording_constraints",
+        "analysis_artifact_ids",
         "draft_notes"
       ])
     };
@@ -7618,7 +7629,7 @@ var require_core = __commonJS({
       "execution_contract",
       "causal_basis_hash"
     ]);
-    var StateError2 = class extends Error {
+    var StateError = class extends Error {
       constructor(code, message, details = void 0) {
         super(message);
         this.name = "StateError";
@@ -7627,7 +7638,7 @@ var require_core = __commonJS({
       }
     };
     function fail(code, message, details) {
-      throw new StateError2(code, message, details);
+      throw new StateError(code, message, details);
     }
     function isObject(value) {
       return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -7683,6 +7694,15 @@ var require_core = __commonJS({
         fail(code, `${label} must not contain duplicates`);
       }
       return normalized;
+    }
+    function normalizeAnalysisArtifactIds(value, label, code = "INVALID_INPUT") {
+      const normalized = normalizeContractArray(value, label, code);
+      normalized.forEach((artifactId, index) => {
+        if (!isArtifactId(artifactId)) {
+          fail(code, `${label}[${index}] must be a UUID or legacy artifact id`);
+        }
+      });
+      return normalized.sort();
     }
     function normalizeDiscoveryContract(value, label, code = "INVALID_INPUT") {
       assertKnownKeys(value, DISCOVERY_CONTRACT_KEYS, label, code);
@@ -7750,8 +7770,17 @@ var require_core = __commonJS({
     function contractHash(scopeKind, contract) {
       return sha256Hex(JSON.stringify({ scope_kind: scopeKind, contract }));
     }
-    function reportContractCandidates(reportAssembly) {
+    function reportContractCandidates(reportAssembly, includeEvidenceBinding = true) {
       const base = {};
+      if (includeEvidenceBinding) {
+        if (reportAssembly.analysis_artifact_ids === null) {
+          fail(
+            "SCOPE_MISMATCH",
+            "the report evidence binding is unresolved and requires scope revision"
+          );
+        }
+        base.analysis_artifact_ids = [...reportAssembly.analysis_artifact_ids].sort();
+      }
       for (const field of ["report_goal", "audience", "target_section"]) {
         const value = reportAssembly[field];
         if (typeof value === "string" && value.trim()) base[field] = value.trim();
@@ -7792,6 +7821,7 @@ var require_core = __commonJS({
         for (const field of ["planned_structure", "key_points", "wording_constraints"]) {
           if (contract[field] !== void 0) addMany(field, contract[field]);
         }
+        addMany("analysis_artifact_id", contract.analysis_artifact_ids ?? []);
         if (contract.current_format !== void 0) add("current_format", contract.current_format);
       }
       return requirements;
@@ -7825,7 +7855,10 @@ var require_core = __commonJS({
         return [contractBundle("analysis", slot.execution_contract)];
       }
       if (planInfo.actor === "report_writer") {
-        return reportContractCandidates(state.report_assembly).map((contract) => contractBundle("report", contract));
+        return reportContractCandidates(
+          state.report_assembly,
+          operation.report_evidence_binding_protocol !== 0
+        ).map((contract) => contractBundle("report", contract));
       }
       return [];
     }
@@ -7918,7 +7951,7 @@ var require_core = __commonJS({
     function normalizeEvidenceFiles(value, label) {
       const files = normalizeReceiptStringArray(value, label).map((item, index) => {
         const normalized = normalizePath(item);
-        if (normalized !== item || path2.posix.normalize(normalized) !== normalized || !normalized.startsWith("output/")) {
+        if (normalized !== item || path.posix.normalize(normalized) !== normalized || !normalized.startsWith("output/")) {
           fail("INVALID_ARTIFACT_RECEIPT", `${label}[${index}] must be a canonical project-relative output path`);
         }
         return normalized;
@@ -8157,6 +8190,9 @@ var require_core = __commonJS({
     function isUuid(value) {
       return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
     }
+    function isArtifactId(value) {
+      return isUuid(value) || typeof value === "string" && /^legacy-\d{4}$/.test(value);
+    }
     function isTimestamp(value) {
       if (typeof value !== "string") return false;
       return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value) && !Number.isNaN(Date.parse(value));
@@ -8197,7 +8233,7 @@ var require_core = __commonJS({
     }
     function readBytes(filePath) {
       try {
-        return fs2.readFileSync(filePath);
+        return fs.readFileSync(filePath);
       } catch (error) {
         fail("IO_ERROR", `could not read ${filePath}: ${error.message}`);
       }
@@ -8206,58 +8242,58 @@ var require_core = __commonJS({
       return readBytes(filePath).toString("utf8");
     }
     function atomicWrite(filePath, text, temporaryDirectory = null) {
-      const directory = path2.dirname(filePath);
-      fs2.mkdirSync(directory, { recursive: true });
+      const directory = path.dirname(filePath);
+      fs.mkdirSync(directory, { recursive: true });
       const tempRoot = temporaryDirectory === null ? directory : temporaryDirectory;
-      fs2.mkdirSync(tempRoot, { recursive: true });
-      const tempPath = path2.join(tempRoot, `.${path2.basename(filePath)}.tmp-${process.pid}-${crypto.randomUUID()}`);
+      fs.mkdirSync(tempRoot, { recursive: true });
+      const tempPath = path.join(tempRoot, `.${path.basename(filePath)}.tmp-${process.pid}-${crypto.randomUUID()}`);
       let handle;
       try {
-        handle = fs2.openSync(tempPath, "wx", 384);
-        fs2.writeFileSync(handle, text, "utf8");
-        fs2.fsyncSync(handle);
-        fs2.closeSync(handle);
+        handle = fs.openSync(tempPath, "wx", 384);
+        fs.writeFileSync(handle, text, "utf8");
+        fs.fsyncSync(handle);
+        fs.closeSync(handle);
         handle = void 0;
-        if (process.env.STATECTL_FAIL_BEFORE_RENAME === "1" && path2.basename(filePath) === STATE_FILE) {
+        if (process.env.STATECTL_FAIL_BEFORE_RENAME === "1" && path.basename(filePath) === STATE_FILE) {
           fail("INJECTED_WRITE_FAILURE", "injected failure before atomic replacement");
         }
-        fs2.renameSync(tempPath, filePath);
+        fs.renameSync(tempPath, filePath);
       } catch (error) {
         if (handle !== void 0) {
           try {
-            fs2.closeSync(handle);
+            fs.closeSync(handle);
           } catch (_closeError) {
           }
         }
         try {
-          fs2.rmSync(tempPath, { force: true });
+          fs.rmSync(tempPath, { force: true });
         } catch (_removeError) {
         }
-        if (error instanceof StateError2) throw error;
+        if (error instanceof StateError) throw error;
         fail("IO_ERROR", `could not atomically write ${filePath}: ${error.message}`);
       }
     }
     function archiveBytes(projectRoot, bytes, reason) {
-      const directory = path2.join(projectRoot, ARCHIVE_DIR);
-      fs2.mkdirSync(directory, { recursive: true });
+      const directory = path.join(projectRoot, ARCHIVE_DIR);
+      fs.mkdirSync(directory, { recursive: true });
       const stamp = nowIso().replace(/[-:.]/g, "");
-      const archivePath = path2.join(directory, `${stamp}-${reason}-${crypto.randomUUID().slice(0, 8)}.yaml`);
+      const archivePath = path.join(directory, `${stamp}-${reason}-${crypto.randomUUID().slice(0, 8)}.yaml`);
       let handle;
       try {
-        handle = fs2.openSync(archivePath, "wx", 384);
-        fs2.writeFileSync(handle, bytes);
-        fs2.fsyncSync(handle);
-        fs2.closeSync(handle);
+        handle = fs.openSync(archivePath, "wx", 384);
+        fs.writeFileSync(handle, bytes);
+        fs.fsyncSync(handle);
+        fs.closeSync(handle);
         return archivePath;
       } catch (error) {
         if (handle !== void 0) {
           try {
-            fs2.closeSync(handle);
+            fs.closeSync(handle);
           } catch (_closeError) {
           }
         }
         try {
-          fs2.rmSync(archivePath, { force: true });
+          fs.rmSync(archivePath, { force: true });
         } catch (_removeError) {
         }
         fail("IO_ERROR", `could not archive existing project state: ${error.message}`);
@@ -8334,7 +8370,7 @@ var require_core = __commonJS({
         fail("INVALID_STATE", "a reset startup notice requires an archive_path");
       }
       const normalized = normalizePath(notice.archive_path);
-      if (normalized !== notice.archive_path || normalized.includes("\0") || path2.posix.normalize(normalized) !== normalized || !normalized.startsWith(`${ARCHIVE_DIR}/`) || normalized === `${ARCHIVE_DIR}/`) {
+      if (normalized !== notice.archive_path || normalized.includes("\0") || path.posix.normalize(normalized) !== normalized || !normalized.startsWith(`${ARCHIVE_DIR}/`) || normalized === `${ARCHIVE_DIR}/`) {
         fail("INVALID_STATE", `state_meta.startup_notice.archive_path must be a canonical path under ${ARCHIVE_DIR}/`);
       }
     }
@@ -8373,6 +8409,7 @@ var require_core = __commonJS({
         "discovery_scope",
         "completion_protocol",
         "contract_hash",
+        "report_evidence_binding_protocol",
         "started_at"
       ]), "state_meta.active_operation");
       if (!isUuid(operation.id)) fail("INVALID_STATE", "active_operation.id must be a UUID");
@@ -8384,7 +8421,17 @@ var require_core = __commonJS({
       if (!Object.prototype.hasOwnProperty.call(operation, "discovery_scope")) {
         fail("INVALID_STATE", "active_operation.discovery_scope is required");
       }
+      if (!Object.prototype.hasOwnProperty.call(operation, "report_evidence_binding_protocol")) {
+        fail("INVALID_STATE", "active_operation.report_evidence_binding_protocol is required");
+      }
       validateDiscoveryScopeSnapshot(operation.discovery_scope, "active_operation.discovery_scope");
+      if (planInfo.actor === "report_writer") {
+        if (![0, 1].includes(operation.report_evidence_binding_protocol)) {
+          fail("INVALID_STATE", "active report operation requires evidence-binding protocol 0 or 1");
+        }
+      } else if (operation.report_evidence_binding_protocol !== null) {
+        fail("INVALID_STATE", "non-report operation requires null report_evidence_binding_protocol");
+      }
       if (![0, 1, 2].includes(operation.completion_protocol)) {
         fail("INVALID_STATE", "active_operation.completion_protocol must be 0, 1, or 2");
       }
@@ -8528,7 +8575,7 @@ var require_core = __commonJS({
       const missing = required.filter((key) => !(key in record));
       if (missing.length) fail("INVALID_STATE", `${label} is missing: ${missing.join(", ")}`);
       const legacy = typeof record.artifact_id === "string" && /^legacy-\d{4}$/.test(record.artifact_id);
-      if (!legacy && !isUuid(record.artifact_id)) fail("INVALID_STATE", `${label}.artifact_id must be a UUID or legacy id`);
+      if (!isArtifactId(record.artifact_id)) fail("INVALID_STATE", `${label}.artifact_id must be a UUID or legacy id`);
       if (legacy) {
         if (record.operation_id !== null) fail("INVALID_STATE", `${label}.operation_id must be null for legacy records`);
       } else if (!isUuid(record.operation_id)) {
@@ -8680,6 +8727,12 @@ var require_core = __commonJS({
         );
         if (!deepEqual(option.assignment, normalizedAssignment)) {
           fail("INVALID_STATE", `${label}.assignment must be stored in canonical form`);
+        }
+        if (normalizedAssignment.route === "report_writer" && normalizedAssignment.scope_ref !== null && state.report_assembly.analysis_artifact_ids === null) {
+          fail(
+            "INVALID_STATE",
+            `${label}.assignment cannot approve a report scope with unresolved evidence binding`
+          );
         }
       });
       if (hasDuplicateAssignments(decision.options)) {
@@ -8878,9 +8931,25 @@ var require_core = __commonJS({
       assertEnum(state.report_assembly.current_format, [null, "md", "html"], "report_assembly.current_format");
       assertStringOrNullFields(state.report_assembly, ["report_goal", "audience", "target_section"], "report_assembly");
       assertStringArrayFields(state.report_assembly, ["planned_structure", "key_points", "wording_constraints", "draft_notes"], "report_assembly");
+      if (state.report_assembly.analysis_artifact_ids !== null) {
+        const normalizedReportEvidence = normalizeAnalysisArtifactIds(
+          state.report_assembly.analysis_artifact_ids,
+          "report_assembly.analysis_artifact_ids",
+          "INVALID_STATE"
+        );
+        if (!deepEqual(normalizedReportEvidence, state.report_assembly.analysis_artifact_ids)) {
+          fail("INVALID_STATE", "report_assembly.analysis_artifact_ids must be unique and sorted");
+        }
+      }
       const reportHasIdentity = isUuid(state.report_assembly.scope_id) && Number.isInteger(state.report_assembly.scope_revision) && state.report_assembly.scope_revision >= 1;
       const reportEmptyIdentity = state.report_assembly.scope_id === null && state.report_assembly.scope_revision === 0;
       if (!reportHasIdentity && !reportEmptyIdentity) fail("INVALID_STATE", "report_assembly has an invalid scope identity");
+      if (reportEmptyIdentity && (state.report_assembly.analysis_artifact_ids === null || state.report_assembly.analysis_artifact_ids.length)) {
+        fail("INVALID_STATE", "an unbound report_assembly cannot bind analysis artifacts");
+      }
+      if (state.report_assembly.analysis_artifact_ids === null && state.state_meta.active_operation?.report_evidence_binding_protocol === 1) {
+        fail("INVALID_STATE", "report evidence-binding protocol 1 requires a resolved artifact-ID list");
+      }
       const reportStatus = state.council_chamber.report_writer.current_status;
       if (!templateMode && ["ready", "blocked", "done"].includes(reportStatus) && !reportHasIdentity) {
         fail("INVALID_STATE", `report_assembly requires scope identity for status ${reportStatus}`);
@@ -8894,6 +8963,25 @@ var require_core = __commonJS({
       state.artifact_records.forEach(validateArtifactRecord);
       const ids = state.artifact_records.map((item) => item.artifact_id);
       if (new Set(ids).size !== ids.length) fail("INVALID_STATE", "artifact_id values must be unique");
+      const recordsById = new Map(state.artifact_records.map((record) => [record.artifact_id, record]));
+      if (state.report_assembly.analysis_artifact_ids === null) {
+        if (!state.artifact_records.some((record) => record.route === "analysis_execution" && record.artifact_role === "completion")) {
+          fail(
+            "INVALID_STATE",
+            "a null report evidence binding requires historical analysis completion records"
+          );
+        }
+      } else {
+        state.report_assembly.analysis_artifact_ids.forEach((artifactId) => {
+          const record = recordsById.get(artifactId);
+          if (!record || record.route !== "analysis_execution" || record.artifact_role !== "completion") {
+            fail(
+              "INVALID_STATE",
+              `report_assembly.analysis_artifact_ids must reference analysis completion records: ${artifactId}`
+            );
+          }
+        });
+      }
       const operationIds = state.artifact_records.map((item) => item.operation_id).filter(Boolean);
       if (new Set(operationIds).size !== operationIds.length) fail("INVALID_STATE", "operation_id may appear in only one artifact record");
       const completionArtifacts = state.artifact_records.filter((record) => record.artifact_role === "completion");
@@ -9043,6 +9131,35 @@ var require_core = __commonJS({
         state.response_receipt.direct_assignment = null;
       }
     }
+    function addSchema7Controls(state, projectRoot) {
+      assertObject(state.report_assembly, "report_assembly");
+      if (Object.prototype.hasOwnProperty.call(state.report_assembly, "analysis_artifact_ids")) {
+        fail("UNSUPPORTED_SCHEMA", "pre-v7 report_assembly cannot already contain analysis_artifact_ids");
+      }
+      const reportHasScope = isUuid(state.report_assembly.scope_id) && Number.isInteger(state.report_assembly.scope_revision) && state.report_assembly.scope_revision >= 1;
+      const hasAnalysisCompletion = state.artifact_records.some((record) => record.route === "analysis_execution" && record.artifact_role === "completion");
+      state.report_assembly.analysis_artifact_ids = reportHasScope && hasAnalysisCompletion ? null : [];
+      const targetsCurrentReportScope = (assignment) => assignment?.route === "report_writer" && assignment.scope_ref?.kind === "report" && assignment.scope_ref.id === state.report_assembly.scope_id && assignment.scope_ref.revision === state.report_assembly.scope_revision;
+      if (state.report_assembly.analysis_artifact_ids === null) {
+        if (targetsCurrentReportScope(state.response_receipt?.direct_assignment)) {
+          state.response_receipt.direct_assignment = null;
+        }
+        if (state.pending_decision !== null && state.pending_decision.options.some((option) => targetsCurrentReportScope(option.assignment))) {
+          state.pending_decision = null;
+        }
+      }
+      const active = state.state_meta.active_operation;
+      if (active !== null) {
+        if (Object.prototype.hasOwnProperty.call(active, "report_evidence_binding_protocol")) {
+          fail(
+            "UNSUPPORTED_SCHEMA",
+            "pre-v7 active_operation cannot already contain report_evidence_binding_protocol"
+          );
+        }
+        const planInfo = validatePlan(state.next_step_plan);
+        active.report_evidence_binding_protocol = planInfo.actor === "report_writer" ? 0 : null;
+      }
+    }
     function finalizeSchemaMigration(state) {
       state.state_meta.revision += 1;
       state.state_meta.updated_at = nowIso();
@@ -9053,7 +9170,7 @@ var require_core = __commonJS({
       return state;
     }
     function migrateLegacyState(legacy, options = {}) {
-      const { discardPlan = false } = options;
+      const { discardPlan = false, projectRoot } = options;
       validateLegacyShape(legacy);
       if (legacy.next_step_plan.length && !discardPlan) {
         fail("LEGACY_ACTIVE_PLAN", "recognized v4.5 state has a nonempty transient plan and cannot be resumed safely");
@@ -9101,10 +9218,11 @@ var require_core = __commonJS({
       addDiscoveryControls(reordered);
       addSchema5Controls(reordered);
       addSchema6Controls(reordered);
+      addSchema7Controls(reordered, projectRoot);
       validateState(reordered);
       return reordered;
     }
-    function migrateV2State(v2) {
+    function migrateV2State(v2, projectRoot) {
       assertExactTopLevel(v2, V2_TOP_LEVEL);
       assertObject(v2.state_meta, "state_meta");
       if (v2.state_meta.schema_version !== 2) {
@@ -9118,10 +9236,11 @@ var require_core = __commonJS({
       addDiscoveryControls(migrated);
       addSchema5Controls(migrated);
       addSchema6Controls(migrated);
+      addSchema7Controls(migrated, projectRoot);
       validateState(migrated);
       return finalizeSchemaMigration(migrated);
     }
-    function migrateV3State(v3) {
+    function migrateV3State(v3, projectRoot) {
       assertExactTopLevel(v3);
       assertObject(v3.state_meta, "state_meta");
       if (v3.state_meta.schema_version !== 3) {
@@ -9132,10 +9251,11 @@ var require_core = __commonJS({
       addDiscoveryControls(migrated);
       addSchema5Controls(migrated);
       addSchema6Controls(migrated);
+      addSchema7Controls(migrated, projectRoot);
       validateState(migrated);
       return finalizeSchemaMigration(migrated);
     }
-    function migrateV4State(v4) {
+    function migrateV4State(v4, projectRoot) {
       assertExactTopLevel(v4);
       assertObject(v4.state_meta, "state_meta");
       if (v4.state_meta.schema_version !== 4) {
@@ -9145,10 +9265,11 @@ var require_core = __commonJS({
       migrated.state_meta.schema_version = SCHEMA_VERSION;
       addSchema5Controls(migrated);
       addSchema6Controls(migrated);
+      addSchema7Controls(migrated, projectRoot);
       validateState(migrated);
       return finalizeSchemaMigration(migrated);
     }
-    function migrateV5State(v5) {
+    function migrateV5State(v5, projectRoot) {
       assertExactTopLevel(v5);
       assertObject(v5.state_meta, "state_meta");
       if (v5.state_meta.schema_version !== 5) {
@@ -9157,12 +9278,28 @@ var require_core = __commonJS({
       const migrated = clone(v5);
       migrated.state_meta.schema_version = SCHEMA_VERSION;
       addSchema6Controls(migrated);
+      addSchema7Controls(migrated, projectRoot);
       validateState(migrated);
       return finalizeSchemaMigration(migrated);
     }
+    function upgradeV6State(v6, projectRoot) {
+      assertExactTopLevel(v6);
+      assertObject(v6.state_meta, "state_meta");
+      if (v6.state_meta.schema_version !== 6) {
+        fail("UNSUPPORTED_SCHEMA", `unsupported schema version: ${v6.state_meta.schema_version}`);
+      }
+      const migrated = clone(v6);
+      migrated.state_meta.schema_version = SCHEMA_VERSION;
+      addSchema7Controls(migrated, projectRoot);
+      validateState(migrated);
+      return migrated;
+    }
+    function migrateV6State(v6, projectRoot) {
+      return finalizeSchemaMigration(upgradeV6State(v6, projectRoot));
+    }
     function availableRegularFile(filePath) {
       try {
-        return fs2.lstatSync(filePath).isFile();
+        return fs.lstatSync(filePath).isFile();
       } catch (_error) {
         return false;
       }
@@ -9181,7 +9318,7 @@ var require_core = __commonJS({
           });
           return;
         }
-        if (!fs2.existsSync(resolved)) {
+        if (!fs.existsSync(resolved)) {
           warnings.push({
             code: "MISSING_HISTORICAL_ARTIFACT",
             artifact_id: record.artifact_id,
@@ -9192,7 +9329,7 @@ var require_core = __commonJS({
         if (/^legacy-\d{4}$/.test(record.artifact_id)) return;
         let kind;
         try {
-          const stat = fs2.lstatSync(resolved);
+          const stat = fs.lstatSync(resolved);
           if (stat.isFile()) kind = "file";
           else if (stat.isDirectory()) kind = "directory";
           else {
@@ -9212,8 +9349,8 @@ var require_core = __commonJS({
           return;
         }
         const manifestPath = manifestPathFor(resolved, kind);
-        const relativeManifestPath = normalizePath(path2.relative(path2.resolve(projectRoot), manifestPath));
-        if (!fs2.existsSync(manifestPath)) {
+        const relativeManifestPath = normalizePath(path.relative(path.resolve(projectRoot), manifestPath));
+        if (!fs.existsSync(manifestPath)) {
           warnings.push({
             code: "MISSING_HISTORICAL_ARTIFACT_MANIFEST",
             artifact_id: record.artifact_id,
@@ -9233,7 +9370,7 @@ var require_core = __commonJS({
         }
         let manifest;
         try {
-          manifest = JSON.parse(fs2.readFileSync(manifestPath, "utf8"));
+          manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
         } catch (_error) {
           warnings.push({
             code: "INVALID_HISTORICAL_ARTIFACT_MANIFEST",
@@ -9380,7 +9517,7 @@ var require_core = __commonJS({
             continue;
           }
           if (kind === "directory") {
-            if (!listedPath.startsWith(`${resolved}${path2.sep}`)) {
+            if (!listedPath.startsWith(`${resolved}${path.sep}`)) {
               warnings.push({
                 code: "INVALID_HISTORICAL_ARTIFACT_FILE_PATH",
                 artifact_id: record.artifact_id,
@@ -9394,7 +9531,7 @@ var require_core = __commonJS({
             includesPrimary = true;
             includesDeliverable = true;
           }
-          if (!fs2.existsSync(listedPath) || !availableRegularFile(listedPath)) {
+          if (!fs.existsSync(listedPath) || !availableRegularFile(listedPath)) {
             warnings.push({
               code: "MISSING_HISTORICAL_ARTIFACT_FILE",
               artifact_id: record.artifact_id,
@@ -9422,11 +9559,34 @@ var require_core = __commonJS({
       });
       return warnings;
     }
+    function unavailableBoundReportAnalysisArtifactIds(projectRoot, state) {
+      const bound = new Set(state.report_assembly.analysis_artifact_ids);
+      if (!bound.size) return [];
+      return [...new Set(
+        artifactWarnings(projectRoot, state).filter((warning) => bound.has(warning.artifact_id)).map((warning) => warning.artifact_id)
+      )].sort();
+    }
+    function assertBoundReportAnalysisArtifactsAvailable(projectRoot, state) {
+      if (state.report_assembly.analysis_artifact_ids === null) {
+        fail(
+          "SCOPE_MISMATCH",
+          "the legacy report evidence binding is unresolved; select evidence with scope_transition revise and obtain reapproval",
+          { report_evidence_binding: "unresolved" }
+        );
+      }
+      const unavailable = unavailableBoundReportAnalysisArtifactIds(projectRoot, state);
+      if (!unavailable.length) return;
+      fail(
+        "SCOPE_MISMATCH",
+        "the approved report's bound analysis evidence is unavailable; restore it or revise and reapprove the report scope",
+        { unavailable_analysis_artifact_ids: unavailable }
+      );
+    }
     function statePathFor(projectRoot) {
-      return path2.join(path2.resolve(projectRoot), STATE_FILE);
+      return path.join(path.resolve(projectRoot), STATE_FILE);
     }
     function templatePathFor(skillRoot) {
-      return path2.join(path2.resolve(skillRoot), "assets", "project_state_template.yaml");
+      return path.join(path.resolve(skillRoot), "assets", "project_state_template.yaml");
     }
     function loadTemplate(skillRoot) {
       const templatePath = templatePathFor(skillRoot);
@@ -9442,10 +9602,10 @@ var require_core = __commonJS({
       contextProtocol = null
     }) {
       const selectedContextProtocol = normalizeContextProtocol(contextProtocol, "open context protocol");
-      const root = path2.resolve(projectRoot);
+      const root = path.resolve(projectRoot);
       const statePath = statePathFor(root);
       const template = loadTemplate(skillRoot);
-      const exists = fs2.existsSync(statePath);
+      const exists = fs.existsSync(statePath);
       if (fresh && discardLegacyPlan) fail("INVALID_INPUT", "--fresh and --discard-legacy-plan cannot be combined");
       if (discardLegacyPlan && !exists) fail("INVALID_INPUT", "--discard-legacy-plan requires an existing recognized v4.5 state");
       if (fresh) {
@@ -9453,7 +9613,7 @@ var require_core = __commonJS({
         const archivePath = previous === null ? null : archiveBytes(root, previous, "reset");
         const startupNotice = archivePath === null ? { kind: "created", archive_path: null } : {
           kind: "reset",
-          archive_path: normalizePath(path2.relative(root, archivePath))
+          archive_path: normalizePath(path.relative(root, archivePath))
         };
         const state = instantiateTemplate(template, startupNotice);
         atomicWrite(statePath, stringifyYaml(state));
@@ -9505,7 +9665,10 @@ var require_core = __commonJS({
       const original = readBytes(statePath);
       const parsed = parseYaml(original.toString("utf8"), statePath);
       if (!isObject(parsed.state_meta)) {
-        const migrated = migrateLegacyState(parsed, { discardPlan: discardLegacyPlan });
+        const migrated = migrateLegacyState(parsed, {
+          discardPlan: discardLegacyPlan,
+          projectRoot: root
+        });
         const warnings2 = artifactWarnings(root, migrated);
         const serialized = stringifyYaml(migrated);
         const archivePath = archiveBytes(root, original, discardLegacyPlan ? "migration-v45-discarded-plan" : "migration-v45");
@@ -9530,25 +9693,26 @@ var require_core = __commonJS({
           ...context2
         };
       }
-      if ([2, 3, 4, 5].includes(parsed.state_meta.schema_version)) {
+      if ([2, 3, 4, 5, 6].includes(parsed.state_meta.schema_version)) {
         if (discardLegacyPlan) {
           fail("INVALID_INPUT", "--discard-legacy-plan applies only to a recognized unversioned v4.5 state");
         }
         const sourceVersion = parsed.state_meta.schema_version;
-        const migrated = sourceVersion === 2 ? migrateV2State(parsed) : sourceVersion === 3 ? migrateV3State(parsed) : sourceVersion === 4 ? migrateV4State(parsed) : migrateV5State(parsed);
+        const migrated = sourceVersion === 2 ? migrateV2State(parsed, root) : sourceVersion === 3 ? migrateV3State(parsed, root) : sourceVersion === 4 ? migrateV4State(parsed, root) : sourceVersion === 5 ? migrateV5State(parsed, root) : migrateV6State(parsed, root);
         const { planInfo: planInfo2 } = validateState(migrated);
         const operation2 = migrated.state_meta.active_operation;
         const packet2 = operationPacket(migrated, operation2, planInfo2);
         const mode2 = operation2 === null ? "idle" : operation2.stage === "worker_pending" ? "resume_worker" : "resume_lead";
         const artifactStatus2 = operation2 && operation2.artifact_intent ? inspectReservedArtifact(root, operation2, planInfo2.actor, packet2) : null;
         const warnings2 = artifactWarnings(root, migrated);
+        const visibleWarnings2 = visibleReportArtifactWarnings(migrated, planInfo2, warnings2);
         const serialized = stringifyYaml(migrated);
         const archivePath = archiveBytes(root, original, `migration-v${sourceVersion}-v${SCHEMA_VERSION}`);
         atomicWrite(statePath, serialized);
         const context2 = contextForCurrentStage(
           migrated,
           planInfo2,
-          warnings2,
+          visibleWarnings2,
           artifactStatus2,
           selectedContextProtocol
         );
@@ -9565,7 +9729,7 @@ var require_core = __commonJS({
           active_operation: operation2,
           operation_packet: packet2,
           artifact_status: artifactStatus2,
-          warnings: warnings2,
+          warnings: visibleWarnings2,
           ...context2
         };
       }
@@ -9583,10 +9747,11 @@ var require_core = __commonJS({
       }
       const artifactStatus = operation && operation.artifact_intent ? inspectReservedArtifact(root, operation, planInfo.actor, packet) : null;
       const warnings = artifactWarnings(root, parsed);
+      const visibleWarnings = visibleReportArtifactWarnings(parsed, planInfo, warnings);
       const context = contextForCurrentStage(
         parsed,
         planInfo,
-        warnings,
+        visibleWarnings,
         artifactStatus,
         selectedContextProtocol
       );
@@ -9602,13 +9767,13 @@ var require_core = __commonJS({
         active_operation: operation,
         operation_packet: packet,
         artifact_status: artifactStatus,
-        warnings,
+        warnings: visibleWarnings,
         ...context
       };
     }
     function loadCurrentState(projectRoot) {
       const statePath = statePathFor(projectRoot);
-      if (!fs2.existsSync(statePath)) fail("MISSING_STATE", `${statePath} does not exist`);
+      if (!fs.existsSync(statePath)) fail("MISSING_STATE", `${statePath} does not exist`);
       const text = readText(statePath);
       const state = parseYaml(text, statePath);
       validateState(state);
@@ -9654,6 +9819,13 @@ var require_core = __commonJS({
         }
       } else if (route === "report_writer") {
         if (scopeRef.kind !== "report") fail("SCOPE_MISMATCH", "report_writer requires a report scope reference");
+        if (state.report_assembly.analysis_artifact_ids === null) {
+          fail(
+            "SCOPE_MISMATCH",
+            "the legacy report evidence binding is unresolved; revise the report scope with an explicit evidence selection before approval",
+            { report_evidence_binding: "unresolved" }
+          );
+        }
         current = state.report_assembly;
         status = state.council_chamber.report_writer.current_status;
       } else if (route === "causal_discovery") {
@@ -9844,6 +10016,9 @@ var require_core = __commonJS({
         assignmentFields.filter((field) => Object.prototype.hasOwnProperty.call(payload, field)).map((field) => [field, payload[field]])
       );
       const { assignment, plan, stage } = normalizeAssignment(state, assignmentInput, "begin assignment");
+      if (assignment.route === "report_writer" && assignment.scope_ref !== null) {
+        assertBoundReportAnalysisArtifactsAvailable(projectRoot, state);
+      }
       const operation = {
         id: crypto.randomUUID(),
         stage,
@@ -9853,6 +10028,7 @@ var require_core = __commonJS({
         discovery_scope: null,
         completion_protocol: 0,
         contract_hash: null,
+        report_evidence_binding_protocol: assignment.route === "report_writer" ? state.report_assembly.analysis_artifact_ids === null ? 0 : 1 : null,
         started_at: nowIso()
       };
       if (assignment.route === "causal_discovery" && assignment.scope_ref !== null) {
@@ -9963,25 +10139,25 @@ var require_core = __commonJS({
       return extension.toLowerCase();
     }
     function pathIsWithin(root, candidate) {
-      const relative = path2.relative(root, candidate);
-      return relative === "" || !path2.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path2.sep}`);
+      const relative = path.relative(root, candidate);
+      return relative === "" || !path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`);
     }
     function assertArtifactAncestorsWithinProject(projectRoot, candidate) {
-      const root = path2.resolve(projectRoot);
+      const root = path.resolve(projectRoot);
       let realRoot;
       try {
-        realRoot = fs2.realpathSync(root);
+        realRoot = fs.realpathSync(root);
       } catch (error) {
         fail("IO_ERROR", `could not resolve project root for artifact safety: ${error.message}`);
       }
-      const relative = path2.relative(root, candidate);
-      const segments = relative.split(path2.sep).filter(Boolean);
+      const relative = path.relative(root, candidate);
+      const segments = relative.split(path.sep).filter(Boolean);
       let current = root;
       for (let index = 0; index < segments.length - 1; index += 1) {
-        current = path2.join(current, segments[index]);
+        current = path.join(current, segments[index]);
         let stat;
         try {
-          stat = fs2.lstatSync(current);
+          stat = fs.lstatSync(current);
         } catch (error) {
           if (error && error.code === "ENOENT") return;
           if (error && error.code === "ENOTDIR") {
@@ -9994,7 +10170,7 @@ var require_core = __commonJS({
         }
         let realCurrent;
         try {
-          realCurrent = fs2.realpathSync(current);
+          realCurrent = fs.realpathSync(current);
         } catch (error) {
           if (error && ["ENOENT", "ENOTDIR", "ELOOP"].includes(error.code)) {
             fail("INVALID_ARTIFACT_PATH", "artifact path contains a dangling or invalid link");
@@ -10007,7 +10183,7 @@ var require_core = __commonJS({
         if (index < segments.length - 1) {
           let resolvedStat;
           try {
-            resolvedStat = fs2.statSync(current);
+            resolvedStat = fs.statSync(current);
           } catch (error) {
             if (error && ["ENOENT", "ENOTDIR", "ELOOP"].includes(error.code)) {
               fail("INVALID_ARTIFACT_PATH", "artifact path contains a dangling or invalid ancestor");
@@ -10025,10 +10201,10 @@ var require_core = __commonJS({
       if (!normalized.startsWith("output/") || normalized.includes("\0")) {
         fail("INVALID_ARTIFACT_PATH", "artifact location must be a relative path under output/");
       }
-      const root = path2.resolve(projectRoot);
-      const outputRoot = path2.resolve(root, "output");
-      const resolved = path2.resolve(root, ...normalized.split("/"));
-      if (resolved !== outputRoot && !resolved.startsWith(`${outputRoot}${path2.sep}`)) {
+      const root = path.resolve(projectRoot);
+      const outputRoot = path.resolve(root, "output");
+      const resolved = path.resolve(root, ...normalized.split("/"));
+      if (resolved !== outputRoot && !resolved.startsWith(`${outputRoot}${path.sep}`)) {
         fail("INVALID_ARTIFACT_PATH", "artifact location escapes the project output directory");
       }
       assertArtifactAncestorsWithinProject(root, resolved);
@@ -10072,7 +10248,7 @@ var require_core = __commonJS({
       return {
         artifact_intent: clone(artifactIntent),
         temporary_path: temporaryArtifactLocation(artifactIntent, operation.id),
-        manifest_path: normalizePath(path2.relative(path2.resolve(projectRoot), manifest))
+        manifest_path: normalizePath(path.relative(path.resolve(projectRoot), manifest))
       };
     }
     function reserveArtifact({
@@ -10100,6 +10276,9 @@ var require_core = __commonJS({
       const planInfo = validatePlan(state.next_step_plan);
       const actor = planInfo.actor;
       const previousPacket = operationPacket(state, operation, planInfo);
+      if (actor === "report_writer" && operation.scope_ref !== null) {
+        assertBoundReportAnalysisArtifactsAvailable(projectRoot, state);
+      }
       if (payload.discovery_scope !== void 0) {
         if (actor !== "causal_discovery") {
           fail("OWNERSHIP_VIOLATION", `${actor} cannot set discovery_scope`);
@@ -10143,12 +10322,12 @@ var require_core = __commonJS({
     }
     function temporaryArtifactLocation(intent, operationId) {
       const normalized = normalizePath(intent.location);
-      const directory = path2.posix.dirname(normalized);
-      const name = path2.posix.basename(normalized);
+      const directory = path.posix.dirname(normalized);
+      const name = path.posix.basename(normalized);
       return `${directory}/.${name}.tmp-${operationId.slice(0, 8)}`;
     }
     function manifestPathFor(target, kind) {
-      return kind === "directory" ? path2.join(target, "artifact-manifest.json") : `${target}.manifest.json`;
+      return kind === "directory" ? path.join(target, "artifact-manifest.json") : `${target}.manifest.json`;
     }
     function expectedArtifactRoute(actor) {
       return actor.startsWith("analysis_execution.") ? "analysis_execution" : actor;
@@ -10164,14 +10343,14 @@ var require_core = __commonJS({
     }
     function lstatRequiredArtifact(filePath, missingMessage, ioMessage) {
       try {
-        return fs2.lstatSync(filePath);
+        return fs.lstatSync(filePath);
       } catch (error) {
         failArtifactFsError(error, missingMessage, ioMessage);
       }
     }
     function readRequiredArtifactText(filePath, missingMessage, ioMessage) {
       try {
-        return fs2.readFileSync(filePath, "utf8");
+        return fs.readFileSync(filePath, "utf8");
       } catch (error) {
         failArtifactFsError(error, missingMessage, ioMessage);
       }
@@ -10182,7 +10361,7 @@ var require_core = __commonJS({
       const target = resolveOutputPath(projectRoot, intent.location);
       const manifestPath = manifestPathFor(target, intent.kind);
       const relativeManifestPath = normalizePath(
-        path2.relative(path2.resolve(projectRoot), manifestPath)
+        path.relative(path.resolve(projectRoot), manifestPath)
       );
       const actualFiles = validateArtifactBody(projectRoot, operation, target).filter((file) => file !== relativeManifestPath);
       const manifestStat = lstatRequiredArtifact(
@@ -10314,7 +10493,7 @@ var require_core = __commonJS({
           fail("MISSING_ARTIFACT", `manifest file does not exist: ${normalized}`);
         }
         if (intent.kind === "directory") {
-          if (!resolved.startsWith(`${target}${path2.sep}`)) {
+          if (!resolved.startsWith(`${target}${path.sep}`)) {
             fail("INVALID_ARTIFACT_MANIFEST", `manifest file is outside the reserved directory: ${normalized}`);
           }
           if (resolved !== manifestPath) includesDeliverable = true;
@@ -10364,7 +10543,7 @@ var require_core = __commonJS({
       const visit = (directory, relativeDirectory = "") => {
         let entries;
         try {
-          entries = fs2.readdirSync(directory, { withFileTypes: true });
+          entries = fs.readdirSync(directory, { withFileTypes: true });
         } catch (error) {
           failArtifactFsError(
             error,
@@ -10373,8 +10552,8 @@ var require_core = __commonJS({
           );
         }
         for (const entry of entries) {
-          const relative = relativeDirectory ? path2.join(relativeDirectory, entry.name) : entry.name;
-          const absolute = path2.join(directory, entry.name);
+          const relative = relativeDirectory ? path.join(relativeDirectory, entry.name) : entry.name;
+          const absolute = path.join(directory, entry.name);
           if (relativeDirectory === "" && entry.name.startsWith(".artifact-manifest.json.tmp-")) {
             fail("INVALID_ARTIFACT_PATH", "reserved artifact contains a controller-owned manifest temporary file");
           }
@@ -10464,14 +10643,14 @@ var require_core = __commonJS({
           manifestPath,
           `${JSON.stringify(generatedManifest(operation, actor, files, artifact, packet), null, 2)}
 `,
-          intent.kind === "directory" ? path2.dirname(target) : null
+          intent.kind === "directory" ? path.dirname(target) : null
         );
       } else if (artifactStatus.location_state === "temp-only") {
         const files = validateArtifactBody(projectRoot, operation, temporary, true);
         validateReceiptAgainstPacket(artifact.execution_receipt, packet, artifact.artifact_role, files);
         const manifest = generatedManifest(operation, actor, files, artifact, packet);
         try {
-          fs2.renameSync(temporary, target);
+          fs.renameSync(temporary, target);
         } catch (error) {
           if (isMissingArtifactFsError(error)) {
             fail("MISSING_ARTIFACT", `reserved temporary artifact does not exist: ${temporaryLocation}`);
@@ -10482,7 +10661,7 @@ var require_core = __commonJS({
           manifestPath,
           `${JSON.stringify(manifest, null, 2)}
 `,
-          intent.kind === "directory" ? path2.dirname(target) : null
+          intent.kind === "directory" ? path.dirname(target) : null
         );
       } else {
         fail("INTERNAL_ERROR", `unsupported artifact location state: ${artifactStatus.location_state}`);
@@ -10491,7 +10670,7 @@ var require_core = __commonJS({
     }
     function artifactEntryExists(filePath) {
       try {
-        fs2.lstatSync(filePath);
+        fs.lstatSync(filePath);
         return true;
       } catch (error) {
         if (isMissingArtifactFsError(error)) return false;
@@ -10505,7 +10684,7 @@ var require_core = __commonJS({
         temporaryArtifactLocation(operation.artifact_intent, operation.id)
       );
       const manifestPath = manifestPathFor(target, operation.artifact_intent.kind);
-      const relativeManifestPath = normalizePath(path2.relative(path2.resolve(projectRoot), manifestPath));
+      const relativeManifestPath = normalizePath(path.relative(path.resolve(projectRoot), manifestPath));
       const base = {
         location: operation.artifact_intent.location,
         temporary_path: temporaryArtifactLocation(operation.artifact_intent, operation.id),
@@ -10532,7 +10711,7 @@ var require_core = __commonJS({
           validateArtifactBody(projectRoot, operation, target);
           return describe("final-awaiting-manifest", "MISSING_ARTIFACT");
         } catch (error) {
-          if (error instanceof StateError2 && ["MISSING_ARTIFACT", "INVALID_ARTIFACT_PATH"].includes(error.code)) {
+          if (error instanceof StateError && ["MISSING_ARTIFACT", "INVALID_ARTIFACT_PATH"].includes(error.code)) {
             return describe("invalid", error.code);
           }
           throw error;
@@ -10545,7 +10724,7 @@ var require_core = __commonJS({
           execution_receipt: completed.execution_receipt
         });
       } catch (error) {
-        if (error instanceof StateError2 && [
+        if (error instanceof StateError && [
           "MISSING_ARTIFACT",
           "INVALID_ARTIFACT_MANIFEST",
           "INVALID_ARTIFACT_PATH",
@@ -10670,16 +10849,40 @@ var require_core = __commonJS({
         );
         patch.execution_contract = submittedAnalysisContract;
       }
+      const submittedReportEvidence = isReport && Object.prototype.hasOwnProperty.call(patch, "analysis_artifact_ids");
+      if (submittedReportEvidence) {
+        patch.analysis_artifact_ids = normalizeAnalysisArtifactIds(
+          patch.analysis_artifact_ids,
+          "updates.report_assembly.analysis_artifact_ids"
+        );
+      }
+      const nextReportStatus = isReport && updates.council_chamber && updates.council_chamber.report_writer ? updates.council_chamber.report_writer.current_status : void 0;
+      if (isReport && ["new", "revise"].includes(transition) && nextReportStatus === "ready" && !submittedReportEvidence) {
+        fail(
+          "INVALID_INPUT",
+          "new or revised ready report scope requires explicit analysis_artifact_ids; use [] for an intentional planning report"
+        );
+      }
       const hasCurrentIdentity = isUuid(current.scope_id) && Number.isInteger(current.scope_revision) && current.scope_revision >= 1;
       if (isAnalysis && hasCurrentIdentity && transition === "preserve" && current.support !== patch.support) {
         fail("SCOPE_MISMATCH", "changing analysis support requires scope_transition new or revise");
+      }
+      if (isReport && hasCurrentIdentity && transition === "preserve") {
+        const changed = REPORT_SCOPE_MATERIAL_FIELDS.filter((field) => Object.prototype.hasOwnProperty.call(patch, field) && !deepEqual(patch[field], current[field]));
+        if (changed.length) {
+          fail(
+            "SCOPE_MISMATCH",
+            `changing preserved report scope fields requires scope_transition new or revise: ${changed.join(", ")}`
+          );
+        }
+        patch.analysis_artifact_ids = clone(current.analysis_artifact_ids);
       }
       if (operation.scope_ref !== null) {
         if (current.scope_id !== operation.scope_ref.id || current.scope_revision !== operation.scope_ref.revision) {
           fail("SCOPE_MISMATCH", "the approved scope changed before worker apply");
         }
         if (transition !== "preserve") {
-          const nextStatus = isAnalysis ? patch.current_status : updates.council_chamber && updates.council_chamber.report_writer ? updates.council_chamber.report_writer.current_status : void 0;
+          const nextStatus = isAnalysis ? patch.current_status : nextReportStatus;
           if (hasArtifact || nextStatus === "done") {
             fail("SCOPE_MISMATCH", "output creation must preserve the exact approved scope");
           }
@@ -10706,6 +10909,9 @@ var require_core = __commonJS({
       }
       if (isReport && artifactRole === "infeasibility_evidence" && transition === "preserve" && Object.prototype.hasOwnProperty.call(patch, "current_format") && patch.current_format !== current.current_format) {
         fail("SCOPE_MISMATCH", "report infeasibility evidence cannot change the approved report format");
+      }
+      if (isReport && transition !== "preserve" && (transition === "new" || submittedReportEvidence || current.analysis_artifact_ids !== null)) {
+        operation.report_evidence_binding_protocol = 1;
       }
       if (transition === "new") {
         patch.scope_id = crypto.randomUUID();
@@ -10754,6 +10960,7 @@ var require_core = __commonJS({
         planned_structure: [],
         key_points: [],
         wording_constraints: [],
+        analysis_artifact_ids: [],
         draft_notes: []
       };
     }
@@ -11060,6 +11267,9 @@ var require_core = __commonJS({
       validateOwnedUpdates(payload.actor, payload.updates);
       const updates = clone(payload.updates);
       const hasArtifact = payload.artifact !== void 0 && payload.artifact !== null;
+      if (payload.actor === "report_writer" && hasArtifact) {
+        assertBoundReportAnalysisArtifactsAvailable(projectRoot, state);
+      }
       if (payload.discovery_scope !== void 0) {
         if (payload.actor !== "causal_discovery") {
           fail("OWNERSHIP_VIOLATION", `${payload.actor} cannot set discovery_scope`);
@@ -11125,6 +11335,9 @@ var require_core = __commonJS({
       const completionPacket = operationPacket(merged, mergedOperation, planInfo);
       validateCausalCheckReadiness(merged, payload.actor, updates, state);
       validateScopeCompletion(merged, payload.actor, updates, artifactRole);
+      if (payload.actor === "report_writer" && merged.council_chamber.report_writer.current_status === "ready") {
+        assertBoundReportAnalysisArtifactsAvailable(projectRoot, merged);
+      }
       const abandonedLegacyDiscoveryArtifact = payload.actor === "causal_discovery" && operation.discovery_scope === null && operation.scope_ref === null && !hasArtifact && updates.council_chamber.causal_discovery.current_status === "blocked";
       let artifactRecord = null;
       if (hasArtifact) {
@@ -11214,14 +11427,15 @@ var require_core = __commonJS({
       if (presentation.options.some((option) => option.assignment.scope_ref !== null && ["analysis", "report"].includes(option.assignment.scope_ref.kind))) {
         fail("INVALID_INPUT", "an exact ready analysis or report scope requires direct approval, not a numbered option");
       }
-      if (cancel || plannedScopeStatus(state) !== "ready") return;
+      const planInfo = validatePlan(state.next_step_plan);
+      const unresolvedReportRepair = planInfo.actor === "report_writer" && state.report_assembly.analysis_artifact_ids === null;
+      if (cancel || plannedScopeStatus(state) !== "ready" || unresolvedReportRepair) return;
       if (presentation.options.length > 0 || presentation.direct_assignment === null) {
         fail(
           "INVALID_INPUT",
           "a ready analysis or report handoff must persist one direct approval assignment without options"
         );
       }
-      const planInfo = validatePlan(state.next_step_plan);
       const expectedRoute = planInfo.actor;
       const expectedScope = state.state_meta.active_operation.scope_ref;
       if (presentation.direct_assignment.route !== expectedRoute || presentation.direct_assignment.support !== planInfo.support || !deepEqual(presentation.direct_assignment.scope_ref, expectedScope)) {
@@ -11363,6 +11577,10 @@ ${presentation.next_steps}`);
       ]);
       assertKnownKeys(payload, allowedInput, "finish input", "INVALID_INPUT");
       const operation = assertOperation(state, payload, cancel ? null : "lead_pending");
+      const planInfo = validatePlan(state.next_step_plan);
+      if (!cancel && planInfo.actor === "report_writer" && operation.report_evidence_binding_protocol === 1) {
+        assertBoundReportAnalysisArtifactsAvailable(projectRoot, state);
+      }
       if (!Object.prototype.hasOwnProperty.call(payload, "presentation")) {
         fail("INVALID_INPUT", "finish input requires presentation");
       }
@@ -11513,6 +11731,26 @@ ${candidate}`, bodyStart);
         artifact_records: clone(state.artifact_records)
       };
     }
+    function isOutputBoundReportContext(state, planInfo) {
+      const operation = state.state_meta.active_operation;
+      return planInfo.actor === "report_writer" && operation !== null && operation.scope_ref !== null && Array.isArray(state.report_assembly.analysis_artifact_ids);
+    }
+    function visibleReportArtifactRecords(state, planInfo) {
+      if (!isOutputBoundReportContext(state, planInfo)) return clone(state.artifact_records);
+      const bound = new Set(state.report_assembly.analysis_artifact_ids ?? []);
+      const operationId = state.state_meta.active_operation.id;
+      return clone(state.artifact_records.filter((record) => record.route === "analysis_execution" ? bound.has(record.artifact_id) : record.route === "report_writer" ? record.operation_id === operationId : true));
+    }
+    function visibleReportArtifactWarnings(state, planInfo, warnings) {
+      if (!isOutputBoundReportContext(state, planInfo)) return clone(warnings);
+      const visibleIds = new Set(
+        visibleReportArtifactRecords(state, planInfo).map((record) => record.artifact_id)
+      );
+      const recordIds = new Set(state.artifact_records.map((record) => record.artifact_id));
+      return clone(warnings.filter((warning) => {
+        return !recordIds.has(warning.artifact_id) || visibleIds.has(warning.artifact_id);
+      }));
+    }
     function workerCouncilProjection(state, planInfo) {
       const council = {
         data_audit: clone(state.council_chamber.data_audit),
@@ -11522,7 +11760,7 @@ ${candidate}`, bodyStart);
         analysis_execution: {},
         report_writer: clone(state.council_chamber.report_writer)
       };
-      if (planInfo.actor === "report_writer" || ["causal_check", "causal_discovery"].includes(planInfo.actor)) {
+      if (planInfo.actor === "report_writer" && !isOutputBoundReportContext(state, planInfo) || ["causal_check", "causal_discovery"].includes(planInfo.actor)) {
         council.analysis_execution = clone(state.council_chamber.analysis_execution);
       } else if (planInfo.design !== null) {
         const slot = state.council_chamber.analysis_execution[planInfo.design];
@@ -11538,10 +11776,13 @@ ${candidate}`, bodyStart);
         domain_knowledge: clone(state.domain_knowledge),
         causal_facts: clone(state.causal_facts),
         discovery_sidecar: clone(state.discovery_sidecar),
-        artifact_records: clone(state.artifact_records)
+        artifact_records: planInfo.actor === "report_writer" ? visibleReportArtifactRecords(state, planInfo) : clone(state.artifact_records)
       };
       if (planInfo.actor === "report_writer") {
         projected.report_assembly = clone(state.report_assembly);
+        if (isOutputBoundReportContext(state, planInfo)) {
+          projected.report_assembly.draft_notes = [];
+        }
       }
       return projected;
     }
@@ -11561,6 +11802,10 @@ ${candidate}`, bodyStart);
     function turnContext(state, planInfo, audience, warnings, artifactStatus = null) {
       const operation = state.state_meta.active_operation;
       const projected = audience === "router" ? routerStateProjection(state) : audience === "worker" ? workerStateProjection(state, planInfo) : leadStateProjection(state, planInfo);
+      const snapshot = scopeSnapshot(state);
+      if (audience !== "router" && isOutputBoundReportContext(state, planInfo)) {
+        snapshot.analysis = {};
+      }
       return {
         version: 1,
         audience,
@@ -11570,11 +11815,11 @@ ${candidate}`, bodyStart);
         stage: operation === null ? "idle" : operation.stage,
         startup_notice: clone(state.state_meta.startup_notice),
         operation: clone(operation),
-        scope_snapshot: scopeSnapshot(state),
+        scope_snapshot: snapshot,
         state: projected,
         previous_response_cue: audience === "router" ? previousResponseCue(state.response_receipt) : null,
         artifact_status: clone(artifactStatus),
-        artifact_warnings: clone(warnings)
+        artifact_warnings: audience !== "router" && planInfo.actor === "report_writer" ? visibleReportArtifactWarnings(state, planInfo, warnings) : clone(warnings)
       };
     }
     function phaseName(audience) {
@@ -11594,7 +11839,7 @@ ${candidate}`, bodyStart);
         phase: phaseName(audience),
         turn_context: context,
         operation_packet: operationPacket(state, state.state_meta.active_operation, planInfo),
-        required_references: requiredReferences(state, planInfo, audience),
+        required_references: requiredReferences(state, planInfo, audience, warnings),
         completion_command: completionCommandForAudience(audience)
       };
       const contextHash = sha256Hex(canonicalJson(body));
@@ -11610,12 +11855,15 @@ ${candidate}`, bodyStart);
       }
       return value;
     }
-    function requiredReferences(state, planInfo, audience) {
+    function requiredReferences(state, planInfo, audience, warnings) {
+      const operation = state.state_meta.active_operation;
+      const legacyProtocol = operation !== null && operation.completion_protocol === 1;
       if (audience === "router") return ["references/route_selection_workflow.md"];
       if (audience === "team_lead") {
         const references2 = ["references/team_lead.md"];
         if (planInfo.design !== null) references2.push("references/team_lead_analysis_flow.md");
         if (planInfo.actor === "report_writer") references2.push("references/team_lead_report_flow.md");
+        if (legacyProtocol) references2.push("references/legacy_evidence.md");
         return references2;
       }
       const references = [];
@@ -11628,10 +11876,17 @@ ${candidate}`, bodyStart);
       } else {
         references.push(`references/${planInfo.actor}.md`);
       }
-      const operation = state.state_meta.active_operation;
-      if (operation !== null && (operation.artifact_intent !== null || operation.scope_ref !== null && (planInfo.design !== null || ["report_writer", "causal_discovery"].includes(planInfo.actor)))) {
-        references.push("references/artifact_output_policy.md");
+      const outputBound = operation !== null && (operation.artifact_intent !== null || operation.scope_ref !== null && (planInfo.design !== null || planInfo.actor === "causal_discovery" || planInfo.actor === "report_writer" && Array.isArray(state.report_assembly.analysis_artifact_ids)));
+      if (outputBound && planInfo.actor === "report_writer") {
+        if (state.report_assembly.analysis_artifact_ids !== null) {
+          references.push(
+            state.report_assembly.analysis_artifact_ids.length > 0 ? "assets/report_template_analysis.md" : "assets/report_template_planning.md",
+            "assets/report_html_layout_template.html"
+          );
+        }
       }
+      if (outputBound) references.push("references/artifact_output_policy.md");
+      if (legacyProtocol) references.push("references/legacy_evidence.md");
       return [...new Set(references)];
     }
     function contextForCurrentStage(state, planInfo, warnings, artifactStatus = null, contextProtocol = null) {
@@ -11642,16 +11897,19 @@ ${candidate}`, bodyStart);
       }
       return {
         turn_context: turnContext(state, planInfo, audience, warnings, artifactStatus),
-        required_references: requiredReferences(state, planInfo, audience)
+        required_references: requiredReferences(state, planInfo, audience, warnings)
       };
     }
-    function validateProject2({ projectRoot }) {
-      const root = path2.resolve(projectRoot);
+    function validateProject({ projectRoot }) {
+      const root = path.resolve(projectRoot);
       const statePath = statePathFor(root);
-      if (!fs2.existsSync(statePath)) {
+      if (!fs.existsSync(statePath)) {
         return { ok: false, code: "MISSING_STATE", state_path: statePath, warnings: [] };
       }
-      const state = parseYaml(readText(statePath), statePath);
+      let state = parseYaml(readText(statePath), statePath);
+      if (state.state_meta?.schema_version === 6) {
+        state = upgradeV6State(state, root);
+      }
       const { planInfo } = validateState(state);
       return {
         ok: true,
@@ -11693,91 +11951,176 @@ ${candidate}`, bodyStart);
           required_references: 1,
           operation_packet_ref: 1,
           phase_capsule: 1,
-          begin_artifact_reservation: 1
+          begin_artifact_reservation: 1,
+          conditional_references: 1,
+          report_evidence_binding: 1
         }
       };
     }
     module2.exports = {
       PHASE_CAPSULE_PROTOCOL,
-      StateError: StateError2,
+      StateError,
       applyWorker,
       beginOperation,
       finishOperation,
       openProject,
       reserveArtifact,
-      validateProject: validateProject2,
+      validateProject,
       validateTemplate
     };
   }
 });
 
-// scripts/statectl-src/hook.cjs
-var path = require("node:path");
-var fs = require("node:fs");
-var { StateError, validateProject } = require_core();
-function emit(value) {
-  process.stdout.write(`${JSON.stringify(value)}
+// scripts/statectl-src/hook-runner.cjs
+var require_hook_runner = __commonJS({
+  "scripts/statectl-src/hook-runner.cjs"(exports2, module2) {
+    "use strict";
+    var path = require("node:path");
+    var fs = require("node:fs");
+    var { StateError, validateProject } = require_core();
+    function emit(value) {
+      process.stdout.write(`${JSON.stringify(value)}
 `);
-}
-function readInput() {
-  try {
-    const text = fs.readFileSync(0, "utf8").trim();
-    return text ? JSON.parse(text) : {};
-  } catch (_error) {
-    return {};
+    }
+    function readInput() {
+      try {
+        const text = fs.readFileSync(0, "utf8").trim();
+        return text ? JSON.parse(text) : {};
+      } catch (_error) {
+        return {};
+      }
+    }
+    function firstPath(values) {
+      const value = values.find((item) => typeof item === "string" && item.trim());
+      return value ? value.trim() : null;
+    }
+    function nearestStateRoot(start) {
+      let current = path.resolve(start);
+      while (true) {
+        if (fs.existsSync(path.join(current, "project_state.yaml"))) return current;
+        const parent = path.dirname(current);
+        if (parent === current) return null;
+        current = parent;
+      }
+    }
+    function pathContains(root, candidate) {
+      const relative = path.relative(path.resolve(root), path.resolve(candidate));
+      return relative === "" || !path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`);
+    }
+    function canonicalDirectory(candidate) {
+      try {
+        const resolved = fs.realpathSync.native(path.resolve(candidate));
+        return fs.statSync(resolved).isDirectory() ? resolved : null;
+      } catch (_error) {
+        return null;
+      }
+    }
+    function installedCodexProjectRoot(input, runtimeFile) {
+      if (typeof runtimeFile !== "string" || !runtimeFile.trim()) return void 0;
+      const resolvedFile = path.resolve(runtimeFile);
+      const resolvedDirectory = path.dirname(resolvedFile);
+      if (path.basename(resolvedDirectory) !== ".codex") return void 0;
+      try {
+        const fileStatus = fs.lstatSync(resolvedFile);
+        const directoryStatus = fs.lstatSync(resolvedDirectory);
+        if (!fileStatus.isFile() || fileStatus.isSymbolicLink() || directoryStatus.isSymbolicLink()) return null;
+      } catch (_error) {
+        return null;
+      }
+      const canonicalFile = fs.realpathSync.native(resolvedFile);
+      const canonicalRuntimeDirectory = path.dirname(canonicalFile);
+      if (path.basename(canonicalRuntimeDirectory) !== ".codex") return null;
+      const projectRoot = canonicalDirectory(path.dirname(canonicalRuntimeDirectory));
+      if (projectRoot === null) return null;
+      const workingDirectories = [process.cwd()];
+      if (input && typeof input.cwd === "string" && input.cwd.trim()) {
+        workingDirectories.push(input.cwd.trim());
+      }
+      for (const workingDirectory of workingDirectories) {
+        const canonicalWorkingDirectory = canonicalDirectory(workingDirectory);
+        if (canonicalWorkingDirectory === null || !pathContains(projectRoot, canonicalWorkingDirectory)) {
+          return null;
+        }
+      }
+      return projectRoot;
+    }
+    function claudeProjectRoot(input) {
+      const explicit = firstPath([
+        input && typeof input.projectRoot === "string" ? input.projectRoot : null,
+        process.env.CLAUDE_PROJECT_DIR
+      ]);
+      if (explicit) return path.resolve(explicit);
+      const cwd = firstPath([
+        input && typeof input.cwd === "string" ? input.cwd : null,
+        process.env.PWD,
+        process.cwd()
+      ]) || process.cwd();
+      return nearestStateRoot(cwd) || path.resolve(cwd);
+    }
+    function codexProjectRoot(input, runtimeFile) {
+      const installedRoot = installedCodexProjectRoot(input, runtimeFile);
+      if (installedRoot !== void 0) return installedRoot;
+      const explicit = firstPath([
+        input && typeof input.projectRoot === "string" ? input.projectRoot : null
+      ]);
+      if (explicit) return path.resolve(explicit);
+      const cwd = firstPath([
+        input && typeof input.cwd === "string" ? input.cwd : null,
+        process.cwd(),
+        process.env.PWD
+      ]) || process.cwd();
+      const activeRoot = nearestStateRoot(cwd);
+      if (activeRoot) return activeRoot;
+      const hostRoot = firstPath([process.env.CODEX_PROJECT_DIR]);
+      if (hostRoot) {
+        const resolvedHostRoot = nearestStateRoot(hostRoot) || path.resolve(hostRoot);
+        if (pathContains(resolvedHostRoot, cwd)) return resolvedHostRoot;
+      }
+      return path.resolve(cwd);
+    }
+    function runHook2(host, options = {}) {
+      if (host !== "claude" && host !== "codex") throw new Error(`unsupported hook host: ${host}`);
+      try {
+        const input = readInput();
+        const stopHookActive = input && input.stop_hook_active === true;
+        const projectRoot = host === "codex" ? codexProjectRoot(input, options.runtimeFile) : claudeProjectRoot(input);
+        if (host === "codex" && projectRoot === null) return;
+        const result = validateProject({ projectRoot });
+        if (!result.ok && result.code === "MISSING_STATE") {
+        } else if (result.active_operation !== null || result.plan.length > 0) {
+          const stage = result.active_operation === null ? "planned" : result.active_operation.stage;
+          const actor = result.plan_actor === null ? "unassigned" : result.plan_actor;
+          if (stopHookActive) {
+            emit({
+              systemMessage: `causal-consultant operation remains unfinished (stage: ${stage}, actor: ${actor}); allowing stop after a prior block. The next causal-consultant turn resumes it, or cancel it explicitly.`,
+              suppressOutput: true
+            });
+          } else {
+            emit({
+              decision: "block",
+              reason: `causal-consultant operation is still active (stage: ${stage}, actor: ${actor}); run statectl open, resume it, and finish or cancel before stopping.`,
+              systemMessage: "project_state.yaml contains an unfinished causal-consultant operation."
+            });
+          }
+        } else if (result.warnings.length) {
+          emit({
+            systemMessage: `project_state.yaml is valid, with ${result.warnings.length} unavailable or incomplete artifact reference(s).`,
+            suppressOutput: true
+          });
+        } else if (host === "claude") {
+          emit({ suppressOutput: true });
+        }
+      } catch (error) {
+        emit({
+          systemMessage: error instanceof StateError ? `project_state.yaml failed strict validation (${error.code}); run causal-consultant preflight and report its recovery boundary.` : "project_state.yaml validation failed unexpectedly; run causal-consultant preflight before normal work.",
+          suppressOutput: true
+        });
+      }
+    }
+    module2.exports = { runHook: runHook2 };
   }
-}
-function firstPath(values) {
-  const value = values.find((item) => typeof item === "string" && item.trim());
-  return value ? value.trim() : null;
-}
-function nearestStateRoot(start) {
-  let current = path.resolve(start);
-  while (true) {
-    if (fs.existsSync(path.join(current, "project_state.yaml"))) return current;
-    const parent = path.dirname(current);
-    if (parent === current) return null;
-    current = parent;
-  }
-}
-function projectRootFrom(input) {
-  const explicit = firstPath([
-    input && typeof input.projectRoot === "string" ? input.projectRoot : null,
-    process.env.CLAUDE_PROJECT_DIR,
-    process.env.CODEX_PROJECT_DIR
-  ]);
-  if (explicit) return path.resolve(explicit);
-  const cwd = firstPath([
-    input && typeof input.cwd === "string" ? input.cwd : null,
-    process.env.PWD,
-    process.cwd()
-  ]) || process.cwd();
-  return nearestStateRoot(cwd) || path.resolve(cwd);
-}
-try {
-  const result = validateProject({ projectRoot: projectRootFrom(readInput()) });
-  if (!result.ok && result.code === "MISSING_STATE") {
-    emit({
-      systemMessage: "project_state.yaml does not exist; causal-consultant persistence is not active.",
-      suppressOutput: true
-    });
-  } else if (result.active_operation !== null || result.plan.length > 0) {
-    emit({
-      decision: "block",
-      reason: "causal-consultant operation is still active; resume it and finish or cancel before stopping.",
-      systemMessage: "project_state.yaml contains an unfinished causal-consultant operation."
-    });
-  } else if (result.warnings.length) {
-    emit({
-      systemMessage: `project_state.yaml is valid, with ${result.warnings.length} unavailable or incomplete artifact reference(s).`,
-      suppressOutput: true
-    });
-  } else {
-    emit({ suppressOutput: true });
-  }
-} catch (error) {
-  emit({
-    systemMessage: error instanceof StateError ? `project_state.yaml failed strict validation (${error.code}); run causal-consultant preflight and report its recovery boundary.` : "project_state.yaml validation failed unexpectedly; run causal-consultant preflight before normal work.",
-    suppressOutput: true
-  });
-}
+});
+
+// scripts/statectl-src/codex-hook.cjs
+var { runHook } = require_hook_runner();
+runHook("codex", { runtimeFile: __filename });

@@ -20,7 +20,10 @@ Route `report_writer` when any of these match the inferred intention:
 - The user clearly continues or approves the current ready report scope
   identified by the message and its preceding team-lead context. For clear
   approval, pass the exact report `scope_id` and `scope_revision` in the `begin`
-  `scope_ref` with `kind: report`.
+  `scope_ref` with `kind: report`. A migration-only `null`
+  `analysis_artifact_ids` binding is not approvable. Route `report_writer`
+  without `scope_ref` so it can select evidence explicitly, revise the scope,
+  and return for approval.
 - The user asks for a new report, outline, report revision, reviewer-facing
   response, safer wording, limitations language, claim-boundary wording, or a
   changed report scope.

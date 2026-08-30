@@ -16,14 +16,26 @@ const {
 } = require("../scripts/statectl-src/core.cjs");
 
 const { capsuleContextId, writeFullCapsule } = require("../scripts/statectl-src/context-file.cjs");
+const {
+  validateLoadedBy,
+  validateReleaseMetadata,
+} = require("../scripts/validate-package.cjs");
+const {
+  atomicWrite: atomicWriteCodexHookInstall,
+  install: installCodexHook,
+} = require("../scripts/install-codex-hook.cjs");
 const SKILL_ROOT = path.resolve(__dirname, "..");
 const BUNDLED_CLI = path.join(SKILL_ROOT, "scripts", "statectl.cjs");
 const CLI = process.env.STATECTL_TEST_SOURCE === "1"
   ? path.join(SKILL_ROOT, "scripts", "statectl-src", "cli.cjs")
   : BUNDLED_CLI;
-const CODEX_HOOK = path.join(SKILL_ROOT, "project-hooks", ".codex", "project_state_stop_check.js");
-const CLAUDE_HOOK = path.join(SKILL_ROOT, "project-hooks", ".claude", "project_state_stop_check.js");
+const CODEX_HOOK = path.join(SKILL_ROOT, "project-hooks", "codex", "project_state_stop_check.cjs");
+const CLAUDE_HOOK = path.join(SKILL_ROOT, "project-hooks", "claude", "project_state_stop_check.cjs");
+const CODEX_SOURCE_HOOK = path.join(SKILL_ROOT, "scripts", "statectl-src", "codex-hook.cjs");
 const SOURCE_HOOK = path.join(SKILL_ROOT, "scripts", "statectl-src", "hook.cjs");
+const CODEX_HOOK_INSTALLER = path.join(SKILL_ROOT, "scripts", "install-codex-hook.cjs");
+const CLAUDE_HOOK_INSTALLER = path.join(SKILL_ROOT, "scripts", "install-claude-hook.cjs");
+const { install: installClaudeHook } = require("../scripts/install-claude-hook.cjs");
 const FIXTURES = path.join(__dirname, "fixtures");
 const PACKETS = new Map();
 
@@ -90,11 +102,97 @@ function writeState(projectRoot, state) {
   fs.writeFileSync(statePath(projectRoot), YAML.stringify(state, { lineWidth: 0 }), "utf8");
 }
 
+function legacyReportContractBundle(reportAssembly) {
+  const contract = {};
+  for (const field of ["report_goal", "audience", "target_section"]) {
+    const value = reportAssembly[field];
+    if (typeof value === "string" && value.trim()) contract[field] = value.trim();
+  }
+  for (const field of ["planned_structure", "key_points", "wording_constraints"]) {
+    const values = reportAssembly[field]
+      .filter((item) => typeof item === "string" && item.trim())
+      .map((item) => item.trim());
+    if (values.length) contract[field] = values;
+  }
+  const contractHash = crypto
+    .createHash("sha256")
+    .update(JSON.stringify({ scope_kind: "report", contract }), "utf8")
+    .digest("hex");
+  const descriptions = [];
+  for (const field of ["report_goal", "audience", "target_section"]) {
+    if (contract[field] !== undefined) descriptions.push({ kind: field, description: contract[field] });
+  }
+  for (const field of ["planned_structure", "key_points", "wording_constraints"]) {
+    for (const description of contract[field] ?? []) descriptions.push({ kind: field, description });
+  }
+  const requirements = descriptions.map((item, index) => ({
+    id: `req-${crypto.createHash("sha256").update(JSON.stringify({
+      contract_hash: contractHash,
+      index,
+      kind: item.kind,
+      description: item.description,
+    }), "utf8").digest("hex").slice(0, 16)}`,
+    ...item,
+  }));
+  return { contractHash, requirements };
+}
+
+test("package loader registry rejects ownership drift", () => {
+  const index = YAML.parse(fs.readFileSync(
+    path.join(SKILL_ROOT, "references", "route_index.yaml"),
+    "utf8",
+  ));
+  assert.doesNotThrow(() => validateLoadedBy(index));
+
+  const drifted = structuredClone(index);
+  const legacy = drifted.shared_references.find((entry) => entry.id === "legacy_evidence");
+  legacy.loaded_by = "controller_when_legacy_protocol_or_historical_manifest";
+  assert.throws(
+    () => validateLoadedBy(drifted),
+    /loaded_by mismatch for references\/legacy_evidence\.md/,
+  );
+});
+
+test("release metadata validation rejects local version drift", () => {
+  const packageJson = JSON.parse(fs.readFileSync(path.join(SKILL_ROOT, "package.json"), "utf8"));
+  const packageLock = JSON.parse(fs.readFileSync(path.join(SKILL_ROOT, "package-lock.json"), "utf8"));
+  const readme = fs.readFileSync(path.join(SKILL_ROOT, "README.md"), "utf8");
+  assert.doesNotThrow(() => validateReleaseMetadata(packageJson, packageLock, readme));
+  const driftedVersion = packageJson.version === "0.0.0" ? "0.0.1" : "0.0.0";
+
+  const driftedLock = structuredClone(packageLock);
+  driftedLock.packages[""].version = driftedVersion;
+  assert.throws(
+    () => validateReleaseMetadata(packageJson, driftedLock, readme),
+    /package-lock\.json versions must match/,
+  );
+  assert.throws(
+    () => validateReleaseMetadata(
+      packageJson,
+      packageLock,
+      readme.replace(
+        `version-${packageJson.version}-blue.svg`,
+        `version-${driftedVersion}-blue.svg`,
+      ),
+    ),
+    /README version badge must match/,
+  );
+  assert.throws(
+    () => validateReleaseMetadata(
+      packageJson,
+      packageLock,
+      readme.replace(`/tree/v${packageJson.version}`, `/tree/v${driftedVersion}`),
+    ),
+    /README versioned URLs must use/,
+  );
+});
+
 function downgradeCurrentStateToV2(projectRoot) {
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 6);
+  assert.equal(state.state_meta.schema_version, 7);
   state.state_meta.schema_version = 2;
   delete state.causal_facts.analysis_options;
+  delete state.report_assembly.analysis_artifact_ids;
   delete state.state_meta.startup_notice;
   delete state.pending_decision;
   delete state.response_receipt;
@@ -109,6 +207,7 @@ function downgradeCurrentStateToV2(projectRoot) {
     delete state.state_meta.active_operation.discovery_scope;
     delete state.state_meta.active_operation.completion_protocol;
     delete state.state_meta.active_operation.contract_hash;
+    delete state.state_meta.active_operation.report_evidence_binding_protocol;
   }
   for (const record of state.artifact_records) {
     delete record.artifact_role;
@@ -120,9 +219,10 @@ function downgradeCurrentStateToV2(projectRoot) {
 
 function downgradeCurrentStateToV3(projectRoot) {
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 6);
+  assert.equal(state.state_meta.schema_version, 7);
   state.state_meta.schema_version = 3;
   delete state.causal_facts.analysis_options;
+  delete state.report_assembly.analysis_artifact_ids;
   if (state.response_receipt !== null) delete state.response_receipt.direct_assignment;
   delete state.discovery_sidecar.scope_id;
   delete state.discovery_sidecar.scope_revision;
@@ -135,6 +235,7 @@ function downgradeCurrentStateToV3(projectRoot) {
     delete state.state_meta.active_operation.discovery_scope;
     delete state.state_meta.active_operation.completion_protocol;
     delete state.state_meta.active_operation.contract_hash;
+    delete state.state_meta.active_operation.report_evidence_binding_protocol;
   }
   for (const record of state.artifact_records) {
     delete record.artifact_role;
@@ -146,9 +247,10 @@ function downgradeCurrentStateToV3(projectRoot) {
 
 function downgradeCurrentStateToV4(projectRoot) {
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 6);
+  assert.equal(state.state_meta.schema_version, 7);
   state.state_meta.schema_version = 4;
   delete state.causal_facts.analysis_options;
+  delete state.report_assembly.analysis_artifact_ids;
   if (state.response_receipt !== null) delete state.response_receipt.direct_assignment;
   for (const slot of Object.values(state.council_chamber.analysis_execution)) {
     delete slot.execution_contract;
@@ -157,6 +259,7 @@ function downgradeCurrentStateToV4(projectRoot) {
   if (state.state_meta.active_operation !== null) {
     delete state.state_meta.active_operation.completion_protocol;
     delete state.state_meta.active_operation.contract_hash;
+    delete state.state_meta.active_operation.report_evidence_binding_protocol;
   }
   for (const record of state.artifact_records) {
     delete record.artifact_role;
@@ -168,13 +271,37 @@ function downgradeCurrentStateToV4(projectRoot) {
 
 function downgradeCurrentStateToV5(projectRoot) {
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 6);
+  assert.equal(state.state_meta.schema_version, 7);
   state.state_meta.schema_version = 5;
   delete state.causal_facts.analysis_options;
+  delete state.report_assembly.analysis_artifact_ids;
   for (const slot of Object.values(state.council_chamber.analysis_execution)) {
     delete slot.causal_basis_hash;
   }
   if (state.response_receipt !== null) delete state.response_receipt.direct_assignment;
+  if (state.state_meta.active_operation !== null) {
+    delete state.state_meta.active_operation.report_evidence_binding_protocol;
+  }
+  writeState(projectRoot, state);
+  return state;
+}
+
+function downgradeCurrentStateToV6(projectRoot) {
+  const state = readState(projectRoot);
+  assert.equal(state.state_meta.schema_version, 7);
+  state.state_meta.schema_version = 6;
+  if (
+    state.state_meta.active_operation !== null
+    && state.next_step_plan[0]?.id === "report_writer"
+    && [1, 2].includes(state.state_meta.active_operation.completion_protocol)
+  ) {
+    state.state_meta.active_operation.contract_hash =
+      legacyReportContractBundle(state.report_assembly).contractHash;
+  }
+  delete state.report_assembly.analysis_artifact_ids;
+  if (state.state_meta.active_operation !== null) {
+    delete state.state_meta.active_operation.report_evidence_binding_protocol;
+  }
   writeState(projectRoot, state);
   return state;
 }
@@ -235,7 +362,7 @@ function assertTurnContext(projectRoot, result, expectedContext) {
   assert.equal("turn_context" in state, false);
   assert.equal("required_references" in state, false);
   assert.equal("operation_packet_ref" in state, false);
-  assert.equal(state.state_meta.schema_version, 6);
+  assert.equal(state.state_meta.schema_version, 7);
 }
 
 function begin(projectRoot, prior, route, extras = {}) {
@@ -569,8 +696,57 @@ function prepareAnalysisScope(projectRoot, design = "single_time_observational",
   };
 }
 
-function prepareReportScope(projectRoot) {
-  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+function pushAnalysisCompletionRecord(projectRoot, options = {}) {
+  const artifactId = options.artifactId ?? "legacy-0001";
+  const location = options.location ?? `output/analysis-priors-${artifactId}/`;
+  const state = readState(projectRoot);
+  state.project_summary.analysis_output = "exist";
+  state.artifact_records.push({
+    artifact_id: artifactId,
+    operation_id: null,
+    route: "analysis_execution",
+    design: "single_time_observational",
+    support: null,
+    location,
+    created_at: "historical import",
+    summary: "Prior completed analysis output.",
+    artifact_role: "completion",
+  });
+  writeState(projectRoot, state);
+  if (options.available) {
+    fs.mkdirSync(path.join(projectRoot, ...location.split("/").filter(Boolean)), {
+      recursive: true,
+    });
+  }
+  return artifactId;
+}
+
+function pushReportCompletionRecord(projectRoot, options = {}) {
+  const artifactId = options.artifactId ?? "legacy-9001";
+  const location = options.location ?? `output/report-priors-${artifactId}.html`;
+  const state = readState(projectRoot);
+  state.project_summary.report_output = "exist";
+  state.artifact_records.push({
+    artifact_id: artifactId,
+    operation_id: options.operationId ?? null,
+    route: "report_writer",
+    location,
+    created_at: "historical import",
+    summary: "Prior completed report output.",
+    artifact_role: "completion",
+  });
+  writeState(projectRoot, state);
+  if (options.available) {
+    const filePath = path.join(projectRoot, ...location.split("/").filter(Boolean));
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, "<!doctype html><title>Prior report</title>\n", "utf8");
+  }
+  return artifactId;
+}
+
+function prepareReportScope(projectRoot, options = {}) {
+  const opened = options.opened ?? expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const analysisArtifactIds = options.analysisArtifactIds ?? [];
   const started = expectSuccess(begin(projectRoot, opened, "report_writer"), "BEGAN_WORKER");
   const applied = expectSuccess(execute(projectRoot, "apply", {
     payload: {
@@ -584,6 +760,7 @@ function prepareReportScope(projectRoot) {
           audience: "Clinical collaborators",
           target_section: "Results",
           planned_structure: ["Findings", "Limitations"],
+          analysis_artifact_ids: analysisArtifactIds,
         },
         council_chamber: {
           report_writer: {
@@ -605,17 +782,42 @@ function prepareReportScope(projectRoot) {
   };
 }
 
-function runHook(projectRoot, options = {}) {
+function runHookProcess(projectRoot, options = {}) {
   const env = { ...process.env, NODE_PATH: "", ...(options.env || {}) };
   for (const name of options.unsetEnv || []) delete env[name];
-  const child = spawnSync(process.execPath, [options.hook || CODEX_HOOK], {
+  return spawnSync(process.execPath, [options.hook || CODEX_HOOK], {
     cwd: options.cwd || projectRoot,
     encoding: "utf8",
     input: JSON.stringify(options.input || { cwd: projectRoot }),
     env,
   });
+}
+
+function runHook(projectRoot, options = {}) {
+  const child = runHookProcess(projectRoot, options);
   assert.equal(child.status, 0, child.stderr);
+  assert.notEqual(child.stdout, "", "hook emitted no JSON");
   return JSON.parse(child.stdout.trim());
+}
+
+function runCodexHookInstaller(projectRoot) {
+  const child = spawnSync(process.execPath, [CODEX_HOOK_INSTALLER, "--project-root", projectRoot], {
+    cwd: projectRoot,
+    encoding: "utf8",
+  });
+  const lines = child.stdout.trim().split(/\r?\n/).filter(Boolean);
+  assert.equal(lines.length, 1, `installer must emit one JSON line\nstdout: ${child.stdout}\nstderr: ${child.stderr}`);
+  return { ...child, result: JSON.parse(lines[0]) };
+}
+
+function runClaudeHookInstaller(projectRoot) {
+  const child = spawnSync(process.execPath, [CLAUDE_HOOK_INSTALLER, "--project-root", projectRoot], {
+    cwd: projectRoot,
+    encoding: "utf8",
+  });
+  const lines = child.stdout.trim().split(/\r?\n/).filter(Boolean);
+  assert.equal(lines.length, 1, `installer must emit one JSON line\nstdout: ${child.stdout}\nstderr: ${child.stderr}`);
+  return { ...child, result: JSON.parse(lines[0]) };
 }
 
 test("open creates a valid state and a normal open is a byte-preserving no-op", (t) => {
@@ -624,7 +826,7 @@ test("open creates a valid state and a normal open is a byte-preserving no-op", 
   const firstBytes = fs.readFileSync(statePath(projectRoot), "utf8");
   const state = readState(projectRoot);
 
-  assert.equal(state.state_meta.schema_version, 6);
+  assert.equal(state.state_meta.schema_version, 7);
   assert.equal(state.state_meta.project_id, created.project_id);
   assert.equal(state.state_meta.revision, 0);
   assert.equal(state.state_meta.active_operation, null);
@@ -646,11 +848,13 @@ test("open creates a valid state and a normal open is a byte-preserving no-op", 
 
 test("template validation advertises strategy and requirement-evidence support", () => {
   const result = validateSourceTemplate({ skillRoot: SKILL_ROOT });
-  assert.equal(result.schema_version, 6);
+  assert.equal(result.schema_version, 7);
   assert.equal(result.capabilities.analysis_options, 1);
   assert.equal(result.capabilities.requirement_evidence, 1);
   assert.equal(result.capabilities.direct_assignment, 1);
   assert.equal(result.capabilities.causal_scope_basis, 1);
+  assert.equal(result.capabilities.conditional_references, 1);
+  assert.equal(result.capabilities.report_evidence_binding, 1);
 });
 
 test("begin treats a historical manifest lstat race as an availability warning", (t) => {
@@ -1035,7 +1239,7 @@ test("supported v4.5 migration preserves evidence, adds identities, and is idemp
   }]);
 
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 6);
+  assert.equal(state.state_meta.schema_version, 7);
   assert.equal(state.state_meta.startup_notice, null);
   assert.equal(state.pending_decision, null);
   assert.equal(state.response_receipt, null);
@@ -1696,11 +1900,157 @@ test("begin returns comprehensive actor context and exact route references", asy
       stage: "worker_pending",
       references: [
         "references/report_writer.md",
+        "assets/report_template_planning.md",
+        "assets/report_html_layout_template.html",
         "references/artifact_output_policy.md",
       ],
     });
     assert.deepEqual(started.turn_context.state.report_assembly, readState(projectRoot).report_assembly);
     expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+  });
+
+  await t.test("bound report with available analysis evidence selects the analysis template", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const artifactId = pushAnalysisCompletionRecord(projectRoot, { available: true });
+    const prepared = prepareReportScope(projectRoot, {
+      opened,
+      analysisArtifactIds: [artifactId],
+    });
+    const reopened = expectSuccess(execute(projectRoot, "open"), "OPENED");
+    assert.deepEqual(reopened.warnings, []);
+    const started = expectSuccess(begin(projectRoot, reopened, "report_writer", {
+      scope_ref: prepared.scope_ref,
+    }), "BEGAN_WORKER");
+    assert.ok(started.required_references.includes("assets/report_template_analysis.md"));
+    assert.ok(started.required_references.includes("assets/report_html_layout_template.html"));
+    assert.equal(started.required_references.includes("assets/report_template_planning.md"), false);
+    expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+  });
+
+  await t.test("an available analysis artifact added after scope preparation remains unrelated", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const prepared = prepareReportScope(projectRoot);
+    pushAnalysisCompletionRecord(projectRoot, { available: true });
+    const opened = expectSuccess(execute(projectRoot, "open"), "OPENED");
+    assert.deepEqual(opened.warnings, []);
+    const started = expectSuccess(begin(projectRoot, opened, "report_writer", {
+      scope_ref: prepared.scope_ref,
+    }), "BEGAN_WORKER");
+    assert.ok(started.required_references.includes("assets/report_template_planning.md"));
+    assert.equal(started.required_references.includes("assets/report_template_analysis.md"), false);
+    expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+  });
+
+  await t.test("unavailable bound analysis evidence blocks execution without a planning fallback", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const artifactId = pushAnalysisCompletionRecord(projectRoot, { available: true });
+    const prepared = prepareReportScope(projectRoot, {
+      opened,
+      analysisArtifactIds: [artifactId],
+    });
+    fs.rmSync(path.join(projectRoot, "output", `analysis-priors-${artifactId}`), {
+      recursive: true,
+      force: true,
+    });
+    const reopened = expectSuccess(execute(projectRoot, "open"), "OPENED");
+    assert.equal(reopened.warnings.some(
+      (warning) => warning.code === "MISSING_HISTORICAL_ARTIFACT"
+        && warning.artifact_id === artifactId,
+    ), true);
+    const before = fs.readFileSync(statePath(projectRoot));
+    const failure = expectFailure(begin(projectRoot, reopened, "report_writer", {
+      scope_ref: prepared.scope_ref,
+    }), "SCOPE_MISMATCH");
+    assert.deepEqual(failure.details.unavailable_analysis_artifact_ids, [artifactId]);
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+  });
+
+  await t.test("a ready report scope must state an intentional evidence binding", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const started = expectSuccess(begin(projectRoot, opened, "report_writer"), "BEGAN_WORKER");
+    const before = fs.readFileSync(statePath(projectRoot));
+    expectFailure(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(started),
+        operation_id: started.operation_id,
+        actor: "report_writer",
+        scope_transition: "new",
+        updates: {
+          report_assembly: {
+            report_goal: "Prepare a bounded report",
+          },
+          council_chamber: {
+            report_writer: {
+              current_status: "ready",
+            },
+          },
+        },
+      },
+    }), "INVALID_INPUT");
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+  });
+
+  await t.test("a revised ready report scope must restate its evidence binding", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const prepared = prepareReportScope(projectRoot);
+    const started = expectSuccess(begin(projectRoot, prepared, "report_writer"), "BEGAN_WORKER");
+    const before = fs.readFileSync(statePath(projectRoot));
+    expectFailure(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(started),
+        operation_id: started.operation_id,
+        actor: "report_writer",
+        scope_transition: "revise",
+        updates: {
+          report_assembly: {
+            report_goal: "Revise the bounded report",
+          },
+          council_chamber: {
+            report_writer: {
+              current_status: "ready",
+            },
+          },
+        },
+      },
+    }), "INVALID_INPUT");
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+  });
+
+  await t.test("scope preparation loads no report templates", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const started = expectSuccess(begin(projectRoot, opened, "report_writer"), "BEGAN_WORKER");
+    assert.equal(
+      started.required_references.some((reference) => reference.startsWith("assets/")),
+      false,
+    );
+    expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+  });
+
+  await t.test("a migrated protocol-1 operation returns the legacy evidence reference", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const prepared = prepareAnalysisScope(projectRoot);
+    expectSuccess(begin(
+      projectRoot,
+      prepared,
+      `analysis_execution.${prepared.design}`,
+      { scope_ref: prepared.scope_ref },
+    ), "BEGAN_WORKER");
+    const v5 = downgradeCurrentStateToV5(projectRoot);
+    v5.state_meta.active_operation.completion_protocol = 1;
+    writeState(projectRoot, v5);
+    const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V5");
+    assert.equal(migrated.operation_packet.completion_protocol, 1);
+    assert.ok(migrated.required_references.includes("references/legacy_evidence.md"));
+    expectSuccess(finish(
+      projectRoot,
+      { ...migrated, operation_id: migrated.operation_packet.operation_id },
+      {},
+      { cancel: true },
+    ), "OPERATION_CANCELLED");
   });
 });
 
@@ -3224,6 +3574,7 @@ test("analysis and report scope identities are controller-owned and exact refere
             audience: "Clinical collaborators",
             target_section: "Results",
             planned_structure: ["Findings", "Limitations"],
+            analysis_artifact_ids: [],
           },
           council_chamber: {
             report_writer: {
@@ -4947,23 +5298,31 @@ test("atomic finish failure preserves a resumable lead operation and removes tem
   assert.equal(committedState.response_receipt.response_markdown, closed.response_markdown);
 });
 
-test("bundled stop hook validates strictly without external YAML modules", async (t) => {
-  assert.deepEqual(fs.readFileSync(CODEX_HOOK), fs.readFileSync(CLAUDE_HOOK));
+test("bundled stop hooks validate strictly without external YAML modules", async (t) => {
+  assert.notDeepEqual(fs.readFileSync(CODEX_HOOK), fs.readFileSync(CLAUDE_HOOK));
   assert.match(fs.readFileSync(CODEX_HOOK, "utf8"), /Bundled dependency: yaml \(ISC\)/);
   assert.match(fs.readFileSync(BUNDLED_CLI, "utf8"), /Bundled dependency: yaml \(ISC\)/);
 
-  await t.test("missing state warns without blocking", () => {
+  await t.test("Codex missing state is silent", () => {
     const projectRoot = temporaryProject(t);
-    const result = runHook(projectRoot);
-    assert.equal(result.suppressOutput, true);
-    assert.match(result.systemMessage, /does not exist/);
-    assert.equal(result.decision, undefined);
+    const child = runHookProcess(projectRoot);
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.stdout, "");
+  });
+
+  await t.test("Claude missing state is silent", () => {
+    const projectRoot = temporaryProject(t);
+    const child = runHookProcess(projectRoot, { hook: CLAUDE_HOOK });
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.stdout, "");
   });
 
   await t.test("idle valid state passes", () => {
     const projectRoot = temporaryProject(t);
     expectSuccess(execute(projectRoot, "open"), "CREATED");
-    assert.deepEqual(runHook(projectRoot), { suppressOutput: true });
+    const child = runHookProcess(projectRoot);
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.stdout, "");
   });
 
   await t.test("idle pending decision passes", () => {
@@ -4976,7 +5335,9 @@ test("bundled stop hook validates strictly without external YAML modules", async
         decisionOption("Review the domain", "domain_expert"),
       ]),
     }), "OPERATION_FINISHED");
-    assert.deepEqual(runHook(projectRoot), { suppressOutput: true });
+    const child = runHookProcess(projectRoot);
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.stdout, "");
   });
 
   await t.test("active operation blocks", () => {
@@ -4984,12 +5345,65 @@ test("bundled stop hook validates strictly without external YAML modules", async
     const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
     expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
     const result = runHook(projectRoot);
-    assert.equal(result.decision, "block");
+    assert.equal(result.decision, "block", JSON.stringify(result));
     assert.match(result.reason, /still active/);
+    assert.match(result.reason, /stage: lead_pending, actor: team_lead/);
     assert.equal(
       result.systemMessage,
       "project_state.yaml contains an unfinished causal-consultant operation.",
     );
+  });
+
+  await t.test("stop_hook_active allows the stop instead of blocking again", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    const result = runHook(projectRoot, {
+      input: { cwd: projectRoot, stop_hook_active: true },
+    });
+    assert.equal(result.decision, undefined);
+    assert.equal(result.suppressOutput, true);
+    assert.match(result.systemMessage, /remains unfinished/);
+    assert.match(result.systemMessage, /allowing stop/);
+  });
+
+  await t.test("Claude blocks the first stop attempt with stage and actor detail", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    const result = runHook(projectRoot, {
+      hook: CLAUDE_HOOK,
+      input: { cwd: projectRoot, stop_hook_active: false },
+    });
+    assert.equal(result.decision, "block");
+    assert.match(result.reason, /still active/);
+    assert.match(result.reason, /stage: lead_pending, actor: team_lead/);
+    assert.equal(
+      result.systemMessage,
+      "project_state.yaml contains an unfinished causal-consultant operation.",
+    );
+  });
+
+  await t.test("Claude stop_hook_active yields instead of blocking again", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    const result = runHook(projectRoot, {
+      hook: CLAUDE_HOOK,
+      input: { cwd: projectRoot, stop_hook_active: true },
+    });
+    assert.equal(result.decision, undefined);
+    assert.equal(result.suppressOutput, true);
+    assert.match(result.systemMessage, /remains unfinished/);
+    assert.match(result.systemMessage, /allowing stop/);
+  });
+
+  await t.test("stop_hook_active with idle state stays silent", () => {
+    const projectRoot = temporaryProject(t);
+    expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const child = runHookProcess(projectRoot, { input: { cwd: projectRoot, stop_hook_active: true } });
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.stdout, "");
   });
 
   await t.test("strict validation errors warn without blocking preflight recovery", () => {
@@ -5029,6 +5443,75 @@ test("bundled stop hook validates strictly without external YAML modules", async
     }), { suppressOutput: true });
   });
 
+  await t.test("Codex active cwd state takes precedence over stale host root", () => {
+    const envRoot = temporaryProject(t);
+    const cwdRoot = temporaryProject(t);
+    expectSuccess(execute(envRoot, "open"), "CREATED");
+    const opened = expectSuccess(execute(cwdRoot, "open"), "CREATED");
+    expectSuccess(begin(cwdRoot, opened, "team_lead"), "BEGAN_LEAD");
+
+    const result = runHook(cwdRoot, {
+      hook: CODEX_SOURCE_HOOK,
+      input: { cwd: cwdRoot },
+      env: { CODEX_PROJECT_DIR: envRoot },
+      unsetEnv: ["CLAUDE_PROJECT_DIR"],
+    });
+    assert.equal(result.decision, "block", JSON.stringify(result));
+    assert.match(result.reason, /still active/);
+  });
+
+  await t.test("installed Codex bundle ignores a redirected project root", () => {
+    const projectRoot = temporaryProject(t);
+    const redirectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    expectSuccess(execute(redirectRoot, "open"), "CREATED");
+    const hookDirectory = path.join(projectRoot, ".codex");
+    const installedHook = path.join(hookDirectory, "project_state_stop_check.cjs");
+    const nested = path.join(projectRoot, "nested", "work");
+    fs.mkdirSync(hookDirectory, { recursive: true });
+    fs.mkdirSync(nested, { recursive: true });
+    fs.copyFileSync(CODEX_HOOK, installedHook);
+
+    const result = runHook(projectRoot, {
+      hook: installedHook,
+      cwd: nested,
+      input: { cwd: nested, projectRoot: redirectRoot },
+      env: { CODEX_PROJECT_DIR: redirectRoot },
+    });
+    assert.equal(result.decision, "block", JSON.stringify(result));
+    assert.match(result.reason, /still active/);
+  });
+
+  await t.test("installed Codex bundle stays silent for an outside working directory", () => {
+    const projectRoot = temporaryProject(t);
+    const outsideRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    const hookDirectory = path.join(projectRoot, ".codex");
+    const installedHook = path.join(hookDirectory, "project_state_stop_check.cjs");
+    fs.mkdirSync(hookDirectory, { recursive: true });
+    fs.copyFileSync(CODEX_HOOK, installedHook);
+
+    const outsideProcess = runHookProcess(projectRoot, {
+      hook: installedHook,
+      cwd: outsideRoot,
+      input: { cwd: outsideRoot, projectRoot },
+      env: { CODEX_PROJECT_DIR: projectRoot },
+    });
+    assert.equal(outsideProcess.status, 0, outsideProcess.stderr);
+    assert.equal(outsideProcess.stdout, "");
+
+    const outsideInput = runHookProcess(projectRoot, {
+      hook: installedHook,
+      cwd: projectRoot,
+      input: { cwd: outsideRoot, projectRoot },
+      env: { CODEX_PROJECT_DIR: projectRoot },
+    });
+    assert.equal(outsideInput.status, 0, outsideInput.stderr);
+    assert.equal(outsideInput.stdout, "");
+  });
+
   await t.test("cwd resolves to the nearest state-bearing ancestor", () => {
     const projectRoot = temporaryProject(t);
     const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
@@ -5042,6 +5525,679 @@ test("bundled stop hook validates strictly without external YAML modules", async
       input: { cwd: nested },
       unsetEnv: ["CLAUDE_PROJECT_DIR", "CODEX_PROJECT_DIR", "PWD"],
     });
+    assert.equal(result.decision, "block", JSON.stringify(result));
+    assert.match(result.reason, /still active/);
+  });
+});
+
+test("installed hook configurations resolve from nested working directories", async (t) => {
+  const CLAUDE_SETTINGS = path.join(SKILL_ROOT, "project-hooks", "claude", "settings.json");
+  const CODEX_HOOKS_CONFIG = path.join(SKILL_ROOT, "project-hooks", "codex", "hooks.json");
+  const bashProbe = spawnSync("bash", ["-c", "echo ok"], { encoding: "utf8" });
+  const hasBash = bashProbe.status === 0 && bashProbe.stdout.trim() === "ok";
+
+  function configuredClaudeHandler() {
+    const config = JSON.parse(fs.readFileSync(CLAUDE_SETTINGS, "utf8"));
+    const handler = config.hooks.Stop[0].hooks[0];
+    assert.equal(handler.command, "node");
+    assert.ok(Array.isArray(handler.args) && handler.args.length === 1);
+    return handler;
+  }
+
+  function runClaudeExecForm(projectRoot, cwd, input) {
+    const handler = configuredClaudeHandler();
+    const args = handler.args.map(
+      (argument) => argument.replaceAll("${CLAUDE_PROJECT_DIR}", projectRoot),
+    );
+    const env = { ...process.env, NODE_PATH: "", CLAUDE_PROJECT_DIR: projectRoot };
+    delete env.CODEX_PROJECT_DIR;
+    const child = spawnSync(handler.command, args, {
+      cwd,
+      encoding: "utf8",
+      input: JSON.stringify(input),
+      env,
+    });
+    assert.equal(child.status, 0, child.stderr);
+    return child;
+  }
+
+  function configuredCommand(configPath, field) {
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    const hook = config.hooks.Stop[0].hooks[0];
+    assert.equal(typeof hook[field], "string", `${configPath} must define ${field}`);
+    return hook[field];
+  }
+
+  function anchoredTarget(command) {
+    assert.match(command, /\/\* causal-consultant Codex hook \*\//);
+    const match = command.match(/Buffer\.from\('([A-Za-z0-9+/=]+)','base64'\)/);
+    assert.ok(match, "installed command must contain an encoded target");
+    return Buffer.from(match[1], "base64").toString("utf8");
+  }
+
+  function installNestedProject(t2, hostDirectory, options = {}) {
+    const projectRoot = temporaryProject(t2);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    const hookDirectory = path.join(projectRoot, hostDirectory);
+    fs.mkdirSync(hookDirectory, { recursive: true });
+    fs.copyFileSync(
+      hostDirectory === ".claude" ? CLAUDE_HOOK : CODEX_HOOK,
+      path.join(
+        hookDirectory,
+        "project_state_stop_check.cjs",
+      ),
+    );
+    if (hostDirectory === ".codex" && options.git !== false) {
+      const initialized = spawnSync("git", ["init", "--quiet", projectRoot], { encoding: "utf8" });
+      assert.equal(initialized.status, 0, initialized.stderr);
+    }
+    const nested = path.join(projectRoot, "nested", "deep");
+    fs.mkdirSync(nested, { recursive: true });
+    return { projectRoot, nested };
+  }
+
+  function executeConfigured(shell, command, cwd, extraEnv) {
+    const env = { ...process.env, NODE_PATH: "" };
+    delete env.CLAUDE_PROJECT_DIR;
+    delete env.CODEX_PROJECT_DIR;
+    Object.assign(env, extraEnv || {});
+    return shell === "cmd"
+      ? spawnSync(command, {
+        shell: true,
+        cwd,
+        encoding: "utf8",
+        input: JSON.stringify({ cwd, stop_hook_active: false }),
+        env,
+      })
+      : spawnSync("bash", ["-c", command], {
+        cwd,
+        encoding: "utf8",
+        input: JSON.stringify({ cwd, stop_hook_active: false }),
+        env,
+      });
+  }
+
+  function runConfigured(shell, command, cwd, extraEnv) {
+    const child = executeConfigured(shell, command, cwd, extraEnv);
+    assert.equal(child.status, 0, `hook command failed\nstdout: ${child.stdout}\nstderr: ${child.stderr}`);
+    const lines = child.stdout.trim().split(/\r?\n/).filter(Boolean);
+    assert.equal(lines.length, 1, `hook must emit one JSON line\nstdout: ${child.stdout}`);
+    return JSON.parse(lines[0]);
+  }
+
+  await t.test("claude exec-form settings block from a nested directory", (t2) => {
+    const { projectRoot, nested } = installNestedProject(t2, ".claude");
+    const child = runClaudeExecForm(projectRoot, nested, { stop_hook_active: false });
+    const result = JSON.parse(child.stdout.trim());
+    assert.equal(result.decision, "block");
+    assert.match(result.reason, /still active/);
+  });
+
+  await t.test("claude exec-form settings block once in an ESM project", (t2) => {
+    const { projectRoot, nested } = installNestedProject(t2, ".claude");
+    fs.writeFileSync(path.join(projectRoot, "package.json"), '{"type":"module"}\n', "utf8");
+    const blocked = JSON.parse(
+      runClaudeExecForm(projectRoot, nested, { stop_hook_active: false }).stdout.trim(),
+    );
+    assert.equal(blocked.decision, "block");
+    const yielded = JSON.parse(
+      runClaudeExecForm(projectRoot, nested, { stop_hook_active: true }).stdout.trim(),
+    );
+    assert.equal(yielded.decision, undefined);
+    assert.equal(yielded.suppressOutput, true);
+    assert.match(yielded.systemMessage, /allowing stop/);
+  });
+
+  await t.test("codex command blocks from a nested ESM project without env", (t2) => {
+    if (!hasBash) return t2.skip("bash is unavailable");
+    const { projectRoot, nested } = installNestedProject(t2, ".codex");
+    fs.writeFileSync(path.join(projectRoot, "package.json"), '{"type":"module"}\n', "utf8");
+    const command = configuredCommand(CODEX_HOOKS_CONFIG, "command");
+    const result = runConfigured("bash", command, nested, {});
+    assert.equal(result.decision, "block");
+    assert.match(result.reason, /still active/);
+  });
+
+  await t.test("codex command anchors at the git root and ignores a nested shadow bundle", (t2) => {
+    if (!hasBash && process.platform !== "win32") return t2.skip("supported shell is unavailable");
+    const { projectRoot, nested } = installNestedProject(t2, ".codex");
+    const shadowDirectory = path.join(projectRoot, "nested", ".codex");
+    const shadowMarker = path.join(projectRoot, "shadow-hook-executed");
+    fs.mkdirSync(shadowDirectory, { recursive: true });
+    fs.copyFileSync(
+      path.join(projectRoot, "project_state.yaml"),
+      path.join(projectRoot, "nested", "project_state.yaml"),
+    );
+    fs.writeFileSync(
+      path.join(shadowDirectory, "project_state_stop_check.cjs"),
+      `require("node:fs").writeFileSync(${JSON.stringify(shadowMarker)}, "executed\\n");\n`,
+      "utf8",
+    );
+    const field = process.platform === "win32" ? "commandWindows" : "command";
+    const shell = process.platform === "win32" ? "cmd" : "bash";
+    const command = configuredCommand(CODEX_HOOKS_CONFIG, field);
+    const result = runConfigured(shell, command, nested, {});
+    assert.equal(result.decision, "block");
+    assert.match(result.reason, /still active/);
+    assert.equal(fs.existsSync(shadowMarker), false, "nested shadow hook must not execute");
+  });
+
+  await t.test("codex command honors CODEX_PROJECT_DIR from a nested directory", (t2) => {
+    if (!hasBash && process.platform !== "win32") return t2.skip("supported shell is unavailable");
+    const { projectRoot, nested } = installNestedProject(t2, ".codex", { git: false });
+    const field = process.platform === "win32" ? "commandWindows" : "command";
+    const shell = process.platform === "win32" ? "cmd" : "bash";
+    const command = configuredCommand(CODEX_HOOKS_CONFIG, field);
+    const result = runConfigured(shell, command, nested, {
+      CODEX_PROJECT_DIR: projectRoot,
+    });
+    assert.equal(result.decision, "block");
+    assert.match(result.reason, /still active/);
+  });
+
+  await t.test("codex windows command blocks from a nested ESM project", (t2) => {
+    if (process.platform !== "win32") return t2.skip("cmd.exe is Windows-specific");
+    const { projectRoot, nested } = installNestedProject(t2, ".codex");
+    fs.writeFileSync(path.join(projectRoot, "package.json"), '{"type":"module"}\n', "utf8");
+    const command = configuredCommand(CODEX_HOOKS_CONFIG, "commandWindows");
+    const result = runConfigured("cmd", command, nested, {});
+    assert.equal(result.decision, "block");
+    assert.match(result.reason, /still active/);
+  });
+
+  await t.test("codex command prefers the active cwd over stale CODEX_PROJECT_DIR", (t2) => {
+    if (!hasBash && process.platform !== "win32") return t2.skip("supported shell is unavailable");
+    const { nested } = installNestedProject(t2, ".codex");
+    const staleRoot = temporaryProject(t2);
+    expectSuccess(execute(staleRoot, "open"), "CREATED");
+    const staleHookDirectory = path.join(staleRoot, ".codex");
+    fs.mkdirSync(staleHookDirectory, { recursive: true });
+    fs.copyFileSync(CODEX_HOOK, path.join(staleHookDirectory, "project_state_stop_check.cjs"));
+    const field = process.platform === "win32" ? "commandWindows" : "command";
+    const shell = process.platform === "win32" ? "cmd" : "bash";
+    const command = configuredCommand(CODEX_HOOKS_CONFIG, field);
+    const result = runConfigured(shell, command, nested, { CODEX_PROJECT_DIR: staleRoot });
+    assert.equal(result.decision, "block");
+    assert.match(result.reason, /still active/);
+  });
+
+  await t.test("codex command accepts a nested CODEX_PROJECT_DIR within the active host root", (t2) => {
+    if (!hasBash && process.platform !== "win32") return t2.skip("supported shell is unavailable");
+    const { projectRoot, nested } = installNestedProject(t2, ".codex");
+    const siblingCwd = path.join(projectRoot, "sibling", "work");
+    fs.mkdirSync(siblingCwd, { recursive: true });
+    const field = process.platform === "win32" ? "commandWindows" : "command";
+    const shell = process.platform === "win32" ? "cmd" : "bash";
+    const command = configuredCommand(CODEX_HOOKS_CONFIG, field);
+    const result = runConfigured(shell, command, siblingCwd, { CODEX_PROJECT_DIR: nested });
+    assert.equal(result.decision, "block");
+    assert.match(result.reason, /still active/);
+    assert.notEqual(projectRoot, nested);
+  });
+
+  await t.test("codex command rejects stale CODEX_PROJECT_DIR for an external state-free cwd", (t2) => {
+    if (!hasBash && process.platform !== "win32") return t2.skip("supported shell is unavailable");
+    const staleRoot = temporaryProject(t2);
+    const opened = expectSuccess(execute(staleRoot, "open"), "CREATED");
+    expectSuccess(begin(staleRoot, opened, "team_lead"), "BEGAN_LEAD");
+    const staleHookDirectory = path.join(staleRoot, ".codex");
+    fs.mkdirSync(staleHookDirectory, { recursive: true });
+    fs.copyFileSync(CODEX_HOOK, path.join(staleHookDirectory, "project_state_stop_check.cjs"));
+    const externalCwd = temporaryProject(t2);
+    const field = process.platform === "win32" ? "commandWindows" : "command";
+    const shell = process.platform === "win32" ? "cmd" : "bash";
+    const command = configuredCommand(CODEX_HOOKS_CONFIG, field);
+    const result = executeConfigured(shell, command, externalCwd, { CODEX_PROJECT_DIR: staleRoot });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "");
+  });
+
+  await t.test("Codex installer produces a runnable nested ESM installation", (t2) => {
+    if (!hasBash && process.platform !== "win32") return t2.skip("supported shell is unavailable");
+    const container = temporaryProject(t2);
+    const projectRoot = path.join(container, "project with spaces & percent%value%");
+    fs.mkdirSync(projectRoot);
+    const initialized = spawnSync("git", ["init", "--quiet", projectRoot], { encoding: "utf8" });
+    assert.equal(initialized.status, 0, initialized.stderr);
+    fs.writeFileSync(path.join(projectRoot, "package.json"), '{"type":"module"}\n', "utf8");
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    const installed = runCodexHookInstaller(projectRoot);
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.equal(installed.result.code, "INSTALLED");
+    const nested = path.join(projectRoot, "nested", "deep");
+    fs.mkdirSync(nested, { recursive: true });
+    const shadowDirectory = path.join(projectRoot, "nested", ".codex");
+    fs.mkdirSync(shadowDirectory);
+    fs.writeFileSync(
+      path.join(shadowDirectory, "project_state_stop_check.cjs"),
+      "process.stdout.write('{\"shadowed\":true}\\n');\n",
+      "utf8",
+    );
+    const installedConfig = path.join(projectRoot, ".codex", "hooks.json");
+    const field = process.platform === "win32" ? "commandWindows" : "command";
+    const shell = process.platform === "win32" ? "cmd" : "bash";
+    const command = configuredCommand(installedConfig, field);
+    assert.equal(
+      anchoredTarget(command),
+      path.join(fs.realpathSync.native(projectRoot), ".codex", "project_state_stop_check.cjs"),
+    );
+    const result = runConfigured(shell, command, nested, {});
+    assert.equal(result.decision, "block");
+    assert.match(result.reason, /still active/);
+    assert.equal(result.shadowed, undefined);
+
+    fs.writeFileSync(
+      path.join(projectRoot, ".codex", "project_state_stop_check.cjs"),
+      "process.stdout.write('tampered');\n",
+      "utf8",
+    );
+    const tampered = executeConfigured(shell, command, nested, {});
+    assert.notEqual(tampered.status, 0);
+    assert.equal(tampered.stdout, "");
+    assert.match(tampered.stderr, /Codex hook integrity check failed/);
+  });
+
+  await t.test("configured Codex command emits zero stdout when state is missing or idle", (t2) => {
+    if (!hasBash && process.platform !== "win32") return t2.skip("supported shell is unavailable");
+    const projectRoot = temporaryProject(t2);
+    const codexDirectory = path.join(projectRoot, ".codex");
+    fs.mkdirSync(codexDirectory, { recursive: true });
+    const initialized = spawnSync("git", ["init", "--quiet", projectRoot], { encoding: "utf8" });
+    assert.equal(initialized.status, 0, initialized.stderr);
+    fs.copyFileSync(CODEX_HOOK, path.join(codexDirectory, "project_state_stop_check.cjs"));
+    const nested = path.join(projectRoot, "nested");
+    fs.mkdirSync(nested);
+    const field = process.platform === "win32" ? "commandWindows" : "command";
+    const shell = process.platform === "win32" ? "cmd" : "bash";
+    const command = configuredCommand(CODEX_HOOKS_CONFIG, field);
+
+    const missing = executeConfigured(shell, command, nested, {});
+    assert.equal(missing.status, 0, missing.stderr);
+    assert.equal(missing.stdout, "");
+
+    expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const idle = executeConfigured(shell, command, nested, {});
+    assert.equal(idle.status, 0, idle.stderr);
+    assert.equal(idle.stdout, "");
+  });
+
+  await t.test("idle state stays silent through the configured claude handler", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const hookDirectory = path.join(projectRoot, ".claude");
+    fs.mkdirSync(hookDirectory, { recursive: true });
+    fs.copyFileSync(CLAUDE_HOOK, path.join(hookDirectory, "project_state_stop_check.cjs"));
+    const nested = path.join(projectRoot, "nested", "deep");
+    fs.mkdirSync(nested, { recursive: true });
+    const child = runClaudeExecForm(projectRoot, nested, { stop_hook_active: false });
+    assert.deepEqual(JSON.parse(child.stdout.trim()), { suppressOutput: true });
+  });
+
+  await t.test("Codex installer safely merges, backs up, and is idempotent", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const codexDirectory = path.join(projectRoot, ".codex");
+    fs.mkdirSync(codexDirectory, { recursive: true });
+    const existing = {
+      projectSetting: "preserve-me",
+      hooks: {
+        Stop: [
+          { hooks: [{ type: "command", command: "node unrelated.cjs", timeout: 4 }] },
+          {
+            hooks: [{
+              type: "command",
+              command: "node .codex/project_state_stop_check.js",
+              timeout: 3,
+              async: true,
+            }],
+          },
+        ],
+        SessionStart: [{ hooks: [{ type: "command", command: "node setup.cjs" }] }],
+      },
+    };
+    const configPath = path.join(codexDirectory, "hooks.json");
+    const bundlePath = path.join(codexDirectory, "project_state_stop_check.cjs");
+    fs.writeFileSync(configPath, `${JSON.stringify(existing, null, 2)}\n`, "utf8");
+    fs.writeFileSync(bundlePath, "stale bundle\n", "utf8");
+
+    const first = runCodexHookInstaller(projectRoot);
+    assert.equal(first.status, 0, first.stderr);
+    assert.equal(first.result.code, "INSTALLED");
+    assert.equal(first.result.changed.bundle, true);
+    assert.equal(first.result.changed.config, true);
+    assert.equal(first.result.backups.some((item) => item.startsWith(".codex/hooks.json.bak-")), true);
+    const bundleBackup = first.result.backups.find(
+      (item) => item.startsWith(".codex/project_state_stop_check.cjs.bak-"),
+    );
+    assert.equal(typeof bundleBackup, "string");
+    assert.equal(fs.readFileSync(path.join(projectRoot, ...bundleBackup.split("/")), "utf8"), "stale bundle\n");
+    assert.deepEqual(fs.readFileSync(bundlePath), fs.readFileSync(CODEX_HOOK));
+    const installed = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    assert.equal(installed.projectSetting, "preserve-me");
+    assert.deepEqual(installed.hooks.SessionStart, existing.hooks.SessionStart);
+    const handlers = installed.hooks.Stop.flatMap((group) => group.hooks);
+    assert.equal(handlers.some((handler) => handler.command === "node unrelated.cjs"), true);
+    assert.equal(
+      handlers.filter((handler) => /\/\* causal-consultant Codex hook \*\//.test(handler.command || "")).length,
+      1,
+    );
+    const installedConsultant = handlers.find(
+      (handler) => /\/\* causal-consultant Codex hook \*\//.test(handler.command || ""),
+    );
+    const canonicalConsultant = JSON.parse(
+      fs.readFileSync(CODEX_HOOKS_CONFIG, "utf8"),
+    ).hooks.Stop[0].hooks[0];
+    const installedMetadata = structuredClone(installedConsultant);
+    const canonicalMetadata = structuredClone(canonicalConsultant);
+    delete installedMetadata.command;
+    delete installedMetadata.commandWindows;
+    delete canonicalMetadata.command;
+    delete canonicalMetadata.commandWindows;
+    assert.deepEqual(installedMetadata, canonicalMetadata);
+    assert.equal(
+      anchoredTarget(installedConsultant.command),
+      path.join(fs.realpathSync.native(projectRoot), ".codex", "project_state_stop_check.cjs"),
+    );
+    assert.equal(installedConsultant.commandWindows, installedConsultant.command);
+    assert.notEqual(installedConsultant.command, canonicalConsultant.command);
+    assert.equal(Object.prototype.hasOwnProperty.call(installedConsultant, "async"), false);
+
+    const backupsBefore = fs.readdirSync(codexDirectory).filter((name) => name.includes(".bak-")).sort();
+    const second = runCodexHookInstaller(projectRoot);
+    assert.equal(second.status, 0, second.stderr);
+    assert.equal(second.result.code, "ALREADY_INSTALLED");
+    assert.deepEqual(
+      fs.readdirSync(codexDirectory).filter((name) => name.includes(".bak-")).sort(),
+      backupsBefore,
+    );
+  });
+
+  await t.test("Codex installer restores both targets when the second write fails", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const codexDirectory = path.join(projectRoot, ".codex");
+    fs.mkdirSync(codexDirectory);
+    const configPath = path.join(codexDirectory, "hooks.json");
+    const bundlePath = path.join(codexDirectory, "project_state_stop_check.cjs");
+    const originalConfig = Buffer.from(
+      JSON.stringify({ projectSetting: "original", hooks: { Stop: [] } }, null, 2) + "\n",
+      "utf8",
+    );
+    const originalBundle = Buffer.from("original bundle bytes\n", "utf8");
+    fs.writeFileSync(configPath, originalConfig);
+    fs.writeFileSync(bundlePath, originalBundle);
+    const originalEntries = fs.readdirSync(codexDirectory).sort();
+    let writes = 0;
+
+    assert.throws(
+      () => installCodexHook(projectRoot, {
+        writeTarget(target, bytes) {
+          writes += 1;
+          if (writes === 2) throw new Error("injected second write failure");
+          atomicWriteCodexHookInstall(target, bytes);
+        },
+      }),
+      /original targets were restored: injected second write failure/,
+    );
+    assert.equal(writes, 2);
+    assert.deepEqual(fs.readFileSync(configPath), originalConfig);
+    assert.deepEqual(fs.readFileSync(bundlePath), originalBundle);
+    assert.deepEqual(fs.readdirSync(codexDirectory).sort(), originalEntries);
+  });
+
+  await t.test("Codex installer distinguishes an unverified rollback failure", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const codexDirectory = path.join(projectRoot, ".codex");
+    fs.mkdirSync(codexDirectory);
+    const configPath = path.join(codexDirectory, "hooks.json");
+    const bundlePath = path.join(codexDirectory, "project_state_stop_check.cjs");
+    fs.writeFileSync(configPath, JSON.stringify({ hooks: { Stop: [] } }) + "\n", "utf8");
+    fs.writeFileSync(bundlePath, "original bundle bytes\n", "utf8");
+    let writes = 0;
+    let failure;
+
+    try {
+      installCodexHook(projectRoot, {
+        writeTarget(target, bytes) {
+          writes += 1;
+          if (writes === 2) throw new Error("injected commit failure");
+          atomicWriteCodexHookInstall(target, bytes);
+        },
+        rollbackWriteTarget() {
+          throw new Error("injected rollback failure");
+        },
+      });
+    } catch (error) {
+      failure = error;
+    }
+    assert.ok(failure);
+    assert.equal(failure && failure.code, "ROLLBACK_FAILED");
+    assert.match(failure.message, /installation failed: injected commit failure/);
+    assert.match(failure.message, /rollback failed:/);
+    assert.match(failure.message, /injected rollback failure/);
+  });
+
+  await t.test("Codex installer preserves a similarly named unrelated hook", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const codexDirectory = path.join(projectRoot, ".codex");
+    fs.mkdirSync(codexDirectory, { recursive: true });
+    const unrelated = {
+      type: "command",
+      command: "node tools/my_project_state_stop_check.js",
+      timeout: 7,
+    };
+    const configPath = path.join(codexDirectory, "hooks.json");
+    fs.writeFileSync(configPath, `${JSON.stringify({
+      hooks: { Stop: [{ hooks: [unrelated] }] },
+    }, null, 2)}\n`, "utf8");
+
+    const installedResult = runCodexHookInstaller(projectRoot);
+    assert.equal(installedResult.status, 0, installedResult.stderr);
+    assert.equal(installedResult.result.code, "INSTALLED");
+    const installed = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    const handlers = installed.hooks.Stop.flatMap((group) => group.hooks);
+    assert.deepEqual(handlers.find((handler) => handler.command === unrelated.command), unrelated);
+    assert.equal(
+      handlers.filter((handler) => /causal-consultant Codex hook/.test(handler.command || "")).length,
+      1,
+    );
+  });
+
+  await t.test("Codex installer rejects duplicate registrations without mutation", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const codexDirectory = path.join(projectRoot, ".codex");
+    fs.mkdirSync(codexDirectory, { recursive: true });
+    const configPath = path.join(codexDirectory, "hooks.json");
+    const duplicate = {
+      hooks: {
+        Stop: [{
+          hooks: [
+            { type: "command", command: "node .codex/project_state_stop_check.js" },
+            { type: "command", command: "node .codex/project_state_stop_check.cjs" },
+          ],
+        }],
+      },
+    };
+    const original = `${JSON.stringify(duplicate, null, 2)}\n`;
+    fs.writeFileSync(configPath, original, "utf8");
+    const result = runCodexHookInstaller(projectRoot);
+    assert.notEqual(result.status, 0);
+    assert.equal(result.result.code, "INSTALL_FAILED");
+    assert.match(result.result.message, /multiple causal-consultant Stop hooks/);
+    assert.equal(fs.readFileSync(configPath, "utf8"), original);
+    assert.equal(fs.existsSync(path.join(codexDirectory, "project_state_stop_check.cjs")), false);
+    assert.deepEqual(fs.readdirSync(codexDirectory), ["hooks.json"]);
+  });
+
+  await t.test("Codex installer rejects a non-regular hook target", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const codexDirectory = path.join(projectRoot, ".codex");
+    const configPath = path.join(codexDirectory, "hooks.json");
+    fs.mkdirSync(configPath, { recursive: true });
+
+    const result = runCodexHookInstaller(projectRoot);
+    assert.notEqual(result.status, 0);
+    assert.equal(result.result.code, "INSTALL_FAILED");
+    assert.match(result.result.message, /non-regular target: \.codex\/hooks\.json/);
+    assert.deepEqual(fs.readdirSync(codexDirectory), ["hooks.json"]);
+    assert.equal(fs.statSync(configPath).isDirectory(), true);
+  });
+});
+
+test("claude hook installer merges, backs up, and stays idempotent", async (t) => {
+  const CLAUDE_SNIPPET = JSON.parse(fs.readFileSync(
+    path.join(SKILL_ROOT, "project-hooks", "claude", "settings.json"),
+    "utf8",
+  ));
+  const SNIPPET_HANDLER = CLAUDE_SNIPPET.hooks.Stop[0].hooks[0];
+
+  await t.test("fresh install creates settings.json and the bundle", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const { result } = runClaudeHookInstaller(projectRoot);
+    assert.equal(result.ok, true);
+    assert.equal(result.code, "INSTALLED");
+    assert.deepEqual(result.backups, []);
+    const settings = JSON.parse(
+      fs.readFileSync(path.join(projectRoot, ".claude", "settings.json"), "utf8"),
+    );
+    assert.deepEqual(settings.hooks.Stop[0].hooks[0], SNIPPET_HANDLER);
+    assert.equal(settings.hooks.Stop[0].hooks[0].command, "node");
+    assert.equal(
+      fs.existsSync(path.join(projectRoot, ".claude", "project_state_stop_check.cjs")),
+      true,
+    );
+    const rerun = runClaudeHookInstaller(projectRoot);
+    assert.equal(rerun.result.code, "ALREADY_INSTALLED");
+  });
+
+  await t.test("existing settings are merged and backed up, not overwritten", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const claudeDirectory = path.join(projectRoot, ".claude");
+    fs.mkdirSync(claudeDirectory, { recursive: true });
+    const existing = {
+      permissions: { allow: ["Bash(npm test:*)"] },
+      env: { EXAMPLE: "1" },
+      hooks: {
+        PostToolUse: [{ matcher: "Write", hooks: [{ type: "command", command: "echo done" }] }],
+        Stop: [{ hooks: [{ type: "command", command: "node unrelated-stop.js" }] }],
+      },
+    };
+    const settingsPath = path.join(claudeDirectory, "settings.json");
+    fs.writeFileSync(settingsPath, `${JSON.stringify(existing, null, 2)}\n`, "utf8");
+
+    const { result } = runClaudeHookInstaller(projectRoot);
+    assert.equal(result.code, "INSTALLED");
+    assert.equal(result.backups.length, 1);
+    assert.match(result.backups[0], /settings\.json\.bak-/);
+    assert.equal(fs.existsSync(path.join(projectRoot, result.backups[0])), true);
+
+    const merged = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    assert.deepEqual(merged.permissions, existing.permissions);
+    assert.deepEqual(merged.env, existing.env);
+    assert.deepEqual(merged.hooks.PostToolUse, existing.hooks.PostToolUse);
+    assert.equal(merged.hooks.Stop[0].hooks[0].command, "node unrelated-stop.js");
+    assert.deepEqual(merged.hooks.Stop[1].hooks[0], SNIPPET_HANDLER);
+  });
+
+  await t.test("an outdated consultant entry is replaced in place", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const claudeDirectory = path.join(projectRoot, ".claude");
+    fs.mkdirSync(claudeDirectory, { recursive: true });
+    const settingsPath = path.join(claudeDirectory, "settings.json");
+    fs.writeFileSync(settingsPath, `${JSON.stringify({
+      hooks: {
+        Stop: [{
+          hooks: [{
+            type: "command",
+            command: "node \".claude/project_state_stop_check.js\"",
+          }],
+        }],
+      },
+    }, null, 2)}\n`, "utf8");
+
+    const { result } = runClaudeHookInstaller(projectRoot);
+    assert.equal(result.code, "INSTALLED");
+    const merged = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    assert.equal(merged.hooks.Stop.length, 1);
+    assert.equal(merged.hooks.Stop[0].hooks.length, 1);
+    assert.deepEqual(merged.hooks.Stop[0].hooks[0], SNIPPET_HANDLER);
+  });
+
+  await t.test("invalid existing settings abort without mutation", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const claudeDirectory = path.join(projectRoot, ".claude");
+    fs.mkdirSync(claudeDirectory, { recursive: true });
+    const settingsPath = path.join(claudeDirectory, "settings.json");
+    fs.writeFileSync(settingsPath, "{ not json", "utf8");
+    assert.throws(
+      () => installClaudeHook(projectRoot),
+      /existing \.claude\/settings\.json is invalid JSON/,
+    );
+    assert.equal(fs.readFileSync(settingsPath, "utf8"), "{ not json");
+    assert.equal(
+      fs.existsSync(path.join(claudeDirectory, "project_state_stop_check.cjs")),
+      false,
+    );
+  });
+
+  await t.test("the installed configuration blocks from a nested directory", (t2) => {
+    const projectRoot = temporaryProject(t2);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    runClaudeHookInstaller(projectRoot);
+    const installed = JSON.parse(
+      fs.readFileSync(path.join(projectRoot, ".claude", "settings.json"), "utf8"),
+    );
+    const handler = installed.hooks.Stop.at(-1).hooks[0];
+    assert.equal(handler.command, "node");
+    const args = handler.args.map(
+      (argument) => argument.replaceAll("${CLAUDE_PROJECT_DIR}", projectRoot),
+    );
+    const nested = path.join(projectRoot, "nested", "deep");
+    fs.mkdirSync(nested, { recursive: true });
+    const env = { ...process.env, NODE_PATH: "", CLAUDE_PROJECT_DIR: projectRoot };
+    delete env.CODEX_PROJECT_DIR;
+    const child = spawnSync(handler.command, args, {
+      cwd: nested,
+      encoding: "utf8",
+      input: JSON.stringify({ stop_hook_active: false }),
+      env,
+    });
+    assert.equal(child.status, 0, child.stderr);
+    const result = JSON.parse(child.stdout.trim());
+    assert.equal(result.decision, "block");
+    assert.match(result.reason, /still active/);
+  });
+
+  await t.test("Claude installer produces a runnable nested ESM installation", (t2) => {
+    const container = temporaryProject(t2);
+    const projectRoot = path.join(container, "project with spaces & percent%value%");
+    fs.mkdirSync(projectRoot);
+    fs.writeFileSync(path.join(projectRoot, "package.json"), '{"type":"module"}\n', "utf8");
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    const installed = runClaudeHookInstaller(projectRoot);
+    assert.equal(installed.result.code, "INSTALLED");
+    const settings = JSON.parse(
+      fs.readFileSync(path.join(projectRoot, ".claude", "settings.json"), "utf8"),
+    );
+    const handler = settings.hooks.Stop.at(-1).hooks[0];
+    assert.match(handler.args[0], /project_state_stop_check\.cjs$/);
+    const args = handler.args.map(
+      (argument) => argument.replaceAll("${CLAUDE_PROJECT_DIR}", projectRoot),
+    );
+    const nested = path.join(projectRoot, "nested", "deep");
+    fs.mkdirSync(nested, { recursive: true });
+    const env = { ...process.env, NODE_PATH: "", CLAUDE_PROJECT_DIR: projectRoot };
+    delete env.CODEX_PROJECT_DIR;
+    const child = spawnSync(handler.command, args, {
+      cwd: nested,
+      encoding: "utf8",
+      input: JSON.stringify({ stop_hook_active: false }),
+      env,
+    });
+    assert.equal(child.status, 0, child.stderr);
+    const result = JSON.parse(child.stdout.trim());
     assert.equal(result.decision, "block");
     assert.match(result.reason, /still active/);
   });
@@ -5501,6 +6657,7 @@ test("a historical report artifact remains valid with a new scope but cannot be 
           audience: "Policy collaborators",
           target_section: "Updated results",
           planned_structure: ["Updated findings", "Limitations"],
+          analysis_artifact_ids: [],
           draft_notes: [],
         },
         council_chamber: {
@@ -5732,7 +6889,10 @@ test("new scope transitions clear only the replaced scope state", async (t) => {
         actor: "report_writer",
         scope_transition: "new",
         updates: {
-          report_assembly: { report_goal: "Replacement report scope" },
+          report_assembly: {
+            report_goal: "Replacement report scope",
+            analysis_artifact_ids: [],
+          },
           council_chamber: {
             report_writer: {
               current_status: "ready",
@@ -6195,7 +7355,7 @@ test("--discard-legacy-plan is rejected when no legacy v4.5 state exists", async
     assert.equal(fs.existsSync(statePath(projectRoot)), false);
   });
 
-  await t.test("current v6 state", () => {
+  await t.test("current v7 state", () => {
     const projectRoot = temporaryProject(t);
     expectSuccess(execute(projectRoot, "open"), "CREATED");
     const before = fs.readFileSync(statePath(projectRoot), "utf8");
@@ -6552,6 +7712,7 @@ test("ready analysis and report handoffs require direct approval without options
             audience: "Decision makers",
             target_section: "Results",
             planned_structure: ["Findings", "Limitations"],
+            analysis_artifact_ids: [],
           },
           council_chamber: {
             report_writer: {
@@ -6783,6 +7944,800 @@ test("malformed discovery migration containers fail without mutation or archive"
 });
 
 
+test("report evidence and material contract changes require scope revision", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const firstId = pushAnalysisCompletionRecord(projectRoot, {
+    artifactId: "legacy-0001",
+    available: true,
+  });
+  const secondId = pushAnalysisCompletionRecord(projectRoot, {
+    artifactId: "legacy-0002",
+    available: true,
+  });
+  const prepared = prepareReportScope(projectRoot, {
+    opened,
+    analysisArtifactIds: [firstId],
+  });
+  const started = expectSuccess(begin(projectRoot, prepared, "report_writer", {
+    scope_ref: prepared.scope_ref,
+  }), "BEGAN_WORKER");
+  const before = fs.readFileSync(statePath(projectRoot));
+
+  for (const reportPatch of [
+    { analysis_artifact_ids: [secondId] },
+    { report_goal: "A materially different report goal" },
+  ]) {
+    expectFailure(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(started),
+        operation_id: started.operation_id,
+        actor: "report_writer",
+        scope_transition: "preserve",
+        updates: {
+          report_assembly: reportPatch,
+          council_chamber: {
+            report_writer: {
+              current_status: "ready",
+            },
+          },
+        },
+      },
+    }), "SCOPE_MISMATCH");
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+  }
+
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "report_writer",
+      scope_transition: "revise",
+      updates: {
+        report_assembly: {
+          report_goal: "A revised report with an unstated evidence basis",
+        },
+        council_chamber: {
+          report_writer: {
+            current_status: "ready",
+          },
+        },
+      },
+    },
+  }), "INVALID_INPUT");
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+
+  const revised = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "report_writer",
+      scope_transition: "revise",
+      updates: {
+        report_assembly: {
+          report_goal: "A materially different report goal",
+          analysis_artifact_ids: [secondId],
+        },
+        council_chamber: {
+          report_writer: {
+            current_status: "ready",
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+  const report = readState(projectRoot).report_assembly;
+  assert.equal(report.scope_id, prepared.scope_ref.id);
+  assert.equal(report.scope_revision, prepared.scope_ref.revision + 1);
+  assert.deepEqual(report.analysis_artifact_ids, [secondId]);
+  expectSuccess(finish(projectRoot, revised), "OPERATION_FINISHED");
+});
+
+test("schema-6 migration preserves unresolved legacy report provenance", async (t) => {
+  await t.test("legacy planning scope plus unrelated analysis history", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const prepared = prepareReportScope(projectRoot, {
+      opened,
+      analysisArtifactIds: [],
+    });
+    pushAnalysisCompletionRecord(projectRoot, { available: true });
+    const v6 = downgradeCurrentStateToV6(projectRoot);
+    const original = fs.readFileSync(statePath(projectRoot));
+
+    const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V6");
+    assert.deepEqual(fs.readFileSync(migrated.archive_path), original);
+    assert.equal(migrated.revision, v6.state_meta.revision + 1);
+    assert.equal(readState(projectRoot).report_assembly.analysis_artifact_ids, null);
+    const beforeBegin = fs.readFileSync(statePath(projectRoot));
+    const failure = expectFailure(begin(projectRoot, migrated, "report_writer", {
+      scope_ref: prepared.scope_ref,
+    }), "SCOPE_MISMATCH");
+    assert.equal(failure.details.report_evidence_binding, "unresolved");
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), beforeBegin);
+  });
+
+  await t.test("multiple available and unavailable analyses are not auto-bound", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    prepareReportScope(projectRoot, { opened, analysisArtifactIds: [] });
+    pushAnalysisCompletionRecord(projectRoot, {
+      artifactId: "legacy-0001",
+      available: true,
+    });
+    pushAnalysisCompletionRecord(projectRoot, {
+      artifactId: "legacy-0002",
+      available: false,
+    });
+    downgradeCurrentStateToV6(projectRoot);
+    expectSuccess(execute(projectRoot, "open"), "MIGRATED_V6");
+    assert.equal(readState(projectRoot).report_assembly.analysis_artifact_ids, null);
+  });
+
+  await t.test("scoped report with no analysis history gets an intentional empty binding", () => {
+    const projectRoot = temporaryProject(t);
+    prepareReportScope(projectRoot);
+    downgradeCurrentStateToV6(projectRoot);
+    expectSuccess(execute(projectRoot, "open"), "MIGRATED_V6");
+    assert.deepEqual(readState(projectRoot).report_assembly.analysis_artifact_ids, []);
+  });
+
+  await t.test("unbound report state stays empty despite analysis history", () => {
+    const projectRoot = temporaryProject(t);
+    expectSuccess(execute(projectRoot, "open"), "CREATED");
+    pushAnalysisCompletionRecord(projectRoot, { available: true });
+    downgradeCurrentStateToV6(projectRoot);
+    expectSuccess(execute(projectRoot, "open"), "MIGRATED_V6");
+    assert.equal(readState(projectRoot).report_assembly.scope_id, null);
+    assert.deepEqual(readState(projectRoot).report_assembly.analysis_artifact_ids, []);
+  });
+});
+
+test("schema-6 unresolved migration clears stale report approval cues", async (t) => {
+  await t.test("direct assignment", () => {
+    const projectRoot = temporaryProject(t);
+    const prepared = prepareReportScope(projectRoot);
+    const beforeMigration = readState(projectRoot);
+    const responseMarkdown = beforeMigration.response_receipt.response_markdown;
+    assert.deepEqual(beforeMigration.response_receipt.direct_assignment.scope_ref, prepared.scope_ref);
+    pushAnalysisCompletionRecord(projectRoot, { available: true });
+    downgradeCurrentStateToV6(projectRoot);
+
+    expectSuccess(execute(projectRoot, "open"), "MIGRATED_V6");
+    const migrated = readState(projectRoot);
+    assert.equal(migrated.report_assembly.analysis_artifact_ids, null);
+    assert.equal(migrated.response_receipt.direct_assignment, null);
+    assert.equal(migrated.response_receipt.response_markdown, responseMarkdown);
+  });
+
+  await t.test("numbered decision", () => {
+    const projectRoot = temporaryProject(t);
+    const prepared = prepareReportScope(projectRoot);
+    const state = readState(projectRoot);
+    const responseMarkdown = state.response_receipt.response_markdown;
+    state.response_receipt.direct_assignment = null;
+    state.pending_decision = {
+      decision_id: crypto.randomUUID(),
+      source_operation_id: state.response_receipt.operation_id,
+      created_at: state.response_receipt.created_at,
+      options: [
+        {
+          number: 1,
+          assignment: {
+            route: "report_writer",
+            support: null,
+            intent_summary: "Approve the legacy report scope.",
+            scope_ref: prepared.scope_ref,
+          },
+        },
+        {
+          number: 2,
+          assignment: {
+            route: "data_audit",
+            support: null,
+            intent_summary: "Review the source data first.",
+            scope_ref: null,
+          },
+        },
+      ],
+    };
+    writeState(projectRoot, state);
+    pushAnalysisCompletionRecord(projectRoot, { available: true });
+    downgradeCurrentStateToV6(projectRoot);
+
+    expectSuccess(execute(projectRoot, "open"), "MIGRATED_V6");
+    const migrated = readState(projectRoot);
+    assert.equal(migrated.report_assembly.analysis_artifact_ids, null);
+    assert.equal(migrated.pending_decision, null);
+    assert.equal(migrated.response_receipt.direct_assignment, null);
+    assert.equal(migrated.response_receipt.response_markdown, responseMarkdown);
+  });
+});
+
+test("report context projection isolates candidate and approved evidence", async (t) => {
+  await t.test("unbound preparation sees analysis candidates and slots", () => {
+    const projectRoot = temporaryProject(t);
+    const analysisReady = prepareAnalysisScope(projectRoot);
+    const candidateId = pushAnalysisCompletionRecord(projectRoot, {
+      artifactId: "legacy-0001",
+      available: false,
+    });
+    const candidateNote = "Candidate legacy-0001 may support a later report scope.";
+    const state = readState(projectRoot);
+    state.report_assembly.draft_notes = [candidateNote];
+    writeState(projectRoot, state);
+
+    const started = expectSuccess(begin(projectRoot, analysisReady, "report_writer"), "BEGAN_WORKER");
+    assert.deepEqual(
+      started.turn_context.state.artifact_records.map((record) => record.artifact_id),
+      [candidateId],
+    );
+    assert.ok(started.turn_context.state.council_chamber.analysis_execution[analysisReady.design]);
+    assert.ok(started.turn_context.scope_snapshot.analysis[analysisReady.design]);
+    assert.deepEqual(started.turn_context.state.report_assembly.draft_notes, [candidateNote]);
+    assert.ok(started.turn_context.artifact_warnings.some((warning) => (
+      warning.artifact_id === candidateId
+    )));
+    expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+  });
+
+  await t.test("bound analysis exposes only selected analysis and current report output", () => {
+    const projectRoot = temporaryProject(t);
+    const analysisReady = prepareAnalysisScope(projectRoot);
+    const selectedId = pushAnalysisCompletionRecord(projectRoot, {
+      artifactId: "legacy-0001",
+      available: true,
+    });
+    const unrelatedId = pushAnalysisCompletionRecord(projectRoot, {
+      artifactId: "legacy-0002",
+      available: false,
+    });
+    const prepared = prepareReportScope(projectRoot, {
+      opened: analysisReady,
+      analysisArtifactIds: [selectedId],
+    });
+    const oldReportId = pushReportCompletionRecord(projectRoot);
+    const candidateNote = "Selected legacy-0001; omitted legacy-0002 and legacy-9001.";
+    const state = readState(projectRoot);
+    state.report_assembly.draft_notes = [candidateNote];
+    writeState(projectRoot, state);
+
+    const started = expectSuccess(begin(projectRoot, prepared, "report_writer", {
+      scope_ref: prepared.scope_ref,
+    }), "BEGAN_WORKER");
+    assert.deepEqual(
+      started.turn_context.state.artifact_records.map((record) => record.artifact_id),
+      [selectedId],
+    );
+    assert.deepEqual(started.turn_context.state.council_chamber.analysis_execution, {});
+    assert.deepEqual(started.turn_context.scope_snapshot.analysis, {});
+    assert.deepEqual(started.turn_context.state.report_assembly.draft_notes, []);
+    assert.equal(started.turn_context.artifact_warnings.some((warning) => (
+      [unrelatedId, oldReportId].includes(warning.artifact_id)
+    )), false);
+
+    const reopened = expectSuccess(execute(projectRoot, "open"), "RESUME_WORKER");
+    assert.equal(reopened.warnings.some((warning) => (
+      [unrelatedId, oldReportId].includes(warning.artifact_id)
+    )), false);
+
+    const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+      payload: {
+        ...expected(started),
+        operation_id: started.operation_id,
+        kind: "file",
+        slug: "bound-analysis-report",
+        extension: "html",
+      },
+    }), "ARTIFACT_RESERVED");
+    writeReservedTemporary(projectRoot, reserved, "<!doctype html><title>Bound report</title>\n");
+    const applied = expectSuccess(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(reserved),
+        operation_id: started.operation_id,
+        actor: "report_writer",
+        scope_transition: "preserve",
+        updates: {
+          report_assembly: {
+            current_format: "html",
+          },
+          council_chamber: {
+            report_writer: {
+              current_status: "done",
+            },
+          },
+        },
+        artifact: scopedArtifact(reserved, "Completed bound analysis report."),
+      },
+    }), "WORKER_APPLIED");
+    const leadRecords = applied.turn_context.state.artifact_records;
+    assert.deepEqual(applied.turn_context.state.report_assembly.draft_notes, []);
+    assert.deepEqual(
+      leadRecords.filter((record) => record.route === "analysis_execution")
+        .map((record) => record.artifact_id),
+      [selectedId],
+    );
+    assert.deepEqual(
+      leadRecords.filter((record) => record.route === "report_writer")
+        .map((record) => record.operation_id),
+      [started.operation_id],
+    );
+    assert.equal(leadRecords.some((record) => record.artifact_id === oldReportId), false);
+    assert.equal(applied.turn_context.artifact_warnings.some((warning) => (
+      [unrelatedId, oldReportId].includes(warning.artifact_id)
+    )), false);
+    expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+  });
+
+  await t.test("bound planning exposes no historical analysis", () => {
+    const projectRoot = temporaryProject(t);
+    const analysisReady = prepareAnalysisScope(projectRoot);
+    const prepared = prepareReportScope(projectRoot, {
+      opened: analysisReady,
+      analysisArtifactIds: [],
+    });
+    const unrelatedId = pushAnalysisCompletionRecord(projectRoot, {
+      artifactId: "legacy-0001",
+      available: false,
+    });
+    const candidateNote = "Historical analysis exists but is intentionally not bound.";
+    const state = readState(projectRoot);
+    state.report_assembly.draft_notes = [candidateNote];
+    writeState(projectRoot, state);
+
+    const started = expectSuccess(begin(projectRoot, prepared, "report_writer", {
+      scope_ref: prepared.scope_ref,
+    }), "BEGAN_WORKER");
+    assert.deepEqual(
+      started.turn_context.state.artifact_records.filter((record) => (
+        record.route === "analysis_execution"
+      )),
+      [],
+    );
+    assert.deepEqual(started.turn_context.state.council_chamber.analysis_execution, {});
+    assert.deepEqual(started.turn_context.scope_snapshot.analysis, {});
+    assert.deepEqual(started.turn_context.state.report_assembly.draft_notes, []);
+    assert.equal(started.turn_context.artifact_warnings.some((warning) => (
+      warning.artifact_id === unrelatedId
+    )), false);
+    const applied = expectSuccess(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(started),
+        operation_id: started.operation_id,
+        actor: "report_writer",
+        scope_transition: "preserve",
+        updates: {
+          report_assembly: {
+            draft_notes: [candidateNote],
+          },
+          council_chamber: {
+            report_writer: {
+              current_status: "ready",
+            },
+          },
+        },
+      },
+    }), "WORKER_APPLIED");
+    assert.deepEqual(applied.turn_context.state.report_assembly.draft_notes, []);
+    expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+  });
+});
+
+test("report evidence availability is rechecked at ready handoff and closeout", async (t) => {
+  await t.test("blocked to ready preserve is atomic when bound evidence is missing", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const artifactId = pushAnalysisCompletionRecord(projectRoot, { available: true });
+    const prepared = prepareReportScope(projectRoot, {
+      opened,
+      analysisArtifactIds: [artifactId],
+    });
+    const blocker = expectSuccess(begin(projectRoot, prepared, "report_writer"), "BEGAN_WORKER");
+    const blocked = expectSuccess(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(blocker),
+        operation_id: blocker.operation_id,
+        actor: "report_writer",
+        scope_transition: "preserve",
+        updates: {
+          report_assembly: {
+            draft_notes: ["Evidence restoration is required."],
+          },
+          council_chamber: {
+            report_writer: {
+              current_status: "blocked",
+            },
+          },
+        },
+      },
+    }), "WORKER_APPLIED");
+    const idle = expectSuccess(finish(projectRoot, blocked), "OPERATION_FINISHED");
+    const record = readState(projectRoot).artifact_records.find((item) => (
+      item.artifact_id === artifactId
+    ));
+    fs.rmSync(path.join(projectRoot, ...record.location.split("/").filter(Boolean)), {
+      recursive: true,
+      force: true,
+    });
+
+    const repair = expectSuccess(begin(projectRoot, idle, "report_writer"), "BEGAN_WORKER");
+    const before = fs.readFileSync(statePath(projectRoot));
+    const failure = expectFailure(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(repair),
+        operation_id: repair.operation_id,
+        actor: "report_writer",
+        scope_transition: "preserve",
+        updates: {
+          report_assembly: {
+            draft_notes: ["Attempted ready handoff with missing evidence."],
+          },
+          council_chamber: {
+            report_writer: {
+              current_status: "ready",
+            },
+          },
+        },
+      },
+    }), "SCOPE_MISMATCH");
+    assert.deepEqual(failure.details.unavailable_analysis_artifact_ids, [artifactId]);
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+  });
+
+  await t.test("protocol-1 closeout blocks source loss but cancellation remains allowed", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const artifactId = pushAnalysisCompletionRecord(projectRoot, { available: true });
+    const prepared = prepareReportScope(projectRoot, {
+      opened,
+      analysisArtifactIds: [artifactId],
+    });
+    const started = expectSuccess(begin(projectRoot, prepared, "report_writer", {
+      scope_ref: prepared.scope_ref,
+    }), "BEGAN_WORKER");
+    const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+      payload: {
+        ...expected(started),
+        operation_id: started.operation_id,
+        kind: "file",
+        slug: "source-loss-report",
+        extension: "html",
+      },
+    }), "ARTIFACT_RESERVED");
+    writeReservedTemporary(projectRoot, reserved, "<!doctype html><title>Source loss</title>\n");
+    const applied = expectSuccess(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(reserved),
+        operation_id: started.operation_id,
+        actor: "report_writer",
+        scope_transition: "preserve",
+        updates: {
+          report_assembly: {
+            current_format: "html",
+          },
+          council_chamber: {
+            report_writer: {
+              current_status: "done",
+            },
+          },
+        },
+        artifact: scopedArtifact(reserved, "Completed report before source loss."),
+      },
+    }), "WORKER_APPLIED");
+    const record = readState(projectRoot).artifact_records.find((item) => (
+      item.artifact_id === artifactId
+    ));
+    fs.rmSync(path.join(projectRoot, ...record.location.split("/").filter(Boolean)), {
+      recursive: true,
+      force: true,
+    });
+    const before = fs.readFileSync(statePath(projectRoot));
+
+    const failure = expectFailure(finish(projectRoot, applied), "SCOPE_MISMATCH");
+    assert.deepEqual(failure.details.unavailable_analysis_artifact_ids, [artifactId]);
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+    expectSuccess(finish(projectRoot, applied, {}, { cancel: true }), "OPERATION_CANCELLED");
+  });
+});
+
+test("schema-6 active report execution opens for repair without allowing unresolved output", async (t) => {
+  await t.test("worker pending", () => {
+    const projectRoot = temporaryProject(t);
+    const analysisReady = prepareAnalysisScope(projectRoot);
+    const artifactId = pushAnalysisCompletionRecord(projectRoot, { available: true });
+    const prepared = prepareReportScope(projectRoot, {
+      opened: analysisReady,
+      analysisArtifactIds: [artifactId],
+    });
+    expectSuccess(begin(projectRoot, prepared, "report_writer", {
+      scope_ref: prepared.scope_ref,
+    }), "BEGAN_WORKER");
+    const legacyHash = legacyReportContractBundle(readState(projectRoot).report_assembly).contractHash;
+    downgradeCurrentStateToV6(projectRoot);
+
+    const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V6");
+    const active = readState(projectRoot).state_meta.active_operation;
+    assert.equal(active.report_evidence_binding_protocol, 0);
+    assert.equal(active.contract_hash, legacyHash);
+    assert.equal(readState(projectRoot).report_assembly.analysis_artifact_ids, null);
+    assert.ok(migrated.turn_context.state.artifact_records.some((record) => (
+      record.artifact_id === artifactId
+    )));
+    assert.ok(
+      migrated.turn_context.state.council_chamber.analysis_execution[analysisReady.design],
+    );
+    assert.ok(migrated.turn_context.scope_snapshot.analysis[analysisReady.design]);
+    assert.equal(
+      migrated.required_references.some((reference) => reference.startsWith("assets/report_template_")),
+      false,
+    );
+    assert.equal(migrated.required_references.includes("references/artifact_output_policy.md"), false);
+
+    const beforeBlockedOutput = fs.readFileSync(statePath(projectRoot));
+    expectFailure(execute(projectRoot, "reserve-artifact", {
+      payload: {
+        ...expected(migrated),
+        operation_id: migrated.active_operation.id,
+        kind: "file",
+        slug: "migrated-report",
+        extension: "html",
+      },
+    }), "SCOPE_MISMATCH");
+    expectFailure(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(migrated),
+        operation_id: migrated.active_operation.id,
+        actor: "report_writer",
+        scope_transition: "preserve",
+        updates: {
+          report_assembly: {
+            draft_notes: ["Attempted unresolved output."],
+          },
+          council_chamber: {
+            report_writer: {
+              current_status: "done",
+            },
+          },
+        },
+        artifact: {},
+      },
+    }), "SCOPE_MISMATCH");
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), beforeBlockedOutput);
+
+    const revised = expectSuccess(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(migrated),
+        operation_id: migrated.active_operation.id,
+        actor: "report_writer",
+        scope_transition: "revise",
+        updates: {
+          report_assembly: {
+            report_goal: "Repair the migrated evidence provenance",
+            analysis_artifact_ids: [artifactId],
+          },
+          council_chamber: {
+            report_writer: {
+              current_status: "ready",
+            },
+          },
+        },
+      },
+    }), "WORKER_APPLIED");
+    const repaired = readState(projectRoot);
+    assert.deepEqual(repaired.report_assembly.analysis_artifact_ids, [artifactId]);
+    assert.equal(repaired.state_meta.active_operation.report_evidence_binding_protocol, 1);
+    expectSuccess(finish(projectRoot, revised), "OPERATION_FINISHED");
+  });
+
+  await t.test("lead pending with a completed legacy-hash manifest", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const artifactId = pushAnalysisCompletionRecord(projectRoot, { available: true });
+    const prepared = prepareReportScope(projectRoot, {
+      opened,
+      analysisArtifactIds: [artifactId],
+    });
+    const started = expectSuccess(begin(projectRoot, prepared, "report_writer", {
+      scope_ref: prepared.scope_ref,
+    }), "BEGAN_WORKER");
+    const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+      payload: {
+        ...expected(started),
+        operation_id: started.operation_id,
+        kind: "file",
+        slug: "legacy-report",
+        extension: "html",
+      },
+    }), "ARTIFACT_RESERVED");
+    writeReservedTemporary(projectRoot, reserved, "<!doctype html><title>Legacy report</title>\n");
+    const applied = expectSuccess(execute(projectRoot, "apply", {
+      payload: {
+        ...expected(reserved),
+        operation_id: started.operation_id,
+        actor: "report_writer",
+        scope_transition: "preserve",
+        updates: {
+          report_assembly: {
+            current_format: "html",
+          },
+          council_chamber: {
+            report_writer: {
+              current_status: "done",
+            },
+          },
+        },
+        artifact: scopedArtifact(reserved, "Completed legacy report."),
+      },
+    }), "WORKER_APPLIED");
+
+    const reportState = readState(projectRoot);
+    const legacyBundle = legacyReportContractBundle(reportState.report_assembly);
+    const manifestPath = path.join(projectRoot, ...reserved.manifest_path.split("/"));
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    const evidenceFile = manifest.execution_receipt.evidence_files[0];
+    manifest.requirements = legacyBundle.requirements;
+    manifest.execution_receipt.contract_hash = legacyBundle.contractHash;
+    manifest.execution_receipt.completed_requirements =
+      legacyBundle.requirements.map((requirement) => requirement.id);
+    manifest.execution_receipt.unmet_requirements = [];
+    manifest.execution_receipt.requirement_evidence =
+      legacyBundle.requirements.map((requirement) => ({
+        requirement_id: requirement.id,
+        file: evidenceFile,
+        locator: `Evidence for ${requirement.id}`,
+      }));
+    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    downgradeCurrentStateToV6(projectRoot);
+
+    const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V6");
+    const active = readState(projectRoot).state_meta.active_operation;
+    assert.equal(migrated.mode, "resume_lead");
+    assert.equal(migrated.artifact_status.location_state, "complete");
+    assert.equal(active.report_evidence_binding_protocol, 0);
+    assert.equal(active.contract_hash, legacyBundle.contractHash);
+    assert.equal(readState(projectRoot).report_assembly.analysis_artifact_ids, null);
+    expectSuccess(finish(projectRoot, {
+      ...migrated,
+      operation_id: migrated.active_operation.id,
+    }), "OPERATION_FINISHED");
+    assert.equal(readState(projectRoot).state_meta.active_operation, null);
+    assert.equal(applied.operation_id, migrated.active_operation.id);
+  });
+});
+
+test("migrated ready report lead can hand off repair but cannot persist unresolved approval", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const artifactId = pushAnalysisCompletionRecord(projectRoot, { available: true });
+  const prepared = prepareReportScope(projectRoot, {
+    opened,
+    analysisArtifactIds: [artifactId],
+  });
+  const started = expectSuccess(begin(projectRoot, prepared, "report_writer", {
+    scope_ref: prepared.scope_ref,
+  }), "BEGAN_WORKER");
+  expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "report_writer",
+      scope_transition: "preserve",
+      updates: {
+        report_assembly: {
+          draft_notes: ["Return for explicit evidence repair."],
+        },
+        council_chamber: {
+          report_writer: {
+            current_status: "ready",
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+  downgradeCurrentStateToV6(projectRoot);
+
+  const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V6");
+  assert.equal(migrated.mode, "resume_lead");
+  assert.equal(migrated.active_operation.report_evidence_binding_protocol, 0);
+  assert.equal(readState(projectRoot).report_assembly.analysis_artifact_ids, null);
+  const prior = {
+    ...migrated,
+    operation_id: migrated.active_operation.id,
+  };
+  const exactApproval = structuredClone(DEFAULT_PRESENTATION);
+  exactApproval.direct_assignment = {
+    route: "report_writer",
+    support: null,
+    intent_summary: "Approve the unresolved legacy report scope.",
+    scope_ref: prepared.scope_ref,
+  };
+  const before = fs.readFileSync(statePath(projectRoot));
+  const failure = expectFailure(finish(projectRoot, prior, {}, {
+    presentation: exactApproval,
+  }), "SCOPE_MISMATCH");
+  assert.equal(failure.details.report_evidence_binding, "unresolved");
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+
+  const repairHandoff = structuredClone(DEFAULT_PRESENTATION);
+  repairHandoff.next_steps = "Revise the report scope with an explicit evidence selection.";
+  repairHandoff.direct_assignment = {
+    route: "report_writer",
+    support: null,
+    intent_summary: "Resolve the legacy report evidence selection.",
+    scope_ref: null,
+  };
+  expectSuccess(finish(projectRoot, prior, {}, {
+    presentation: repairHandoff,
+  }), "OPERATION_FINISHED");
+  const closed = readState(projectRoot);
+  assert.equal(closed.response_receipt.direct_assignment.route, "report_writer");
+  assert.equal(closed.response_receipt.direct_assignment.scope_ref, null);
+});
+
+test("migrated report preparation upgrades new and revised scopes to binding protocol 1", async (t) => {
+  for (const transition of ["new", "revise"]) {
+    await t.test(transition, () => {
+      const projectRoot = temporaryProject(t);
+      let selectedArtifactId = null;
+      const prior = transition === "new"
+        ? expectSuccess(execute(projectRoot, "open"), "CREATED")
+        : prepareReportScope(projectRoot);
+      if (transition === "revise") {
+        selectedArtifactId = pushAnalysisCompletionRecord(projectRoot, { available: true });
+      }
+      expectSuccess(begin(projectRoot, prior, "report_writer"), "BEGAN_WORKER");
+      downgradeCurrentStateToV6(projectRoot);
+      const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V6");
+      assert.equal(
+        readState(projectRoot).state_meta.active_operation.report_evidence_binding_protocol,
+        0,
+      );
+      const applied = expectSuccess(execute(projectRoot, "apply", {
+        payload: {
+          ...expected(migrated),
+          operation_id: migrated.active_operation.id,
+          actor: "report_writer",
+          scope_transition: transition,
+          updates: {
+            report_assembly: {
+              report_goal: `${transition} report scope`,
+              analysis_artifact_ids: selectedArtifactId === null ? [] : [selectedArtifactId],
+            },
+            council_chamber: {
+              report_writer: {
+                current_status: "ready",
+              },
+            },
+          },
+        },
+      }), "WORKER_APPLIED");
+      const active = readState(projectRoot).state_meta.active_operation;
+      assert.equal(active.report_evidence_binding_protocol, 1);
+      assert.match(active.contract_hash, /^[0-9a-f]{64}$/);
+      assert.deepEqual(
+        readState(projectRoot).report_assembly.analysis_artifact_ids,
+        selectedArtifactId === null ? [] : [selectedArtifactId],
+      );
+      expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+    });
+  }
+});
+
+test("the source Stop hook blocks an active v6 state without migrating it on disk", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+  downgradeCurrentStateToV6(projectRoot);
+  const before = fs.readFileSync(statePath(projectRoot));
+  for (const hook of [SOURCE_HOOK, CODEX_SOURCE_HOOK]) {
+    const result = runHook(projectRoot, { hook });
+    assert.equal(result.decision, "block", JSON.stringify(result));
+    assert.match(result.reason, /still active/);
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+  }
+  assert.equal(readState(projectRoot).state_meta.schema_version, 6);
+});
+
 test("schema-4 migration archives exact bytes, preserves identity, and is idempotent", (t) => {
   const projectRoot = temporaryProject(t);
   const prepared = prepareAnalysisScope(projectRoot);
@@ -6839,7 +8794,7 @@ test("schema-4 migration archives exact bytes, preserves identity, and is idempo
   assert.deepEqual(migrated.warnings, []);
 
   const current = readState(projectRoot);
-  assert.equal(current.state_meta.schema_version, 6);
+  assert.equal(current.state_meta.schema_version, 7);
   assert.equal(current.state_meta.project_id, v4.state_meta.project_id);
   assert.equal(current.state_meta.active_operation.completion_protocol, 0);
   assert.equal(current.state_meta.active_operation.contract_hash, null);
@@ -6883,7 +8838,7 @@ test("schema-5 migration adds an empty strategy portfolio without invalidating p
   const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V5");
   assert.deepEqual(fs.readFileSync(migrated.archive_path), original);
   const current = readState(projectRoot);
-  assert.equal(current.state_meta.schema_version, 6);
+  assert.equal(current.state_meta.schema_version, 7);
   assert.deepEqual(current.causal_facts.analysis_options, []);
   assert.equal(current.causal_facts.analysis_readiness, v5.causal_facts.analysis_readiness);
   assert.deepEqual(
@@ -6989,6 +8944,14 @@ test("schema-5 migration grandfathers an active bound ready analysis lead throug
 
   const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V5");
   assert.equal(migrated.mode, "resume_lead");
+  assert.ok(
+    migrated.required_references.includes("references/legacy_evidence.md"),
+    "lead phase must receive the legacy evidence reference for protocol-1 operations",
+  );
+  assert.ok(
+    migrated.required_references.includes("references/team_lead_analysis_flow.md"),
+    "lead phase must receive the analysis flow reference for analysis operations",
+  );
   assert.deepEqual(fs.readFileSync(migrated.archive_path), original);
   assert.equal(migrated.operation_packet.completion_protocol, 1);
   const current = readState(projectRoot);
@@ -7078,9 +9041,9 @@ test("schema-2 migration preserves idle and active route boundaries", async (t) 
           scenario.route === "team_lead" ? "BEGAN_LEAD" : "BEGAN_WORKER",
         );
       }
-      const currentV6 = readState(projectRoot);
-      const priorOperation = currentV6.state_meta.active_operation;
-      const priorPlan = currentV6.next_step_plan;
+      const currentV7 = readState(projectRoot);
+      const priorOperation = currentV7.state_meta.active_operation;
+      const priorPlan = currentV7.next_step_plan;
       const v2 = downgradeCurrentStateToV2(projectRoot);
       const original = fs.readFileSync(statePath(projectRoot), "utf8");
 
@@ -7093,7 +9056,7 @@ test("schema-2 migration preserves idle and active route boundaries", async (t) 
       assert.deepEqual(migrated.plan, priorPlan);
 
       const current = readState(projectRoot);
-      assert.equal(current.state_meta.schema_version, 6);
+      assert.equal(current.state_meta.schema_version, 7);
       assert.equal(current.state_meta.project_id, v2.state_meta.project_id);
       assert.equal(current.state_meta.revision, v2.state_meta.revision + 1);
       assert.equal(current.state_meta.startup_notice, null);
@@ -7105,11 +9068,14 @@ test("schema-2 migration preserves idle and active route boundaries", async (t) 
         "project_summary",
         "data_facts",
         "domain_knowledge",
-        "report_assembly",
         "artifact_records",
       ]) {
         assert.deepEqual(current[section], v2[section], `${section} changed during v2 migration`);
       }
+      assert.deepEqual(current.report_assembly, {
+        ...v2.report_assembly,
+        analysis_artifact_ids: [],
+      });
       assert.deepEqual(current.causal_facts, {
         ...v2.causal_facts,
         analysis_options: [],
@@ -8153,6 +10119,8 @@ test("exact analysis and report scopes reach their worker capsules", async (t) =
       support: null,
       references: [
         "references/report_writer.md",
+        "assets/report_template_planning.md",
+        "assets/report_html_layout_template.html",
         "references/artifact_output_policy.md",
       ],
     },

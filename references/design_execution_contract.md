@@ -1,7 +1,10 @@
 # Design Execution Contract
 
-Use this reference from design routes only. Support routes provide context
-inside the selected design scope; the design route owns the worker submission.
+Use this reference from design routes only. The design route is the
+accountable owner for keeping analysis execution consistent with its study
+design. Support routes provide context inside the selected design scope and
+may add analytic tools, but they must stay inside that scope; the design route
+owns the worker submission.
 
 ## Active Assignment
 
@@ -67,6 +70,30 @@ A requested change to target, estimand, identification design, data
 construction, or domain interpretation returns to its owning core route. A
 same-design formulation may return here as scope preparation or revision. Name
 the concrete path and owner instead of returning generic advice to revise.
+`causal_check` owns catalog-based support-route selection. If a different
+support becomes central to the bound work, flag it in chamber feedback rather
+than loading the catalog or switching routes. Cues for scientific
+issues discovered during design work:
+
+- effect variation by subgroup, site, or modifier -> `heterogeneous-effects`;
+  requires modifier timing and subgroup support; main risk: multiplicity and
+  unsupported subgroups.
+- continuous, cumulative, duration, or intensity exposure -> `dose-response`;
+  requires support across the dose range; main risk: extrapolation beyond
+  support.
+- mechanism, pathway, or mediator-adjustment question -> `mediation`; requires
+  mediator timing and mediator-outcome confounding control; main risk: fragile
+  cross-world assumptions.
+- binary, count, survival, or competing-risk outcome scale ->
+  `non-continuous-outcomes`; requires event counts, follow-up, and censoring
+  handling; main risk: scale-dependent conclusions.
+- decision rule, targeting, deployment, or transport use ->
+  `policy-making-and-transportability`; requires decision-time features and a
+  named target population; main risk: local evidence overgeneralized.
+- unresolved balance, overlap, weights, nuisance, or inference concerns beyond
+  the design's required diagnostics -> `statistical-validity`; requires
+  design-matched diagnostics; main risk: estimation machinery mistaken for
+  identification.
 
 ## Scope Identity And Handoff
 
@@ -133,7 +160,9 @@ a scope-consistency check, not a repeat of the full begin gate.
 When the approved scope remains current, follow
 `references/artifact_output_policy.md`: reserve one meaningful output directory,
 execute and validate every operation-packet requirement, and submit one silent
-owner-scoped `apply`. Requirements are minimum coverage; supplemental work is
+owner-scoped `apply`. Choose the estimator lane before choosing software;
+package lanes in the design and support references are cues, not execution
+permission, so verify current docs before running code. Requirements are minimum coverage; supplemental work is
 allowed only inside the approved target and claim boundary.
 
 Prefer one reproducible execution pass that produces the contracted analysis,

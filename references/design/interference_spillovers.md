@@ -2,13 +2,10 @@
 
 Use this file to plan or review an interference or spillover analysis: SUTVA/no-interference violations, peer effects, contagion, contamination, networks, geographic or spatial spillovers, cluster exposure, market effects, treatment saturation, partial interference, exposure mapping, graph cluster randomization, two-stage randomized designs, direct/indirect/total/overall effects, or interference-aware report support.
 
-This design route is the accountable owner for whether analysis execution remains consistent with the interference design. Support routes may add analytic tools, but they must stay inside this design scope.
-
 Work in this order: define units, mechanism, interference restriction, exposure mapping, timing, support, design source, dependence-aware inference, and claim boundary. Do not treat ordinary cluster-robust standard errors as a repair for interference.
 
-Runtime contract: follow `references/design_execution_contract.md` using design
-id `interference_spillovers`. Keep any named support route inside this
-interference/spillover design scope.
+Runtime contract: `references/design_execution_contract.md`, design id
+`interference_spillovers`.
 
 ## Use When
 
@@ -81,8 +78,6 @@ Never rescue these failures by "controlling for peers" or by ordinary cluster-ro
 
 ## Packages
 
-Choose the estimator lane before choosing software. Package lanes are reference cues, not execution permission. Verify current docs before running code.
-
 - Partial interference and clustered spillovers: R `inferference`, `interferenceCI`, `clusteredinterference`.
 - Network or spatial exposure construction: R `igraph`, `tidygraph`, `sf`; Python `networkx`, `geopandas`, `shapely`.
 - Spatial/spatiotemporal causal support: R/GitHub `SpatialEffect`, R `geocausal`; use only when assumptions match the data.
@@ -94,24 +89,21 @@ Choose the estimator lane before choosing software. Package lanes are reference 
 
 Key literature anchors: SUTVA/no-interference violations, partial interference, two-stage randomized designs, exposure mapping, direct/indirect/total/overall effects, network interference, spatial spillovers, spillover-robust experimental design, and peer-effect homophily cautions.
 
-## Support And Rerouting Connections
+## Rerouting Cues
 
-- Use `statistical-validity` only when unresolved exposure-map support,
-  dependence-aware inference, map sensitivity, or reproducibility concerns
-  exceed the interference diagnostics above.
-- Use `policy-making-and-transportability` when treatment saturation, allocation, spillover policy value, market decisions, or deployment constraints matter.
-- Use `dose-response` when spillover exposure is a treated-neighbor share, radius-weighted dose, saturation level, intensity, or exposure-response curve.
-- Use `heterogeneous-effects` when spillovers vary by subgroup, network position, geography, site, cohort, or baseline risk.
 - Return to `causal_check` for `instrumental_variables` when an instrument and
   noncompliance become the primary identification frame.
 - Return to `causal_check` for `difference_in_differences`,
   `regression_discontinuity`, or `synthetic_control_time_series` when
   interference is only a threat to that primary comparison design.
-- Use `non-continuous-outcomes` for contagion, infection, event, count, survival, recurrent-event, or competing-risk spillover outcomes.
+
+`causal_check` owns support-route selection. If a different support becomes
+central to the bound work, flag it in chamber feedback rather than loading the
+catalog or switching routes.
+
 
 ## Execution Record
 
-Follow the shared completion-summary and artifact rules in
-`references/design_execution_contract.md`. Emphasize units and exposure mapping,
+In the artifact `summary`, emphasize units and exposure mapping,
 the direct/spillover estimand, support and dependence diagnostics,
 confounding/homophily limits, and the interference claim boundary.

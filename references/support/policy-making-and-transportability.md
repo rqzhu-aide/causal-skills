@@ -49,16 +49,6 @@ Context only. Relevant when the target concerns action choice, prioritization, t
 - source-target version compatibility table
 - effect-modifier overlap and transportability note
 
-## Other Considerations
-
-- Flag `statistical-validity` follow-up only when unresolved rule stability,
-  source-target support, value estimation, or nuisance-model concerns exceed the
-  selected design's normal diagnostics.
-- Consider `heterogeneous-effects` when policy or transport depends on effect modifiers, subgroup benefit, equity/safety strata, or site/time variation.
-- Consider `non-continuous-outcomes` when the decision depends on risk, rate, survival, RMST, competing events, utility, or categorical outcomes.
-- Consider `dose-response` if the decision is about dose choice, exposure intensity, dose cap, threshold, or feasible shift.
-- Consider `mediation` if the policy is justified by a mechanism, pathway, or intervention component rather than the total effect alone.
-
 ## Boundary Language
 
 Use "decision support" rather than "deployment rule" unless the policy has validated decision-time features, support, uncertainty, and harm constraints. Use "transported under measured effect-modifier assumptions" rather than broad generalizability when target support is limited.

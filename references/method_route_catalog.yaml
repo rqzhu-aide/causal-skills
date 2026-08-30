@@ -4,15 +4,10 @@
 # route_index.yaml.
 
 selection_principles:
-  - "Recommend one accountable analysis frame first. Causal design routes provide the identification frame; descriptive_association is the named non-causal fallback."
-  - "Add one support route only when it materially changes validity, diagnostics, target interpretation, or implementation. Use statistical-validity only for unresolved concerns beyond the design's normal diagnostics."
-  - "Do not recommend a support route alone. Pair support with a design or record why design selection is not ready."
-  - "Prefer a more specific support only when it changes the target, outcome scale, validity review, mechanism question, dose question, policy use, or transport question."
-  - "Use descriptive_association only as an explicit non-causal fallback, never as a shortcut around causal design selection."
-  - "When current evidence supports one responsible default, recommend it even if one or two credible alternatives remain; alternatives do not become executable routes."
-  - "If a material missing discriminator prevents responsible ranking, leave route recommendations empty, keep analysis readiness not_ready, and name that discriminator."
-  - "Keep same-design model, estimator, uncertainty, preprocessing, and implementation alternatives in the selected analysis chamber and scope-revision path, not analysis_options."
-  - "Never choose a strategy from the direction or significance of a target result, and never reshape or restrict data merely to rescue a desired conclusion."
+  - "Recommend one accountable analysis frame first. Causal design routes provide the identification frame; descriptive_association is the named non-causal fallback, never a shortcut around causal design selection."
+  - "Add one support route only when it materially changes validity, diagnostics, target interpretation, or implementation. Prefer a more specific support only when it changes the target, outcome scale, validity review, mechanism question, dose question, policy use, or transport question."
+  - "Do not recommend a support route alone: pair support with a design or record why design selection is not ready. Use statistical-validity only for unresolved concerns beyond the design's normal diagnostics."
+  - "Portfolio semantics -- default plus alternatives, missing discriminators, same-design formulation handling, and the outcome-driven-selection ban -- live in references/causal_check.md."
 
 strategy_portfolio_lenses:
   - id: data_enablement
@@ -34,73 +29,64 @@ design_candidates:
   - id: randomized_assignment
     recommend_when: "Use when treatment variation comes from a documented, auditable random assignment process, including trials, A/B tests, encouragement designs, lotteries, cluster assignment, blocked randomization, or randomized rollout rules."
     check_before_recommending: "Confirm unit of assignment, time zero, analysis set, compliance, attrition, contamination, outcome window, and whether the target is ITT, per-protocol, CACE/LATE, subgroup, dose, or safety."
-    support_hints: "Consider heterogeneous-effects, non-continuous-outcomes, or policy-making-and-transportability when they change the target; use statistical-validity only for unresolved concerns beyond the randomization diagnostics."
 
   - id: single_time_observational
     recommend_when: "Use when exposure is measured at or near baseline and the main challenge is emulating a point-treatment contrast from observational data with measured confounders."
     check_before_recommending: "Look for a credible target-trial emulation: eligibility, time zero, treatment strategies, comparator, outcome follow-up, confounder timing, positivity, and a reason adjustment could be enough."
-    support_hints: "Consider heterogeneous-effects for modifiers or dose-response for nonbinary exposure; use statistical-validity only for unresolved overlap, balance, weighting, or nuisance-model concerns."
 
   - id: longitudinal_gmethods
     recommend_when: "Use when treatment, exposure, adherence, or confounders evolve over time and past treatment affects later confounders or future treatment opportunities."
     check_before_recommending: "Confirm repeated time ordering, treatment histories, censoring, sustained or dynamic regimes, time-varying confounding, follow-up alignment, and whether g-formula, MSM/IPW, longitudinal TMLE, or LMTP language fits."
-    support_hints: "Consider dose-response, policy-making-and-transportability, or non-continuous-outcomes when they change the target; use statistical-validity only for unresolved sequential-validity concerns."
 
   - id: difference_in_differences
     recommend_when: "Use when treatment is a policy, program, shock, or adoption event observed before and after in treated and comparison units, with untreated potential trends as the identifying story."
     check_before_recommending: "Confirm panel or repeated cross-section structure, adoption timing, comparison units, pre-periods, outcome measurement stability, anticipation risk, staggered timing, and whether parallel-trend diagnostics are possible."
-    support_hints: "Consider heterogeneous-effects for event-time/group-time contrasts or policy-making-and-transportability for deployment; use statistical-validity only for unresolved inference, placebo, or robustness concerns."
 
   - id: regression_discontinuity
     recommend_when: "Use when treatment or eligibility changes at a known cutoff in a running variable and the estimand is local to that threshold."
     check_before_recommending: "Confirm the cutoff rule, running variable measurement, manipulation risk, bandwidth support, continuity plausibility, sharp versus fuzzy assignment, and whether local interpretation is acceptable."
-    support_hints: "Consider non-continuous-outcomes for endpoint scale or heterogeneous-effects near the cutoff; use statistical-validity only for unresolved bandwidth, support, or inference concerns."
 
   - id: instrumental_variables
     recommend_when: "Use when there is a plausible source of treatment variation that affects outcome only through treatment, such as encouragement, judge/provider preference, distance, lottery, policy assignment, or genetic instruments."
     check_before_recommending: "Confirm instrument relevance, exclusion restriction, independence, monotonicity or principal-strata target, weak-instrument risk, measured violations, and whether LATE/CACE is the right claim."
-    support_hints: "Consider mediation only with extreme caution or policy-making-and-transportability for LATE transport; use statistical-validity only for unresolved weak-IV, sensitivity, or nuisance-model concerns."
+    support_hints: "Consider mediation support only with extreme caution."
 
   - id: synthetic_control_time_series
     recommend_when: "Use when one or a few aggregate units are exposed at a known intervention time and the comparison comes from untreated donor units or pre-intervention time-series structure."
     check_before_recommending: "Confirm intervention timing, donor pool credibility, sufficient pre-periods, no donor contamination, outcome stability, unit comparability, and whether synthetic control, synthetic DiD, ITS, BSTS, or matrix completion is most natural."
-    support_hints: "Consider policy-making-and-transportability for external interpretation or non-continuous-outcomes for outcome scale; use statistical-validity only for unresolved placebo, uncertainty, or model-dependence concerns."
 
   - id: interference_spillovers
     recommend_when: "Use when one unit's treatment can affect another unit's outcome through networks, geography, markets, households, peers, clusters, saturation, contamination, or shared environments."
     check_before_recommending: "Confirm interference mechanism, exposure mapping, cluster or network boundaries, saturation measures, direct versus spillover contrasts, partial-interference plausibility, and whether ordinary no-interference methods would be misleading."
-    support_hints: "Consider policy-making-and-transportability, heterogeneous-effects, or dose-response when they change the target; use statistical-validity only for unresolved exposure-map, dependence, or sensitivity concerns."
 
   - id: descriptive_association
     recommend_when: "Use only when causal identification is not supportable from the current design or facts, but a descriptive, exploratory, or association-only analysis would still help the user understand patterns, data quality, candidate relationships, or reporting limitations."
     check_before_recommending: "State explicitly that this is not a causal design. Confirm the user-facing goal is non-causal, the variables and outcome scale are clear enough for association summaries, and the analysis can report effect sizes, uncertainty, multiplicity, missingness, and selection limits without causal wording."
-    support_hints: "Consider non-continuous-outcomes, heterogeneous-effects, or dose-response only when they shape the descriptive target; use statistical-validity only for unresolved multiplicity, robustness, or model-diagnostic concerns."
+    support_hints: "Recommend supports only when they shape the descriptive target."
 
 support_routes:
   - id: heterogeneous-effects
     recommend_when: "Use when the causal target is effect variation across groups, covariates, sites, cohorts, baseline risk, time periods, or biologically/socially meaningful modifiers."
     adds_value_by: "Forces the plan to separate prespecified subgroup contrasts, exploratory CATE search, interaction modeling, prioritization, and claim wording."
-    pairing_notes: "Use statistical-validity only when unresolved data-adaptive subgrouping, multiplicity, or modifier-support concerns exceed the selected design's normal diagnostics."
 
   - id: dose-response
     recommend_when: "Use when treatment is continuous, ordinal, multi-level, duration-based, intensity-based, cumulative, threshold-like, or better expressed as a shift/intervention on exposure."
     adds_value_by: "Clarifies what dose intervention is causal, which dose range has support, whether a curve or discrete contrast is safer, and where extrapolation begins."
-    pairing_notes: "Use statistical-validity only when unresolved dose support or positivity exceeds the selected design's normal diagnostics; use non-continuous-outcomes when endpoint scale changes dose interpretation."
+    pairing_notes: "Use non-continuous-outcomes when endpoint scale changes dose interpretation."
 
   - id: mediation
     recommend_when: "Use when the question is about mechanism, pathways, direct and indirect effects, mediator adjustment, or whether an intermediate variable should be controlled."
     adds_value_by: "Keeps mediator timing, mediator-outcome confounding, post-treatment adjustment, interventional versus natural effects, and mechanistic wording separate from total-effect estimation."
-    pairing_notes: "Use domain_expert when mechanism meaning is unresolved and statistical-validity only for concerns beyond the selected design's normal diagnostics; avoid if mediator ordering or mediator-outcome assumptions fail."
+    pairing_notes: "Use domain_expert when mechanism meaning is unresolved; avoid if mediator ordering or mediator-outcome assumptions fail."
 
   - id: policy-making-and-transportability
     recommend_when: "Use when the evidence must guide a decision, treatment rule, policy value, deployment choice, prioritization, or application to another population, site, time, or setting."
     adds_value_by: "Connects estimand choice to the decision context, utility, constraints, target population, external validity, and whether the analysis should estimate a rule rather than a static effect."
-    pairing_notes: "Use statistical-validity only when unresolved model-reliability or transport concerns exceed the selected design's normal diagnostics."
 
   - id: non-continuous-outcomes
     recommend_when: "Use when the outcome is binary, ordinal, categorical, count, zero-inflated, bounded, time-to-event, recurrent-event, competing-risk, censored, or otherwise not well represented by a simple continuous mean."
     adds_value_by: "Forces the plan to choose the causal scale, follow-up window, censoring approach, estimand interpretation, and whether risk, rate, odds, survival, RMST, or cumulative incidence is appropriate."
-    pairing_notes: "Use statistical-validity only when unresolved inference or support exceeds the selected design's normal diagnostics; outcome scale may change dose-response or heterogeneous-effects interpretation."
+    pairing_notes: "Outcome scale may change dose-response or heterogeneous-effects interpretation."
 
   - id: statistical-validity
     recommend_when: "Use when the main issue is whether the proposed analysis will be statistically credible after the design is chosen: balance, overlap, extreme weights, robustness, nuisance modeling, sensitivity, falsification, negative controls, DR/TMLE/DML, or valid inference."

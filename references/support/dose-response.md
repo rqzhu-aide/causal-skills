@@ -43,16 +43,6 @@ Context only. Relevant when treatment or exposure is continuous, ordinal, multi-
 - threshold or window sensitivity summary
 - alternative dose-scale comparison
 
-## Other Considerations
-
-- Flag `statistical-validity` follow-up only when unresolved dose support,
-  positivity, threshold stability, or nuisance-model concerns exceed the
-  selected design's normal diagnostics.
-- Consider `heterogeneous-effects` if the dose-response curve may differ across baseline groups, sites, cohorts, or risk levels.
-- Consider `non-continuous-outcomes` when dose-response is evaluated on risk, rates, events, categories, or survival scales.
-- Consider `mediation` if dose affects intermediate biomarkers, adherence, behavior, or mechanisms that the user wants to interpret.
-- Consider `policy-making-and-transportability` if the practical question is a dose rule, dose cap, target dose range, or transport of a dose recommendation.
-
 ## Boundary Language
 
 Record "within the observed support range" as a wording constraint when appropriate. Avoid implying effects for unsupported dose levels, impossible interventions, or post-hoc thresholds.

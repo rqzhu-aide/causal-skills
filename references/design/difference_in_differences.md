@@ -2,13 +2,10 @@
 
 Use this file to plan or review a difference-in-differences or event-study analysis: policy timing, treated and comparison units, pre/post data, panels, repeated cross-sections, staggered adoption, group-time ATT, TWFE benchmarks, synthetic DiD, DR-DiD, anticipation, spillovers, or DiD report support.
 
-This design route is the accountable owner for whether analysis execution remains consistent with the DiD/event-study design. Support routes may add analytic tools, but they must stay inside this design scope.
-
 Work in this order: define unit-time structure, treatment timing, comparison group, pre-period evidence, estimand, timing hazards, composition/support, inference level, then claim boundary. Do not let fixed effects or a modern estimator substitute for a credible comparison.
 
-Runtime contract: follow `references/design_execution_contract.md` using design
-id `difference_in_differences`. Keep any named support route inside this DiD
-design scope.
+Runtime contract: `references/design_execution_contract.md`, design id
+`difference_in_differences`.
 
 ## Use When
 
@@ -79,8 +76,6 @@ Never rescue these failures by adding fixed effects, covariates, or a newer esti
 
 ## Packages
 
-Choose the estimator lane before choosing software. Package lanes are reference cues, not execution permission. Verify current docs before running code.
-
 - Modern staggered DiD: R `did`, `fixest::sunab`, `didimputation`, `did2s`, `did_multiplegt`, `DIDmultiplegtDYN`; Stata `csdid`, `eventstudyinteract`, `did_imputation`.
 - Two-group/two-period or conditional DiD: R `DRDID`, `did`; Python `moderndid`, `diff-diff`, custom `statsmodels`/`linearmodels` benchmarks.
 - Event-study and FE benchmarks: R `fixest`, `lfe`; Python `statsmodels`, `linearmodels`; keep TWFE labeled when not primary.
@@ -93,21 +88,18 @@ Choose the estimator lane before choosing software. Package lanes are reference 
 
 Key literature anchors: canonical DiD, parallel trends, Callaway-Sant'Anna group-time ATT, Sun-Abraham interaction-weighted event studies, Borusyak-Jaravel-Spiess imputation, Gardner did2s, de Chaisemartin-D'Haultfoeuille estimators, DR-DiD, synthetic DiD, and HonestDiD sensitivity.
 
-## Support And Rerouting Connections
+## Rerouting Cues
 
-- Use `statistical-validity` only when unresolved nuisance adjustment,
-  cluster/serial inference, sensitivity, or reproducibility concerns exceed the
-  DiD diagnostics above.
-- Use `non-continuous-outcomes` for fixed-horizon risk, event counts, survival, competing risks, rates, or categorical outcomes in DiD.
-- Use `heterogeneous-effects` when dynamic, cohort-specific, subgroup, site, or effect-modifier variation is central.
-- Use `dose-response` when treatment intensity, exposure level, duration, or continuous dose replaces binary adoption.
-- Use `policy-making-and-transportability` when the result is meant to guide policy choice, target a population, or generalize beyond treated settings.
 - Return to `causal_check` for `interference_spillovers` when spillovers become
   the primary estimand; otherwise record control contamination as a DiD threat.
 
+`causal_check` owns support-route selection. If a different support becomes
+central to the bound work, flag it in chamber feedback rather than loading the
+catalog or switching routes.
+
+
 ## Execution Record
 
-Follow the shared completion-summary and artifact rules in
-`references/design_execution_contract.md`. Emphasize treatment cohorts and
+In the artifact `summary`, emphasize treatment cohorts and
 comparison units, the DiD/event-time estimand, pre-period and timing diagnostics,
 inference level, and the parallel-trends claim boundary.

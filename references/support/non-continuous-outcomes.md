@@ -44,17 +44,6 @@ Context only. Relevant when the outcome is binary, ordinal, categorical, count, 
 - censoring KM/IPCW distribution, truncation, and support note when censoring is modeled
 - outcome-scale boundary wording
 
-## Other Considerations
-
-- Flag `statistical-validity` follow-up only when unresolved event-support,
-  censoring, scale-sensitivity, or nuisance-model concerns exceed the selected
-  design's normal diagnostics.
-- Consider grouping, collapsing, thresholding, or transforming outcomes only when the new scale matches the decision or domain meaning, not merely to simplify modeling.
-- Consider `heterogeneous-effects` if outcome-scale conclusions differ across subgroups, sites, cohorts, risk levels, or event-count strata.
-- Consider `dose-response` if the outcome is non-continuous and the exposure has intensity, duration, cumulative dose, or threshold structure.
-- Consider `policy-making-and-transportability` if outcome scale affects decisions, utility, target-population interpretation, or deployment.
-- Consider `mediation` if event timing, intermediate events, or competing pathways are part of the substantive question.
-
 ## Boundary Language
 
 Name the scale. Avoid translating odds, hazards, rates, or model coefficients into generic "risk" or "effect" language unless the transformation is explicit and supported.

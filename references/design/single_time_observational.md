@@ -2,13 +2,10 @@
 
 Use this file to plan or review a point-treatment observational analysis: baseline or one-time exposure, treated-versus-untreated comparisons, target-trial emulation, active-comparator designs, measured-confounding adjustment, matching, weighting, standardization, ATE/ATT/overlap targets, or observational report support.
 
-This design route is the accountable owner for whether analysis execution remains consistent with the observational study design. Support routes may add analytic tools, but they must stay inside this design scope.
-
 Work in this order: emulate the target trial, align time zero, define exposure and comparator, build the analysis set, audit covariate timing and support, choose an estimator lane, specify required diagnostics, then set the claim boundary. Do not let a flexible model compensate for bad timing, missing confounding, or positivity failure.
 
-Runtime contract: follow `references/design_execution_contract.md` using design
-id `single_time_observational`. Keep any named support route inside this
-observational-design scope.
+Runtime contract: `references/design_execution_contract.md`, design id
+`single_time_observational`.
 
 ## Use When
 
@@ -80,8 +77,6 @@ Never rescue these failures by adding more covariates, a richer propensity model
 
 ## Packages
 
-Choose the estimator lane before choosing software. Package lanes are reference cues, not execution permission. Verify current docs before running code.
-
 - Transparent first pass: regression adjustment, standardization, or g-computation; R `fixest`, `marginaleffects`, `stdReg`, `survey`; Python `statsmodels`, `zepid`, custom sklearn/statsmodels workflows.
 - Matching and weighting: R `MatchIt`, `WeightIt`, `cobalt`, `optmatch`, `designmatch`, `CBPS`, `ebal`; Python `causalml`, `DoWhy`, `zepid`, custom propensity/balance code.
 - Doubly robust and targeted learning: R `AIPW`, `tmle`, `drtmle`, `tmle3`, `sl3`, `SuperLearner`; Python `zepid`, `EconML`, `DoubleML`, custom AIPW/TMLE templates.
@@ -90,20 +85,15 @@ Choose the estimator lane before choosing software. Package lanes are reference 
 
 Key literature anchors: target-trial emulation, Rubin/Holland potential outcomes, exchangeability/positivity/consistency, Hernan and Robins causal inference framework, propensity-score design, overlap weights, doubly robust estimation, targeted learning, and sensitivity analysis for unmeasured confounding.
 
-## Connections With Supports
+## Rerouting Cues
 
-- Use `statistical-validity` only when unresolved support, balance, weighting,
-  sensitivity, or nuisance-model concerns exceed the observational diagnostics
-  above.
-- Use `heterogeneous-effects` when the question is about subgroup, CATE, site/time, equity, safety, or effect-modifier variation.
-- Use `dose-response` when exposure is continuous, ordinal, cumulative, duration-based, threshold-based, or shift-like.
-- Use `mediation` when the user wants pathway interpretation or asks whether to adjust for an intermediate variable.
-- Use `non-continuous-outcomes` for binary, count, ordinal, survival, recurrent-event, competing-risk, or censoring-sensitive outcomes.
-- Use `policy-making-and-transportability` when the estimate will guide action, targeting, deployment, or movement to another population.
+`causal_check` owns support-route selection. If a different support becomes
+central to the bound work, flag it in chamber feedback rather than loading the
+catalog or switching routes.
+
 
 ## Execution Record
 
-Follow the shared completion-summary and artifact rules in
-`references/design_execution_contract.md`. Emphasize the target-trial slots,
+In the artifact `summary`, emphasize the target-trial slots,
 time zero, estimand and target population, support and adjustment diagnostics,
 and the measured-confounding claim boundary.

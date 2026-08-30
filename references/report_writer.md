@@ -4,11 +4,14 @@ Use this reference to draft, revise, or structure academic, technical,
 reviewer-facing, or decision-facing reports.
 
 `project_summary.analysis_output` and `project_summary.report_output` indicate
-only that a historical `completion` artifact exists. Results-focused report work
-also requires relevant, available analysis artifacts that match the current report
-scope. Without them, use this route only for planning report scope or
-claim-boundary language; do not draft results, invent results, or describe
-completed methods.
+only that a historical `completion` artifact exists. The exact evidence basis
+for the current report is `report_assembly.analysis_artifact_ids`. A
+results-focused scope must bind the relevant, available analysis completion
+records there. An intentionally empty binding defines a planning report. Do
+not infer report evidence from unrelated historical records. A migration-only
+`null` binding means a legacy report had analysis history but did not record
+which evidence it intended to use. It is neither planning nor analysis scope;
+revise it to an explicit ID list or `[]`, then obtain approval.
 
 Approved report output is HTML by default. Requests for PPT, DOCX, PDF, slides,
 email, letter, memo, Markdown, or another form become scope, structure,
@@ -37,10 +40,18 @@ Use this vocabulary consistently:
 Use the worker `turn_context`, operation packet, persisted assignment,
 `report_assembly`, and available artifact evidence. A newer message does not
 change resumed work. A non-null scope reference records approval at `begin`;
-never reinterpret approval later. Use the full-state fallback only for relevant
-detail omitted from the context. Submit one silent `apply` as `report_writer`,
-updating only `report_assembly` and its chamber slot, with an artifact only for
-allowed output below.
+never reinterpret approval later. For report output, that authorization is
+valid only when `analysis_artifact_ids` is a resolved array. A protocol-0
+operation with a `null` binding is repair-only: revise the evidence selection,
+return for approval, and create no output. Use the full-state fallback only for
+relevant detail omitted from the context. During approved or output-bound work,
+recover analysis detail only for IDs already in the frozen binding, and recover
+non-analysis material only when the frozen scope already names it. A prior
+report is a presentation source, not independent empirical evidence; use it
+only when the frozen scope names it and its underlying analysis IDs are bound.
+Never use the fallback to discover or adopt another analysis artifact. Submit
+one silent `apply` as `report_writer`, updating only `report_assembly` and its
+chamber slot, with an artifact only for allowed output below.
 
 Classify the task into one of four report scope states:
 
@@ -52,8 +63,10 @@ Classify the task into one of four report scope states:
 - **Ready scope**:
   - A non-null active `scope_ref` that exactly matches the ready
     `report_assembly.scope_id` and `scope_revision` records approval. Recheck
-    the live evidence gates and artifact availability. If either no longer
-    supports the bound scope, return `blocked` without output. Otherwise
+    the live evidence gates and availability of every bound artifact. Never
+    substitute an unbound artifact or downgrade a nonempty binding to planning.
+    If a bound artifact is unavailable, return `blocked` without output and
+    request restoration or scope revision. Otherwise
     incorporate only minor refinements preserved in `intent_summary`, create
     the report, and set status to `done`.
   - With no `scope_ref`, treat the assignment as clarification or revision.
@@ -94,22 +107,38 @@ Record blocked or completed work in `report_assembly`,
 
 ## Report Templates
 
-Use the bundled templates when preparing a report scope or carrying out an
-approved report output:
+For approved report output, the controller returns the matching Markdown
+template and `assets/report_html_layout_template.html` (the required final
+HTML shell) with the output-authorized context. It returns
+`assets/report_template_planning.md` only when
+`analysis_artifact_ids` is intentionally empty, and
+`assets/report_template_analysis.md` when that binding is nonempty. Do not
+override this choice from global artifact history. A missing bound artifact is
+a blocked analysis-report boundary, not a planning-template fallback. Do not
+load either report template for a migration-only `null` binding. Resolve it
+through scope revision first. Do not load template files during scope
+preparation; use the section logic below.
 
-- `assets/report_template_planning.md` as structural guidance when the current
-  report scope lacks relevant, available analysis artifacts.
-- `assets/report_template_analysis.md` as structural guidance when the current
-  report scope is grounded in relevant, available analysis artifacts.
-- `assets/report_html_layout_template.html` as the required final HTML shell for
-  approved report output.
+Planning-report sections: Front Summary; Planning Boundary And Recommendation;
+Causal Question And Decision Context; Candidate Estimand Or Target Sketch;
+Causal Structure And Assumptions; Data, Measurement, And Provenance Needed
+Next; Candidate Method Paths; Potential Figures Or Displays; Alternatives,
+Pitfalls, And Parked Ideas; Recommended Path From Planning To Analysis;
+Evidence Basis And Open Questions.
 
-Use the Markdown templates as section logic, not output targets or fixed prose.
-Omit sections that are irrelevant to the approved scope, but preserve the causal
+Analysis-report sections: At A Glance; Main Answer And Evidence Status;
+Original Question And Refined Causal Question; Causal Estimand And Target;
+Data Reality And Provenance; Method Rationale, Alternatives, And Pitfalls;
+Results, Figures, And Tables; Diagnostics, Sensitivity, And Robustness; Causal
+Boundary And What Not To Claim; Interpretation And Next Decisions; Evidence
+Sources And Limitations; Appendix Notes.
+
+Use the Markdown templates as section logic, not output targets or fixed
+prose. Omit sections irrelevant to the approved scope, but preserve the causal
 boundary, evidence status, limitations, and next-decision logic. Build the
-approved report directly in the HTML shell, including required figures, tables,
-callouts, audience-facing evidence sources, and limitations when supported by
-state and artifacts.
+approved report directly in the HTML shell, including required figures,
+tables, callouts, audience-facing evidence sources, and limitations when
+supported by state and artifacts.
 
 ## Causal Report Writing Logic
 
@@ -165,9 +194,8 @@ When scope feedback is needed:
 - Do not draft final report text, completed results prose, or finalized wording.
 - Do not reserve an output location or submit an artifact.
 - Prepare an approval-ready report scope for `team_lead`.
-- Use `assets/report_template_planning.md` when the current scope lacks
-  relevant, available analysis artifacts; otherwise use
-  `assets/report_template_analysis.md`.
+- Follow the matching section list in Report Templates above (planning versus
+  analysis) for the envisioned structure; do not load the template files.
 - Inspect the context's relevant route summaries and only available files
   explicitly referenced by artifacts or the persisted assignment.
 - Write a compact `report_assembly.planned_structure` list that names the
@@ -194,12 +222,19 @@ Submit supported fields under `report_assembly`:
 - `planned_structure`
 - `key_points`
 - `wording_constraints`
+- `analysis_artifact_ids`: the sorted IDs of the analysis `completion`
+  records approved for this report, or `[]` for an intentional planning
+  report. Changing this evidence set is material and requires `new` or
+  `revise`, followed by approval. Never submit `null`; it is a
+  controller-owned legacy migration marker.
 - `draft_notes`
 
 In report scope setup, keep in `draft_notes` a compact internal
 finished-artifact inventory: what artifacts exist, what each contributes to the
 proposed report, and which expected report pieces are missing, omitted, or only
-suitable as limitations. Translate that provenance into audience-facing
+suitable as limitations. This inventory explains selection decisions but does
+not bind evidence. Bind every selected analysis completion explicitly in
+`analysis_artifact_ids`. Translate that provenance into audience-facing
 evidence descriptions rather than copying it into the rendered report.
 
 Submit only this route's chamber slot:

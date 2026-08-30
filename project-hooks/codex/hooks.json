@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const f=require('node:fs'),p=require('node:path'),c=require('node:child_process'),real=s=>{try{return f.realpathSync.native(p.resolve(s))}catch{return null}},dir=s=>{const r=real(s);try{return r&&f.statSync(r).isDirectory()?r:null}catch{return null}},inside=(r,x)=>{const q=p.relative(r,x);return q===''||(q!=='..'&&!q.startsWith('..'+p.sep)&&!p.isAbsolute(q))},git=s=>{try{return dir(c.execFileSync('git',['-C',s,'rev-parse','--show-toplevel'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim())}catch{return null}},hook=s=>{try{const d=p.dirname(s),x=f.lstatSync(s);if(f.lstatSync(d).isSymbolicLink()||x.isSymbolicLink()||!x.isFile())return null;const r=real(s);return r&&f.statSync(r).isFile()?r:null}catch{return null}},cwd=dir(process.cwd()),env=process.env.CODEX_PROJECT_DIR?dir(process.env.CODEX_PROJECT_DIR):null,root=cwd&&(git(cwd)||(env&&inside(env,cwd)?env:null));if(!root)process.exit(0);const h=hook(p.join(root,'.codex','project_state_stop_check.cjs'));if(!h)throw new Error('causal-consultant Codex hook is not installed as a regular file at the project root');require(h)\"",
+            "commandWindows": "node -e \"const f=require('node:fs'),p=require('node:path'),c=require('node:child_process'),real=s=>{try{return f.realpathSync.native(p.resolve(s))}catch{return null}},dir=s=>{const r=real(s);try{return r&&f.statSync(r).isDirectory()?r:null}catch{return null}},inside=(r,x)=>{const q=p.relative(r,x);return q===''||(q!=='..'&&!q.startsWith('..'+p.sep)&&!p.isAbsolute(q))},git=s=>{try{return dir(c.execFileSync('git',['-C',s,'rev-parse','--show-toplevel'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim())}catch{return null}},hook=s=>{try{const d=p.dirname(s),x=f.lstatSync(s);if(f.lstatSync(d).isSymbolicLink()||x.isSymbolicLink()||!x.isFile())return null;const r=real(s);return r&&f.statSync(r).isFile()?r:null}catch{return null}},cwd=dir(process.cwd()),env=process.env.CODEX_PROJECT_DIR?dir(process.env.CODEX_PROJECT_DIR):null,root=cwd&&(git(cwd)||(env&&inside(env,cwd)?env:null));if(!root)process.exit(0);const h=hook(p.join(root,'.codex','project_state_stop_check.cjs'));if(!h)throw new Error('causal-consultant Codex hook is not installed as a regular file at the project root');require(h)\"",
+            "timeout": 10,
+            "statusMessage": "project_state_stop_check: checking project_state.yaml structure and state flags"
+          }
+        ]
+      }
+    ]
+  }
+}

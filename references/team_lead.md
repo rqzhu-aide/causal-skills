@@ -1,12 +1,12 @@
 # Route: team_lead
 
 Team lead closes every causal-consultant operation and is its only user-facing
-voice. For normal closeout, use the controller's committed team-lead
-`turn_context`, not an earlier worker patch, to synthesize the result, submit
-semantic closeout and structured presentation through `finish`, and return the
-rendered response. Explicit cancellation at `worker_pending` is the exception:
-use the validated current-stage context only to call `finish --cancel` and
-acknowledge cancellation, without synthesizing worker results or state updates.
+voice. For normal closeout, synthesize from the controller's committed
+team-lead `turn_context` (not an earlier worker patch), submit semantic
+closeout and structured presentation through `finish`, and return the rendered
+response. Exception: explicit cancellation at `worker_pending` uses the
+validated current-stage context only to call `finish --cancel` and acknowledge
+it, without synthesizing worker results or state updates.
 
 Classify the closeout as intake, core-route handoff, discovery handoff,
 analysis handoff, report handoff, output closeout, synthesis, no-work, or
@@ -15,14 +15,14 @@ genuinely needs relevant detail omitted from the lead context.
 
 ## Boundaries And Conditional Guidance
 
-- The committed operation controls this closeout. Team lead neither changes it
-  nor performs omitted worker work. Proposed options are future assignments and
-  remain unqueued until a later user message.
+- The committed operation controls this closeout: team lead neither changes it
+  nor performs omitted worker work. Proposed options are future assignments,
+  unqueued until a later user message.
 - Run team lead at `lead_pending` for ordinary closeout. A failed `open` uses
   read-only preflight-failure mode and never bypasses or repairs rejected state.
-- On resumed `lead_pending`, use the persisted operation and committed evidence.
-  A newer message matters only for explicit cancellation and acknowledgement of
-  work outside that operation.
+- On resumed `lead_pending`, use the persisted operation and committed
+  evidence; a newer message matters only for explicit cancellation and
+  acknowledgement of work outside the operation.
 - Load `team_lead_analysis_flow.md` for an analysis operation or a lead-only
   question about analysis scope, approval, execution, or output.
 - Load `team_lead_report_flow.md` for a report operation or a lead-only question
@@ -52,32 +52,29 @@ expected handoff permits only a summary of visible committed evidence and the
 smallest repair or clarification.
 
 Treat artifacts named in `artifact_warnings` as unavailable. Claim newly
-promised output only from an available, operation-matched `completion` artifact.
-For the current operation, use `turn_context.artifact_status` for its verified
-role and execution receipt. When the current operation created an available
-completion artifact, include its returned location once in the final response,
-as a link when supported.
+promised output only from an available, operation-matched `completion`
+artifact, using `turn_context.artifact_status` for its verified role and
+execution receipt; when the current operation created one, include its
+returned location once in the final response, as a link when supported.
 `completed_requirements` proves only that the worker accounted for packet IDs;
 it is not semantic proof that the artifact implements them. For current
 completion protocol 2, compare the operation-packet requirements with
-`requirement_evidence`. For historical schema-3 output, use the manifest's
-persisted `requirements` descriptions with that mapping. Inspect every
-load-bearing target, method, support, diagnostic, output, and claim requirement
-before calling the work exact. Load each distinct evidence file at most once
-and use its locators to focus review. If the mapping is unavailable only because
-the artifact is a historical schema-1 or schema-2 manifest, state the narrower
-historical evidence boundary rather than inventing verification.
-Treat every `deviations` item as a real departure to reconcile in the response.
-Do not say `exactly`, `unchanged`, or `every requirement` when any departure
-remains, even if the output is otherwise usable.
-`infeasibility_evidence` shows why the exact scope needs revision; it is neither
-the promised output nor an ordinary tool failure. In lead-only work, discuss
-only unambiguously identified prior scopes or available historical artifacts
-and label them as prior work. Do not scan for, recreate, adopt, or silently
-substitute files.
+`requirement_evidence`. Inspect every load-bearing target, method, support,
+diagnostic, output, and claim requirement before calling the work exact,
+loading each distinct evidence file at most once and using its locators to
+focus review. For a migrated protocol-1 operation or a historical schema-1,
+schema-2, or schema-3 manifest, load `references/legacy_evidence.md` and use
+its evidence boundaries.
+Treat every `deviations` item as a real departure to reconcile in the
+response; do not say `exactly`, `unchanged`, or `every requirement` while any
+departure remains. `infeasibility_evidence` shows why the exact scope needs
+revision; it is neither the promised output nor an ordinary tool failure. In
+lead-only work, discuss only unambiguously identified prior scopes or
+available historical artifacts, label them as prior work, and never scan for,
+recreate, adopt, or silently substitute files.
 
 For a completed core route, explain the useful finding, uncertainty, and next
-decision without presenting newly computed target-analysis results. Such a
+decision without presenting newly computed target-analysis results; such a
 result requires an available artifact from the exact approved analysis scope.
 For a fresh or setup-only turn, ask for the causal goal, data or design, and
 intended use. For intake or synthesis, ask the one highest-value unresolved
@@ -111,21 +108,20 @@ finish. Do not replace real project guidance with a generic feature list.
 ## Research Strategy Decisions
 
 Use `causal_facts.analysis_options` as the durable portfolio of project-level
-research strategies for the current target, and use the selected analysis
-chamber for same-design formulation choices. Recommend the portfolio's
-`preferred` strategy first. Surface no more than two established `alternative`
-or `fallback` strategies, and only when they are credible, materially
-different, and useful to the current decision. Team lead does not invent,
-promote, update, or clear portfolio items.
+research strategies for the current target, and the selected analysis chamber
+for same-design formulation choices. Recommend the `preferred` strategy first;
+surface at most two established `alternative` or `fallback` strategies, only
+when credible, materially different, and useful to the current decision. Team
+lead does not invent, promote, update, or clear portfolio items.
 
-Before presenting a strategy choice, build each legal one-operation assignment.
-Explain in ordinary language what the path enables, its required data,
-assumptions, or preparation, its main risk or weaker claim, and when it would be
-preferable. Use the owning chamber handoff for the exact next owner: data work
-returns to `data_audit`, construct or population interpretation to
-`domain_expert`, target, estimand, or design changes to `causal_check`, and a
-same-design formulation to its analysis worker. Do not turn a concrete path
-into generic advice to reopen or revise, and do not promise later operations.
+Before presenting a strategy choice, build each legal one-operation
+assignment. Explain in ordinary language what the path enables, what it
+requires, its main risk or weaker claim, and when it is preferable. Use the
+owning chamber handoff for the exact next owner: data work to `data_audit`,
+construct or population interpretation to `domain_expert`, target, estimand,
+or design changes to `causal_check`, and a same-design formulation to its
+analysis worker. Do not turn a concrete path into generic advice to reopen or
+revise, and do not promise later operations.
 
 Do not force a menu when one strategy clearly dominates or only one action is
 currently responsible. If evidence cannot rank the candidates, state that no
@@ -136,8 +132,8 @@ favorable target, method, or data construction.
 ## Decision Gate
 
 Ask only when the answer could materially change the next route, scope,
-evidence basis, claim boundary, output creation, or authorization. Ask for at
-most one user decision.
+evidence basis, claim boundary, output creation, or authorization, and ask for
+at most one user decision.
 
 When the current analysis or report worker commits a semantically current
 `ready` scope, present its complete default and ask one direct yes/no approval
@@ -195,11 +191,11 @@ superseded objective or exploration content and explicitly clear obsolete
 values. A ready scope alone does not update `exploration_summary`.
 Exploration completion does not authorize analysis or report execution.
 
-The controller owns timestamps, revisions, six aggregate completion/output
+The controller owns timestamps, revisions, the aggregate completion/output
 fields, pending decisions, and atomic operation clearing. Historical output
-flags show that a completion artifact once existed, not that it remains current
-or available. If `finish` fails, use the returned or reopened committed stage
-and correct the closeout; do not claim completion or clear state manually.
+flags show a completion artifact once existed, not that it remains current or
+available. If `finish` fails, use the returned or reopened committed stage and
+correct the closeout; never claim completion or clear state manually.
 
 For cancellation, call `finish --cancel` without state updates but with the
 presentation. Do not delete or adopt reserved or unrecorded files.

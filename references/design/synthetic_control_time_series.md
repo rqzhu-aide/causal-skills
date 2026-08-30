@@ -2,13 +2,10 @@
 
 Use this file to plan or review a synthetic-control or aggregate time-series causal analysis: one or few treated aggregate units, donor pools, intervention dates, synthetic control, augmented SCM, generalized SCM, synthetic DiD, interrupted time series, comparative ITS, Bayesian structural time series, CausalImpact, matrix completion, pre-period fit, placebo inference, or time-series causal diagnostics.
 
-This design route is the accountable owner for whether analysis execution remains consistent with the aggregate counterfactual/time-series design. Support routes may add analytic tools, but they must stay inside this design scope.
-
 Work in this order: define treated unit(s), intervention timing, donor/control pool, outcome scale, pre-period evidence, estimand, inference route, time-series diagnostics, then claim boundary. Do not let a forecast model hide donor contamination, poor pre-fit, or concurrent shocks.
 
-Runtime contract: follow `references/design_execution_contract.md` using design
-id `synthetic_control_time_series`. Keep any named support route inside this
-synthetic/time-series design scope.
+Runtime contract: `references/design_execution_contract.md`, design id
+`synthetic_control_time_series`.
 
 ## Use When
 
@@ -81,8 +78,6 @@ Never rescue these failures by adding more donors, more predictors, or a richer 
 
 ## Packages
 
-Choose the estimator lane before choosing software. Package lanes are reference cues, not execution permission. Verify current docs before running code.
-
 - Classic SCM: R `Synth`, `tidysynth`; Stata `synth_runner`; Python `pysyncon`.
 - Augmented SCM: R `augsynth`; useful when donor structure is credible but pre-fit is imperfect.
 - Generalized SCM/matrix completion: R `gsynth`, `fect`; useful for multiple treated units/time periods with latent-factor assumptions.
@@ -93,22 +88,20 @@ Choose the estimator lane before choosing software. Package lanes are reference 
 
 Key literature anchors: synthetic control, augmented SCM, generalized SCM, synthetic DiD, interrupted time series, comparative ITS, Bayesian structural time series, placebo/permutation inference, conformal inference, and matrix completion for counterfactual panels.
 
-## Support And Rerouting Connections
+## Rerouting Cues
 
-- Use `statistical-validity` only when unresolved pre-fit, placebo/sensitivity,
-  uncertainty, reproducibility, or model-dependence concerns exceed the
-  synthetic/time-series diagnostics above.
 - Return to `causal_check` for `difference_in_differences` when group-time or
   multi-cohort identification becomes primary.
 - Return to `causal_check` for `interference_spillovers` when spillovers become
   the primary estimand; otherwise retain donor contamination as a design threat.
-- Use `non-continuous-outcomes` when the outcome is a rate, count, event, survival, competing-risk, categorical, or denominator-sensitive measure.
-- Use `policy-making-and-transportability` when aggregate results are being generalized, deployed, or applied to another target population/site/time.
-- Use `heterogeneous-effects` when several treated units or sites allow credible effect variation analysis.
+
+`causal_check` owns support-route selection. If a different support becomes
+central to the bound work, flag it in chamber feedback rather than loading the
+catalog or switching routes.
+
 
 ## Execution Record
 
-Follow the shared completion-summary and artifact rules in
-`references/design_execution_contract.md`. Emphasize treated and donor units,
+In the artifact `summary`, emphasize treated and donor units,
 intervention timing and estimand, pre-fit/placebo and time-series diagnostics,
 concurrent shocks, and the aggregate claim boundary.

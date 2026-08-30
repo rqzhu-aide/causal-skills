@@ -2,13 +2,10 @@
 
 Use this file to plan or review a proper randomized-assignment analysis: randomized trials, A/B tests, randomized encouragement, lotteries, holdouts, blocked/stratified/paired experiments, cluster randomization, factorial variants, or randomized rollouts.
 
-This design route is the accountable owner for whether analysis execution remains consistent with the randomized study design. Support routes may add analytic tools, but they must stay inside this design scope.
-
 Work in this order: verify assignment, define the assignment-based estimand, construct the analysis set, choose an estimator lane, specify required diagnostics, then set the claim boundary. Prefer intention-to-treat unless the assigned contrast is not the analysis being requested; in that case, report the design constraint and let `causal_check` revise the design/support recommendation.
 
-Runtime contract: follow `references/design_execution_contract.md` using design
-id `randomized_assignment`. Keep any named support route inside this
-randomized-design scope.
+Runtime contract: `references/design_execution_contract.md`, design id
+`randomized_assignment`.
 
 ## Use When
 
@@ -79,8 +76,6 @@ Never rescue these failures by calling the contrast an A/B test. Name the fallba
 
 ## Packages
 
-Choose the estimator lane before choosing software. Package lanes are reference cues, not execution permission. Verify current docs before running code.
-
 - Simple individual ITT: difference in means, OLS, or GLM with design-matched robust uncertainty; R `estimatr`, `lm`, `sandwich`, `lmtest`; Python `statsmodels`.
 - Pre-assignment precision adjustment: ANCOVA, Lin adjustment, or CUPED; keep unadjusted and adjusted ITT visible; use R `estimatr`, `fixest`, or Python `statsmodels`.
 - Blocked, stratified, paired, or unequal-probability assignment: include design terms or design-based inference; R `randomizr`, `estimatr`, `ri2`; custom Python randomization code when needed.
@@ -91,22 +86,18 @@ Choose the estimator lane before choosing software. Package lanes are reference 
 
 Key literature anchors: Neyman randomization, Fisher randomization tests, Rubin/Holland potential outcomes, CONSORT flow/reporting, ICH E9(R1) estimands, Lin covariate adjustment, CUPED for online experiments, trustworthy online controlled experiments, and LATE/CACE for encouragement/noncompliance.
 
-## Support And Rerouting Connections
+## Rerouting Cues
 
-- Use `statistical-validity` only when unresolved inference, multiplicity,
-  missingness/censoring, fold-integrity, or reproducibility concerns exceed the
-  randomized design diagnostics above.
-- Use `heterogeneous-effects` for prespecified subgroup effects, exploratory CATE, site/time variation, equity/safety strata, or modifier-specific experiment results.
-- Use `dose-response` when assignment changes dose, intensity, duration, encouragement strength, or exposure level rather than simple treatment/control status.
-- Use `non-continuous-outcomes` for binary, ordinal, count, survival, recurrent-event, competing-risk, or censoring-sensitive outcomes.
-- Use `policy-making-and-transportability` when experiment results are being used for targeting, rollout, deployment, external validity, policy value, or decision rules.
-- Use `mediation` only when mediator timing and post-assignment pathway assumptions are explicit.
 - Return to `causal_check` for `interference_spillovers` when spillovers become
   the primary identification problem; it is another design, not a support.
 
+`causal_check` owns support-route selection. If a different support becomes
+central to the bound work, flag it in chamber feedback rather than loading the
+catalog or switching routes.
+
+
 ## Execution Record
 
-Follow the shared completion-summary and artifact rules in
-`references/design_execution_contract.md`. Emphasize the assignment mechanism,
+In the artifact `summary`, emphasize the assignment mechanism,
 assignment-based estimand, integrity and inference diagnostics, compliance when
 relevant, and the resulting claim boundary.

@@ -71,7 +71,64 @@ function compareOrWriteText(text, trackedPath) {
   }
 }
 
+function loadPartials() {
+  const directory = path.join(__dirname, "reference-partials");
+  const partials = new Map();
+  if (!fs.existsSync(directory)) return partials;
+  for (const file of fs.readdirSync(directory).sort()) {
+    if (!file.endsWith(".md")) continue;
+    const name = file.slice(0, -3);
+    if (!/^[a-z0-9-]+$/.test(name)) throw new Error(`invalid partial name: ${file}`);
+    partials.set(
+      name,
+      fs.readFileSync(path.join(directory, file), "utf8").replace(/\r\n/g, "\n").trim(),
+    );
+  }
+  return partials;
+}
+
+function markdownTargets() {
+  const targets = [path.join(ROOT, "SKILL.md")];
+  const walk = (directory) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile() && entry.name.endsWith(".md")) targets.push(full);
+    }
+  };
+  walk(path.join(ROOT, "references"));
+  return targets;
+}
+
+function renderPartials() {
+  const partials = loadPartials();
+  const markerPattern = /<!-- partial:([a-z0-9-]+) -->\n([\s\S]*?)<!-- \/partial:\1 -->/g;
+  for (const target of markdownTargets()) {
+    const original = fs.readFileSync(target, "utf8").replace(/\r\n/g, "\n");
+    const opens = (original.match(/<!-- partial:/g) || []).length;
+    const closes = (original.match(/<!-- \/partial:/g) || []).length;
+    let matches = 0;
+    const rendered = original.replace(markerPattern, (whole, name) => {
+      matches += 1;
+      if (!partials.has(name)) {
+        throw new Error(`unknown partial "${name}" in ${path.relative(ROOT, target)}`);
+      }
+      return `<!-- partial:${name} -->\n${partials.get(name)}\n<!-- /partial:${name} -->`;
+    });
+    if (opens !== matches || closes !== matches) {
+      throw new Error(`malformed partial markers in ${path.relative(ROOT, target)}`);
+    }
+    if (rendered !== original) {
+      if (CHECK) {
+        throw new Error(`reference partial is stale: ${path.relative(ROOT, target)}`);
+      }
+      fs.writeFileSync(target, rendered, "utf8");
+    }
+  }
+}
+
 function main() {
+  renderPartials();
   const catalog = routeCatalogText();
   const catalogPath = path.join(SOURCE_DIR, "route-catalog.json");
   compareOrWriteText(catalog, catalogPath);
@@ -85,12 +142,14 @@ function main() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "causal-statectl-build-"));
   try {
     const controller = path.join(tempDir, "statectl.cjs");
-    const hook = path.join(tempDir, "project_state_stop_check.js");
+    const codexHook = path.join(tempDir, "project_state_stop_check.cjs");
+    const claudeHook = path.join(tempDir, "claude_project_state_stop_check.cjs");
     build(path.join(SOURCE_DIR, "cli.cjs"), controller, licenseBanner);
-    build(path.join(SOURCE_DIR, "hook.cjs"), hook, licenseBanner);
+    build(path.join(SOURCE_DIR, "codex-hook.cjs"), codexHook, licenseBanner);
+    build(path.join(SOURCE_DIR, "hook.cjs"), claudeHook, licenseBanner);
     compareOrWrite(controller, path.join(__dirname, "statectl.cjs"));
-    compareOrWrite(hook, path.join(ROOT, "project-hooks", ".codex", "project_state_stop_check.js"));
-    compareOrWrite(hook, path.join(ROOT, "project-hooks", ".claude", "project_state_stop_check.js"));
+    compareOrWrite(codexHook, path.join(ROOT, "project-hooks", "codex", "project_state_stop_check.cjs"));
+    compareOrWrite(claudeHook, path.join(ROOT, "project-hooks", "claude", "project_state_stop_check.cjs"));
 
     compareOrWriteText(yamlLicense, path.join(__dirname, "vendor-licenses", "yaml-ISC.txt"));
   } finally {

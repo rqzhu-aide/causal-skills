@@ -3,7 +3,7 @@ purpose: "Canonical route/path registry for controller build and package validat
 rules:
   - "The controller returns the references required for the committed stage; the runtime router does not need to load this registry."
   - "Only causal_check loads method_route_catalog.yaml when method recommendation is needed."
-  - "Every callable route and conditional reference must have a path in this index."
+  - "Every callable route and every controller-returned or conditionally loaded reference or asset must have a path in this index."
 
 core_routes:
   - id: team_lead
@@ -24,6 +24,9 @@ method_routes_catalog:
   loaded_by: causal_check
 
 shared_references:
+  - id: route_selection_workflow
+    path: references/route_selection_workflow.md
+    loaded_by: controller_for_router_phase
   - id: report_routing_workflow
     path: references/report_routing_workflow.md
     loaded_by: router_when_report_needed
@@ -42,6 +45,23 @@ shared_references:
   - id: design_execution_contract
     path: references/design_execution_contract.md
     loaded_by: design_references
+  - id: legacy_evidence
+    path: references/legacy_evidence.md
+    loaded_by: controller_when_active_completion_protocol_1_or_team_lead_when_reviewing_historical_manifest
+  - id: context_transport
+    path: references/context_transport.md
+    loaded_by: host_when_isolated_invocations_or_context_file
+
+conditional_assets:
+  - id: report_template_analysis
+    path: assets/report_template_analysis.md
+    loaded_by: controller_when_output_bound_report_scope_binds_analysis_artifact_ids
+  - id: report_template_planning
+    path: assets/report_template_planning.md
+    loaded_by: controller_when_output_bound_report_analysis_artifact_ids_are_empty
+  - id: report_html_layout_template
+    path: assets/report_html_layout_template.html
+    loaded_by: controller_when_output_bound_report
 
 method_routes:
   - id: randomized_assignment

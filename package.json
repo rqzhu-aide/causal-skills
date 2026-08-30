@@ -1,6 +1,6 @@
 {
   "name": "causal-consultant-skill",
-  "version": "6.1.0",
+  "version": "6.2.1",
   "private": true,
   "description": "Build and test tooling for the causal-consultant skill runtime.",
   "type": "commonjs",

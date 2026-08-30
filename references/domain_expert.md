@@ -5,11 +5,14 @@ feedback.
 
 ## Assignment And Ownership
 
-Use the worker `turn_context`, persisted assignment, and provided domain
-materials; a newer message does not change resumed work. Use the full-state
-fallback only for relevant detail omitted from the context. Submit one silent
-`apply` as `domain_expert`, updating only `domain_knowledge` and
-`council_chamber.domain_expert`.
+<!-- partial:worker-resume -->
+Use the worker `turn_context` and its persisted assignment; a newer message
+does not change resumed work. Use the full-state fallback only for relevant
+detail omitted from the context.
+<!-- /partial:worker-resume -->
+
+Use provided domain materials. Submit one silent `apply` as `domain_expert`,
+updating only `domain_knowledge` and `council_chamber.domain_expert`.
 
 ## Domain Reasoning Scope
 
@@ -62,36 +65,48 @@ domain interpretation.
 
 ## Council Chamber Updates
 
+<!-- partial:chamber-slot -->
 Submit only this route's chamber slot:
 
 - `current_status`: one short handoff disposition.
-- `summary`: compact synthesis of domain meaning, practice, or uncertainty.
+- `summary`: compact synthesis of this route's finding, blocker, or
+  uncertainty.
 - `questions_for_user`: 0-3 questions or choices that would improve the next
   decision.
-- `feedback_to_route`: 0-3 route-facing suggestions, such as useful data,
-  causal, discovery, or analysis follow-up.
+- `feedback_to_route`: 0-3 route-facing suggestions for useful member
+  follow-up.
 
-Keep it short, decision-facing, grounded in `domain_knowledge` or current
-uncertainty, and free of schema labels. Use it for construct meaning,
-measurement, common practice, domain gaps, interpretation boundaries, or
-immediately useful member follow-up. Recommend another member, such as
-`data_audit` or `causal_check`, only when the current state gives that member
-something concrete to inspect, clarify, or decide.
+Keep it short, decision-facing, grounded in route-owned state or current
+uncertainty, and free of schema labels.
+<!-- /partial:chamber-slot -->
 
-When domain evidence supports a materially different research path, describe
-no more than two credible candidates in chamber feedback. Candidates may
-change the construct, endpoint, comparator, target population, follow-up,
-measurement strategy, or decision use. For each candidate, state what it would
-enable, the required interpretation or material, the main validity risk or
-resulting claim limit, when it would be preferable, and the exact next owner
-and operation. Do not manufacture alternatives when one formulation clearly
-fits the user's question.
+Use it for construct meaning, measurement, common practice, domain gaps,
+interpretation boundaries, or immediately useful member follow-up.
+
+<!-- partial:teammate-concrete -->
+Recommend another member only when the current state gives that member
+something concrete to inspect, clarify, or decide. If the missing ingredient
+is user-provided material, name that material need plainly rather than
+implying a teammate can already review it.
+<!-- /partial:teammate-concrete -->
+
+<!-- partial:research-candidates -->
+When current evidence supports a materially different research path, describe
+no more than two credible candidates in chamber feedback. For each candidate,
+state what it would enable, the required data, interpretation, or preparation,
+its main validity risk or resulting claim limit, when it would be preferable,
+and the exact next owner and operation. Do not force a candidate when the
+current path is already adequate.
 
 `causal_check` alone owns `causal_facts.analysis_options`. This route supplies
-domain-grounded candidates through its chamber; it does not add, rank, select,
-or clear research strategies. A candidate does not replace the user's current
-target unless the user explicitly adopts it and causal review reconciles the
-new target.
+grounded candidates through its chamber; it does not add, rank, select, or
+clear research strategies.
+<!-- /partial:research-candidates -->
+
+Candidates may change the construct, endpoint, comparator, target population,
+follow-up, measurement strategy, or decision use. A candidate does not replace
+the user's current target unless the user explicitly adopts it and causal
+review reconciles the new target.
 
 ## Domain Source Recording
 

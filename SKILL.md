@@ -5,11 +5,11 @@ description: Explicit-use interactive causal consulting team. Use only when the 
 
 # Causal Consultant Router
 
-This file is only the turn router. Scientific work belongs to the selected route;
-manager synthesis and the only user-facing response belong to
+This file is only the turn router. Scientific work belongs to the selected
+route; manager synthesis and the only user-facing response belong to
 `references/team_lead.md`. Resolve this skill's directory and use
 `<skill-root>/scripts/statectl.cjs` for every state operation; never edit
-`project_state.yaml` directly.
+`project_state.yaml` directly. Runtime use requires Node.js 18 or newer.
 
 Only `analysis_execution` may prepare or revise an analysis scope. A target
 result is any new quantity, comparison, model-fit result, or test intended as
@@ -23,39 +23,22 @@ work, and summarize completed artifacts.
 ## Phase Context
 
 For `open`, `begin`, `reserve-artifact`, and `apply`, prefer context protocol
-`phase-capsule-v1`. Each full `phase_capsule` contains the phase-specific
+`phase-capsule-v1` (`--context-protocol phase-capsule-v1`) and consume the
+returned capsule inline. Each full `phase_capsule` contains the phase-specific
 `turn_context`, `operation_packet`, `required_references`, and
-`completion_command`.
-References to `turn_context` elsewhere in this skill mean its capsule field; the
-legacy standalone field has the same meaning in compatibility mode.
+`completion_command`. References to `turn_context` elsewhere in this skill mean
+its capsule field; the legacy standalone field has the same meaning in
+compatibility mode, and workflow, gates, and ownership do not change with the
+transport.
 
-When the host supports isolated model invocations, run router, worker, and team
-lead as fresh phases, each still governed by this `SKILL.md`. Give each phase
-its full capsule, returned references, and the user message for the current
-assistant turn. Do not preload prior transcript, model reasoning, or tool
-output. Within the assistant turn that begins an operation, its user message may
-add worker and lead nuance; persisted intent, packet, and frozen scope still
-control the assignment. On a later resumed turn, the newer message is not
-execution nuance; handle it only under Turn Protocol step 5.
-
-Each isolated invocation normally executes only its named phase and
-`completion_command`, then returns the compact `context_ref` to the
-orchestrator, or the controller-rendered response after `finish`. A worker may
-call `reserve-artifact` and reload its refreshed capsule when output was not
-already reserved at `begin`. Explicit
-cancellation overrides the named phase and `completion_command`: do not run or
-resume worker work; load `references/team_lead.md` and follow the current-stage
-cancellation rule.
-No isolated phase reroutes or launches another phase.
-
-If isolated invocations are unavailable, use the same full capsules in one
-continuous session through inline `phase-capsule-v1`; do not create a context
-file merely to read it back in that session. If the protocol is unavailable,
-use the standalone `turn_context`; workflow, gates, and ownership do not
-change. `open` is the recovery and resume boundary. A fresh receiving
-invocation resolves `context_ref.path` under the project root and requires
-matching protocol and a `context_id` derived from the capsule content;
-otherwise regenerate it with `open --context-file` for that fresh handoff.
+When the host hands phases to fresh isolated model invocations, or any call
+uses `--context-file`, load `references/context_transport.md` and follow it.
+In short: file mode writes the capsule to `.statectl-tmp/phase-context.json`
+and returns a compact `context_ref` for the next fresh invocation; never
+create a context file merely to read it back in a continuous session; a
+successful result with `delivery_warnings` has already committed, so use its
+returned capsule and never repeat the mutation. `open` is the recovery and
+resume boundary.
 
 Read `<project-root>/project_state.yaml` only when relevant detail or an exact
 finish-recovery receipt is genuinely omitted; this is a read-only fallback,
@@ -76,10 +59,14 @@ state store.
 
 ## Turn Protocol
 
-1. Resolve the project root once and keep it for the turn: use an explicit root
-   first, then `CLAUDE_PROJECT_DIR` or `CODEX_PROJECT_DIR`; otherwise use the
+1. Resolve the project root once and keep it for the turn. Use an explicit root
+   first. In Claude Code, then use `CLAUDE_PROJECT_DIR`; otherwise use the
    nearest ancestor of the current working directory that contains
    `project_state.yaml`, falling back to the current directory for a new state.
+   In Codex, prefer that nearest state-bearing ancestor. If none exists, use
+   `CODEX_PROJECT_DIR` only when it contains the current working directory;
+   otherwise use the current directory. This keeps a stale main checkout from
+   overriding an active worktree.
 2. Check only the current user message for an explicit fresh-state request such
    as "start fresh", "reset this project", or "save old state and create new".
    Run `statectl open --fresh` only for that request. Vague confirmation such as
@@ -89,14 +76,11 @@ state store.
    session after the immediately preceding successful `finish` for the same
    project root: an unambiguous selection or direct continuation of that exact
    response may call `begin` with the returned pending selection or
-   `direct_assignment`, project ID, and revision, without
-   rereading state or unchanged references. Use `--context-file` only when the
-   successful `begin` result will be handed to a genuinely fresh model
-   invocation; otherwise request and use the inline `phase-capsule-v1` result
-   in the continuous session. Do not use this path for reset, cancellation, a
-   new topic, ambiguous wording, uncertain session continuity, or any missing
-   prior result. A rejected fast-path `begin` changes nothing; run `open` once
-   and follow its committed stage.
+   `direct_assignment`, project ID, and revision, without rereading state or
+   unchanged references. Do not use this path for reset, cancellation, a new
+   topic, ambiguous wording, uncertain session continuity, or any missing prior
+   result. A rejected fast-path `begin` changes nothing; run `open` once and
+   follow its committed stage.
 4. On successful `open`, follow the active `turn_context.stage` before
    considering the new request:
    - explicit cancellation of the persisted operation: load team lead and use
@@ -122,87 +106,81 @@ state store.
    replies also use a team-lead operation rather than answering directly.
 7. At `worker_pending`, load the returned worker references. The worker performs
    only its persisted assignment, submits one owner-scoped update through
-   `statectl apply`, and remains silent. An analysis worker uses its selected
-   design reference, the shared design contract, and only its selected support
-   reference. If relevant route work requires detail omitted from
-   `turn_context`, use the full-state fallback before deciding or acting.
-8. When the worker will create durable output, load
-   `references/artifact_output_policy.md`. Use the reservation returned by
-   `begin` when present; otherwise reserve before writing. Aim to satisfy the
-   frozen contract in one reproducible execution pass, then make only targeted
-   corrections that validation shows are necessary. Reuse unchanged verified
-   inputs, evidence, references, and the current operation packet when the
-   controller reports its contract unchanged, but revalidate anything affected
-   by changed data, code, settings, assumptions, or scope. Validate the returned
-   temporary output and submit the required artifact receipt through `apply`.
+   `statectl apply`, and remains silent. If relevant route work requires detail
+   omitted from `turn_context`, use the full-state fallback before deciding or
+   acting.
+8. When the worker will create durable output, follow
+   `references/artifact_output_policy.md` (returned when output is already
+   authorized; otherwise load it before reserving). Use the reservation
+   returned by `begin` when present; otherwise reserve before writing. Validate
+   the returned temporary output and submit the required artifact receipt
+   through `apply`.
 9. At `lead_pending`, load the returned lead references. Team lead uses the
    committed lead phase context, submits its semantic summary and presentation
    through `statectl finish`, and emits only the controller-rendered response.
-   Do not reread the full YAML unless the current answer needs relevant detail
-   omitted from the lead context.
 10. Each assistant turn handles at most one operation. Once `begin` succeeds,
     that operation consumes the turn. After `finish` succeeds, emit the rendered
     response and stop; do not open or begin again until a new user message. The
     sole no-operation exception is a read-only preflight-failure response.
 
 For an ordinary `reserve-artifact`, `apply`, or `finish` rejection, correct and
-retry the same stage, or cancel only after explicit authorization. On project,
+retry the same stage, or cancel only after explicit authorization; retry only
+while project, revision, operation, and stage still match. On project,
 revision, operation, stage, context, or unusable-input errors, run `open` once
-and follow committed state.
-Retry only while project, revision, operation, and stage still match. If an
-uncertain `finish` is followed by an idle `open` at the next revision with a
-matching response receipt, use the read-only fallback to verify its operation
-and revision, emit that `response_markdown` exactly, and stop. Never replay an
-older receipt on a later turn.
-
-A rejected ordinary `begin` may be corrected or rerouted only before any
-`begin` succeeds. It never authorizes bypassing controller validation.
+and follow committed state. A rejected ordinary `begin` may be corrected or
+rerouted only before any `begin` succeeds; it never authorizes bypassing
+controller validation. If an uncertain `finish` is followed by an idle `open`
+at the next revision with a matching response receipt, use the read-only
+fallback to verify its operation and revision, emit that `response_markdown`
+exactly, and stop. Never replay an older receipt on a later turn.
 
 ## Controller Calls
-
-Pass mutation JSON by file or stdin, never as shell-escaped YAML:
 
 ```text
 node <skill-root>/scripts/statectl.cjs <command> --project-root <root> --input <json-file|->
 ```
 
-Use `--context-file` for `open`, `begin`, `reserve-artifact`, or `apply` only
-when the result will be handed to a genuinely fresh model invocation. The
-controller writes the full capsule to `.statectl-tmp/phase-context.json` and
-returns only its compact `context_ref`; give that reference to the next
-invocation. The file is consumable only when the same command returned its
-matching reference. When router, worker, and lead remain in one continuous
-session, use `--context-protocol phase-capsule-v1` and consume the returned full
-capsule inline.
+Pass mutation JSON by file or stdin, never as shell-escaped YAML. Every
+mutation payload carries the expected identity from the current result. The
+envelopes, in compact form:
 
-If context-file preflight fails, retry that unchanged call with
-`--context-protocol phase-capsule-v1`. If a successful `open`, `begin`,
-`reserve-artifact`, or `apply` instead has `delivery_warnings`, the command
-has already succeeded and any mutation is committed: ignore the stale file, use
-its returned full capsule, and never repeat the mutation. Use the inline
-protocol whenever file delivery or fresh invocations are unavailable. A
-successful `finish` with a context-file cleanup warning remains closed; emit
-its `response_markdown`.
+```json
+{"expected_project_id": "<uuid>", "expected_revision": 7,
+ "route": "data_audit", "intent_summary": "Audit outcome timing in trial.csv."}
+```
 
-Use the expected project ID and revision from the current result. `begin` uses
-an exact pending `selection` or normal `route`, compact `intent_summary`,
-optional `support`, and any required scope reference. When an artifact-capable
-assignment already authorizes output and its kind, slug, and, for a file,
-extension are known, include `artifact_reservation` in `begin` and reserve
-atomically. This is the default for exact approved analysis and report
-execution. Omit it when output is not authorized or those fields are not yet
-known, then let the worker call `reserve-artifact` if output becomes required.
-A new or revised discovery run must use that later call so its contract is
-frozen with the reservation. Later calls use these compact envelopes:
+`begin` uses either that flat assignment with `route`, compact
+`intent_summary`, optional `support`, and the exact ready `scope_ref` for
+approved execution, or an exact pending
+`selection: {decision_id, option_number}`. When an
+artifact-capable assignment already authorizes output and its kind, slug, and,
+for a file, extension are known, include
+`artifact_reservation: {kind, slug, extension?}` and reserve atomically; this
+is the default for exact approved analysis and report execution. Omit it when
+output is not authorized or those fields are not yet known, and let the worker
+call `reserve-artifact` (active `operation_id`, `kind`, `slug`, file
+`extension`, or route-required `discovery_scope`). A new or revised discovery
+run must use that worker-stage call so its contract is frozen with the
+reservation.
 
-- `reserve-artifact`: active `operation_id`, `kind`, `slug`, and file
-  `extension` or route-required `discovery_scope` when applicable;
-- `apply`: active `operation_id`, exact `actor`, owner-scoped `updates`, and any
-  route-required `scope_transition`, `discovery_scope`, or `artifact`;
-- `finish`: active `operation_id`, team lead `presentation`, and optional
-  `updates: {project_summary: ...}`.
+```json
+{"expected_project_id": "<uuid>", "expected_revision": 8,
+ "operation_id": "<uuid>", "actor": "data_audit",
+ "updates": {"data_facts": {}, "council_chamber": {"data_audit": {}}}}
+```
 
-Use `finish --cancel` only after explicit cancellation.
+`apply` is owner-scoped: the exact `actor`, only route-owned `updates`, and any
+route-required `scope_transition`, `discovery_scope`, or `artifact`.
+
+```json
+{"expected_project_id": "<uuid>", "expected_revision": 9,
+ "operation_id": "<uuid>", "presentation": {},
+ "updates": {"project_summary": {}}}
+```
+
+`finish` uses the team lead `presentation` and optional
+`updates: {project_summary: ...}`. Use `finish --cancel` only after explicit
+cancellation.
 
 Patch maps merge recursively, supplied arrays replace complete arrays, `null`
 is explicit, and omitted fields stay unchanged. When evidence supersedes

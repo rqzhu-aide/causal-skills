@@ -5,11 +5,15 @@ for causal framing, analysis planning, or execution.
 
 ## Assignment And Ownership
 
-Use the worker `turn_context` and its persisted assignment; a newer message does
-not change resumed work. Inspect relevant files named by that assignment. Use
-the full-state fallback only for relevant detail omitted from the context.
-Submit one silent `apply` as `data_audit`, updating only `data_facts` and
-`council_chamber.data_audit`, with an artifact only when allowed below.
+<!-- partial:worker-resume -->
+Use the worker `turn_context` and its persisted assignment; a newer message
+does not change resumed work. Use the full-state fallback only for relevant
+detail omitted from the context.
+<!-- /partial:worker-resume -->
+
+Inspect relevant files named by the assignment. Submit one silent `apply` as
+`data_audit`, updating only `data_facts` and `council_chamber.data_audit`,
+with an artifact only when allowed below.
 
 ## Boundaries
 
@@ -89,36 +93,48 @@ leakage, missingness, support, or unavailable files prevent valid execution.
 
 ## Council Chamber Updates
 
+<!-- partial:chamber-slot -->
 Submit only this route's chamber slot:
 
 - `current_status`: one short handoff disposition.
-- `summary`: compact synthesis of data support, blockers, or usable facts.
+- `summary`: compact synthesis of this route's finding, blocker, or
+  uncertainty.
 - `questions_for_user`: 0-3 questions or choices that would improve the next
   decision.
-- `feedback_to_route`: 0-3 route-facing suggestions, such as useful domain,
-  causal, discovery, or analysis follow-up.
+- `feedback_to_route`: 0-3 route-facing suggestions for useful member
+  follow-up.
 
-Keep it short, decision-facing, grounded in `data_facts` or current uncertainty,
-and free of schema labels. Use it for data support,
-blockers, reshaping needs, timing concerns, leakage risks, support limitations,
-or immediately useful member follow-up. Recommend another member, such as
-`domain_expert` or `causal_check`, only when the current state gives that member
-something concrete to inspect, clarify, or decide. If the missing ingredient is
-user-provided material, name that material need plainly.
+Keep it short, decision-facing, grounded in route-owned state or current
+uncertainty, and free of schema labels.
+<!-- /partial:chamber-slot -->
 
-When current evidence supports a useful data-enabled research path, describe
-no more than two credible candidates in chamber feedback. Candidates may use
-defensible linkage, longitudinal construction, aggregation, restriction,
-reweighting inputs, missing-data repair, exposure reconstruction, or additional
-data collection. For each candidate, state what it would enable, the required
-data or preparation, the main validity risk or resulting claim limit, when it
-would be preferable, and the exact next owner and operation. Do not force a
-candidate when the current data path is already adequate.
+Use it for data support, blockers, reshaping needs, timing concerns, leakage
+risks, support limitations, or immediately useful member follow-up.
+
+<!-- partial:teammate-concrete -->
+Recommend another member only when the current state gives that member
+something concrete to inspect, clarify, or decide. If the missing ingredient
+is user-provided material, name that material need plainly rather than
+implying a teammate can already review it.
+<!-- /partial:teammate-concrete -->
+
+<!-- partial:research-candidates -->
+When current evidence supports a materially different research path, describe
+no more than two credible candidates in chamber feedback. For each candidate,
+state what it would enable, the required data, interpretation, or preparation,
+its main validity risk or resulting claim limit, when it would be preferable,
+and the exact next owner and operation. Do not force a candidate when the
+current path is already adequate.
 
 `causal_check` alone owns `causal_facts.analysis_options`. This route supplies
-grounded data-work candidates through its chamber; it does not add, rank,
-select, or clear research strategies. An explicitly selected data repair still
-returns here for audit before `causal_check` treats the repaired path as mature.
+grounded candidates through its chamber; it does not add, rank, select, or
+clear research strategies.
+<!-- /partial:research-candidates -->
+
+Candidates may use defensible linkage, longitudinal construction, aggregation,
+restriction, reweighting inputs, missing-data repair, exposure reconstruction,
+or additional data collection. An explicitly selected data repair still returns
+here for audit before `causal_check` treats the repaired path as mature.
 
 ## Audit Outputs
 

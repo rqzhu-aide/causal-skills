@@ -79,16 +79,6 @@ Select the diagnostics that answer the active design question; do not run every 
 - Inference stability: influence-curve or orthogonal-score tails, outlier influence, standard-error decomposition, cluster/robust/bootstrap variance route, repeated cross-fitting variation, and multiplicity handling.
 - Reproducibility: estimand label, diagnostic choices, package versions, seeds, folds, preprocessing recipe, code path, artifact folder, and reason any expected diagnostic was skipped.
 
-## Other Considerations
-
-- Use this support only when unresolved validity concerns exceed the selected
-  design's required diagnostics, and keep its checks tied to that design.
-- Consider `heterogeneous-effects` if statistical validity issues are subgroup-specific or if DR scores, causal forests, R-/DR-learners, or orthogonal forests are used for CATE/GATE.
-- Consider `dose-response` if sparse exposure tails, unstable thresholds, continuous-treatment DML, shift estimators, or dose-support problems drive the concern.
-- Consider `non-continuous-outcomes` if rare events, censoring, competing risks, count overdispersion, category sparsity, or outcome-scale sensitivity drive the concern.
-- Consider `mediation` if concerns involve post-treatment adjustment, mediator timing, pathway confounding, or flexible mediation nuisance models.
-- Consider `policy-making-and-transportability` if validity changes deployment readiness, policy value, source-target overlap, rule feasibility, or transported-effect claims.
-
 ## Boundary Language
 
 Use "statistical validity checks support the planned design" or "DR/DML estimate under the selected design assumptions." Avoid "diagnostics prove causality," "ML adjusted away confounding," "black-box causal proof," or "valid inference" unless the score, splitting, uncertainty route, and design assumptions justify it.

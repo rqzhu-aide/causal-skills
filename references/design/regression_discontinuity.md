@@ -2,13 +2,10 @@
 
 Use this file to plan or review a regression discontinuity analysis: sharp or fuzzy RD, regression kink, geographic/border RD, score/rank/date cutoffs, eligibility thresholds, running variables, bandwidth choice, robust bias correction, local randomization, manipulation checks, donut RD, placebo cutoffs, multiple cutoffs, or RD report support.
 
-This design route is the accountable owner for whether analysis execution remains consistent with the cutoff design. Support routes may add analytic tools, but they must stay inside this design scope.
-
 Work in this order: verify the cutoff rule, define the running variable, check the treatment jump, establish local support, choose the RD lane, specify manipulation/continuity diagnostics, choose estimator settings, then set the local claim boundary. Do not treat an analyst-created split as RD.
 
-Runtime contract: follow `references/design_execution_contract.md` using design
-id `regression_discontinuity`. Keep any named support route inside this RD
-design scope.
+Runtime contract: `references/design_execution_contract.md`, design id
+`regression_discontinuity`.
 
 ## Use When
 
@@ -81,8 +78,6 @@ Never rescue these failures with covariates, flexible models, or polished plots.
 
 ## Packages
 
-Choose the estimator lane before choosing software. Package lanes are reference cues, not execution permission. Verify current docs before running code.
-
 - Standard RD: R/Stata/Python `rdrobust`, `rdbwselect`, `rdplot` for sharp, fuzzy, kink, bandwidth selection, and robust bias-corrected inference.
 - Manipulation/density: R/Stata `rddensity`; use as one diagnostic, not proof of validity.
 - Local randomization: R/Stata `rdlocrand` for window selection and randomization inference.
@@ -93,23 +88,21 @@ Choose the estimator lane before choosing software. Package lanes are reference 
 
 Key literature anchors: continuity-based RD, local polynomial RD, robust bias correction, McCrary/density testing, local randomization, fuzzy RD as local IV, regression kink, geographic RD, and local external validity.
 
-## Support And Rerouting Connections
+## Rerouting Cues
 
-- Use `statistical-validity` only when unresolved bandwidth, local-support,
-  discrete-score, inference, or reproducibility concerns exceed the RD
-  diagnostics above.
 - Keep fuzzy local-IV assumptions inside this RD scope. Return to `causal_check`
   for `instrumental_variables` only when the instrument rather than the cutoff
   becomes the primary identification frame.
-- Use `heterogeneous-effects` when the user wants local subgroup or cutoff-specific variation.
-- Use `non-continuous-outcomes` for binary risk, survival, count, recurrent-event, or competing-risk outcomes near the cutoff.
-- Use `policy-making-and-transportability` when the local cutoff result is being generalized, deployed, or used for a decision outside the threshold region.
 - Return to `causal_check` for `interference_spillovers` when spillovers become
   the primary estimand; otherwise retain them as RD contamination diagnostics.
 
+`causal_check` owns support-route selection. If a different support becomes
+central to the bound work, flag it in chamber feedback rather than loading the
+catalog or switching routes.
+
+
 ## Execution Record
 
-Follow the shared completion-summary and artifact rules in
-`references/design_execution_contract.md`. Emphasize the cutoff and running
+In the artifact `summary`, emphasize the cutoff and running
 variable, treatment jump, local estimand, manipulation/support and bandwidth
 diagnostics, and the local claim boundary.

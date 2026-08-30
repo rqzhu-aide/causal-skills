@@ -2,13 +2,10 @@
 
 Use this file to plan or review an instrumental-variables analysis: encouragement, lottery, assignment-as-instrument, noncompliance, fuzzy RD, judge/provider/distance/preference instruments, LATE/CACE, Wald ratios, 2SLS, LIML, control functions, weak instruments, overidentification, IV-DML, Mendelian randomization, or IV report support.
 
-This design route is the accountable owner for whether analysis execution remains consistent with the IV design. Support routes may add analytic tools, but they must stay inside this design scope.
-
 Work in this order: define the instrument source, treatment/exposure moved by the instrument, timing, relevance, independence, exclusion, monotonicity/complier logic, measurement level, inference route, then claim boundary. Do not let first-stage strength or software hide a weak exclusion story.
 
-Runtime contract: follow `references/design_execution_contract.md` using design
-id `instrumental_variables`. Keep any named support route inside this IV design
-scope.
+Runtime contract: `references/design_execution_contract.md`, design id
+`instrumental_variables`.
 
 ## Use When
 
@@ -83,8 +80,6 @@ Never rescue these failures by adding more controls, more instruments, or a more
 
 ## Packages
 
-Choose the estimator lane before choosing software. Package lanes are reference cues, not execution permission. Verify current docs before running code.
-
 - Transparent IV and encouragement: R `ivreg`, `AER::ivreg`, `estimatr::iv_robust`; Python `linearmodels`, `statsmodels` support; Stata `ivreg2`.
 - Fixed effects and clustered IV: R `fixest`; Python `linearmodels`; supplement weak-IV diagnostics.
 - Weak-IV inference: R `ivmodel`, `ivDiag`; Python `ivmodels`; Stata `ivreg2`, `weakiv`, `weakivtest`.
@@ -95,24 +90,21 @@ Choose the estimator lane before choosing software. Package lanes are reference 
 
 Key literature anchors: LATE/CACE, Wald estimands, 2SLS, weak instruments, monotonicity, exclusion restriction, encouragement designs, fuzzy RD, PLIV/IIVM, and Mendelian randomization assumptions including pleiotropy and population stratification.
 
-## Support And Rerouting Connections
+## Rerouting Cues
 
-- Use `statistical-validity` only when unresolved weak-IV inference, fold
-  integrity, sensitivity, MR robustness, or reproducibility concerns exceed the
-  IV diagnostics above.
 - When the candidate instrument is a cutoff, return to `causal_check` for
   `regression_discontinuity` unless the instrument rather than the cutoff is the
   primary identification frame.
-- Use `heterogeneous-effects` when IV evidence is about complier heterogeneity, local effect variation, or heterogeneous IV/DRIV.
-- Use `dose-response` when the instrument shifts exposure intensity, dose, duration, or continuous exposure.
-- Use `non-continuous-outcomes` for binary, survival, competing-risk, count, or recurrent-event outcomes where IV scale matters.
-- Use `policy-making-and-transportability` when local/complier evidence is being used for broader policy or target-population decisions.
 - Return to `causal_check` for `interference_spillovers` when peer or market
   exposure becomes the primary estimand; otherwise retain it as an IV threat.
 
+`causal_check` owns support-route selection. If a different support becomes
+central to the bound work, flag it in chamber feedback rather than loading the
+catalog or switching routes.
+
+
 ## Execution Record
 
-Follow the shared completion-summary and artifact rules in
-`references/design_execution_contract.md`. Emphasize the instrument source,
+In the artifact `summary`, emphasize the instrument source,
 treatment moved and IV estimand, first-stage and weak-IV diagnostics, exclusion
 and local-effect assumptions, and the resulting claim boundary.

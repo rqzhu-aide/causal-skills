@@ -2,13 +2,10 @@
 
 Use this file to plan or review a longitudinal causal analysis: repeated treatment or exposure histories, time-varying confounding, sustained strategies, dynamic regimes, cumulative exposure, marginal structural models, treatment/censoring weights, sequential g-formula, longitudinal TMLE, LMTP, or sequential causal-validity checks.
 
-This design route is the accountable owner for whether analysis execution remains consistent with the longitudinal study design. Support routes may add analytic tools, but they must stay inside this design scope.
-
 Work in this order: construct the time grid, order histories, define the strategy, verify time-varying confounding and censoring, audit support over histories, choose an estimator lane, specify required diagnostics, then set the claim boundary. Do not collapse a longitudinal problem into a baseline contrast unless the target truly permits it.
 
-Runtime contract: follow `references/design_execution_contract.md` using design
-id `longitudinal_gmethods`. Keep any named support route inside this
-longitudinal-design scope.
+Runtime contract: `references/design_execution_contract.md`, design id
+`longitudinal_gmethods`.
 
 ## Use When
 
@@ -80,8 +77,6 @@ Never rescue these failures with a generic mixed model or recurrent-outcome regr
 
 ## Packages
 
-Choose the estimator lane before choosing software. Package lanes are reference cues, not execution permission. Verify current docs before running code.
-
 - MSM/IPW: R `ipw`, `WeightIt`, `cobalt`, `survey`, `geepack`, `fixest`; Python custom `statsmodels`/sklearn weighting workflows.
 - Parametric g-formula: R `gfoRmula`; custom R/Python simulation and standardization workflows when model structure is transparent.
 - Longitudinal TMLE/sequential DR: R `ltmle`, `tmle3`, `sl3`, `SuperLearner`; use only when node ordering and nuisance roles are explicit.
@@ -92,20 +87,15 @@ Choose the estimator lane before choosing software. Package lanes are reference 
 
 Key literature anchors: Robins g-methods, marginal structural models, sequential exchangeability, positivity over histories, parametric g-formula, longitudinal TMLE, modified treatment policies, stochastic interventions, and dynamic treatment regimes.
 
-## Connections With Supports
+## Rerouting Cues
 
-- Use `statistical-validity` only when unresolved weight, history-positivity,
-  censoring, cross-fitting, or reproducibility concerns exceed the longitudinal
-  diagnostics above.
-- Use `dose-response` for cumulative dose, duration, intensity, shifting dose, exposure windows, or modified treatment policies.
-- Use `policy-making-and-transportability` for dynamic regimes, learned policies, sequential decisions, value functions, or deployment.
-- Use `non-continuous-outcomes` for survival, recurrent events, competing risks, censoring-sensitive outcomes, binary risk, or count outcomes.
-- Use `heterogeneous-effects` when strategy effects may differ by baseline history, risk, site, cohort, or time.
-- Use `mediation` only when mediator/confounder ordering is explicit and the pathway target can be written sequentially.
+`causal_check` owns support-route selection. If a different support becomes
+central to the bound work, flag it in chamber feedback rather than loading the
+catalog or switching routes.
+
 
 ## Execution Record
 
-Follow the shared completion-summary and artifact rules in
-`references/design_execution_contract.md`. Emphasize the time grid, treatment
+In the artifact `summary`, emphasize the time grid, treatment
 history and strategy, sequential estimand, positivity/censoring diagnostics,
 and the sequential-assumption boundary.

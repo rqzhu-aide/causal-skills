@@ -7,9 +7,8 @@ explicitly wants association-only results.
 
 Do not use this route to strengthen causal wording, choose adjustment sets for causal interpretation, or imply that observed associations estimate effects.
 
-Runtime contract: follow `references/design_execution_contract.md` using design
-id `descriptive_association`. Keep any named support route inside this
-descriptive/association scope.
+Runtime contract: `references/design_execution_contract.md`, design id
+`descriptive_association`.
 
 ## Use When
 
@@ -82,8 +81,7 @@ Use package choice after the data shape and approved lane are clear.
 
 ## Execution Record
 
-Follow the shared completion-summary and artifact rules in
-`references/design_execution_contract.md`. Emphasize variables, analysis lane,
+In the artifact `summary`, emphasize variables, analysis lane,
 multiplicity, key/null/unstable patterns, material limits, and the explicit
 non-causal boundary.
 

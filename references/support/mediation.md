@@ -43,16 +43,6 @@ Context only. Relevant when the causal target asks how an effect works, whether 
 - exposure-mediator interaction or multiple-mediator ordering note
 - pathway wording that separates mechanism clues from validated pathways
 
-## Other Considerations
-
-- Flag `statistical-validity` follow-up only when unresolved mediation
-  sensitivity or nuisance-model concerns exceed the selected design's normal
-  diagnostics; timing and mediator-outcome confounding remain design issues.
-- Consider `non-continuous-outcomes` if the mediator or outcome is binary, ordinal, count, survival, recurrent-event, or competing-risk.
-- Consider `dose-response` if the exposure or mediator has intensity, duration, cumulative exposure, or threshold structure.
-- Consider `heterogeneous-effects` if pathway evidence may differ by subgroup, site, cohort, baseline risk, or exposure level.
-- Consider `policy-making-and-transportability` if mechanism evidence is being used to justify an intervention component, implementation choice, or source-target extrapolation.
-
 ## Boundary Language
 
 Prefer "pathway evidence" or "consistent with mediation" when mediator intervention, timing, and mediator-outcome assumptions are weak. Avoid saying a mediator "explains" the effect without a defensible mediation estimand.

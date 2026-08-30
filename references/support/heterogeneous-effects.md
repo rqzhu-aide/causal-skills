@@ -41,17 +41,6 @@ Context only. Relevant when the causal target asks whether effects differ across
 - fold stability, honest-split, or grouped-CATE validation note
 - confirmatory versus exploratory wording
 
-## Other Considerations
-
-- Flag `statistical-validity` follow-up only when unresolved subgroup support,
-  multiplicity, fold stability, or model-sensitivity concerns exceed the selected
-  design's normal diagnostics.
-- Consider simple subgroup or GATE summaries before flexible CATE when the modifier set is small or prespecified.
-- Consider `policy-making-and-transportability` if heterogeneity is meant to guide targeting, treatment rules, equity decisions, deployment, or source-target movement.
-- Consider `non-continuous-outcomes` when subgroup conclusions depend on risk, odds, hazards, RMST, event counts, or ordinal/category shifts.
-- Consider `mediation` if the proposed modifier is post-treatment, pathway-like, or plausibly affected by the exposure.
-- Consider `dose-response` if the heterogeneous target also varies by treatment intensity, duration, or exposure level.
-
 ## Boundary Language
 
 Use "evidence of effect variation" or "exploratory heterogeneity pattern" unless subgroup definitions, support, validation, and multiplicity control justify stronger wording. Never describe CATE as an observed individual treatment effect.

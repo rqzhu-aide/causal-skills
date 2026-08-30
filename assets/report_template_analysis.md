@@ -1,8 +1,15 @@
 # Analysis Report Template
 
-Use when the current report scope has relevant, available analysis artifacts.
+Use when the current report scope has a nonempty, fully available
+`report_assembly.analysis_artifact_ids` binding.
 
-This report is for results, interpretation, and decision support based on analysis outputs created inside the causal-consultant workflow. Do not include results that are not supported by `artifact_records`, route-owned durable sections, or created output files.
+Use only the analysis artifacts named by that binding; unrelated historical
+analysis records are not report evidence.
+
+This report is for results, interpretation, and decision support. Empirical
+results and diagnostics must come only from the bound, available analysis
+artifacts. Route-owned state may add framing and claim boundaries, but not
+additional target results.
 
 Use this file as section scaffolding. `references/report_writer.md` owns what
 state to read, how to choose causal wording, how to use artifacts, and where the

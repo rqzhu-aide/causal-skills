@@ -75,28 +75,21 @@ approval is direct.
 
 ## Analysis Begin Eligibility
 
-Call `statectl begin` for `analysis_execution.<design_id>` only when:
+The controller gates `begin` for `analysis_execution.<design_id>`: data,
+domain, and causal review must each be `passing` or `limited`,
+`analysis_readiness` must be `ready` or `limited`, the design must match the
+current recommendation, and any non-null support must match the recommended
+support. A rejected begin's `failures` detail names each failing field; route
+only the owner of the missing or stale state -- `data_audit`, `domain_expert`,
+or `causal_check` -- and use `team_lead` only when the missing input must come
+from the user or no valid route can be selected. Do not prepare or execute
+analysis under that owner's operation.
 
-- `turn_context.state.core_status.data_audit.data_checked`,
-  `turn_context.state.core_status.domain_expert.domain_checked`, and
-  `turn_context.state.core_status.causal_check.facts.causal_checked` are each
-  `passing` or `limited`, and
-  `turn_context.state.core_status.causal_check.facts.analysis_readiness` is
-  `ready` or `limited`;
-- the current design recommendation matches `<design_id>`; and
-- any non-null selected support matches the current support recommendation.
-
-The controller enforces these structured requirements. The router uses
-`descriptive_association` only with `analysis_readiness: limited` and an explicit
-no-causal-claim boundary; the controller enforces the readiness value but does
-not interpret prose.
-
-If eligibility fails, route only the owner of the missing or stale state:
-`data_audit`, `domain_expert`, or `causal_check`. Use only `team_lead` when the
-missing input must come from the user or no valid route can be selected. Do not
-prepare or execute analysis under that operation.
+The router uses `descriptive_association` only with
+`analysis_readiness: limited` and an explicit no-causal-claim boundary.
 
 A non-null `scope_ref` supplied to `begin` records approval and remains
 authoritative during worker resume; `begin` verifies it against the current
-ready scope and its causal-basis binding. After `begin` succeeds, the design route follows
-`design_execution_contract.md` and does not repeat the entry gate.
+ready scope and its causal-basis binding. After `begin` succeeds, the design
+route follows `design_execution_contract.md` and does not repeat the entry
+gate.
