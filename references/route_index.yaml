@@ -39,6 +39,12 @@ shared_references:
   - id: team_lead_analysis_flow
     path: references/team_lead_analysis_flow.md
     loaded_by: team_lead_when_analysis_needed
+  - id: team_lead_questions
+    path: references/team_lead_questions.md
+    loaded_by: controller_when_open_carried_questions_or_handoff_questions_else_team_lead_on_synthesis
+  - id: team_lead_audience
+    path: references/team_lead_audience.md
+    loaded_by: controller_while_audience_level_unstated_else_team_lead_on_new_evidence
   - id: artifact_output_policy
     path: references/artifact_output_policy.md
     loaded_by: worker_when_creating_output

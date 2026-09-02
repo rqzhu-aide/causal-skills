@@ -116,8 +116,9 @@ state store.
    the returned temporary output and submit the required artifact receipt
    through `apply`.
 9. At `lead_pending`, load the returned lead references. Team lead uses the
-   committed lead phase context, submits its semantic summary and presentation
-   through `statectl finish`, and emits only the controller-rendered response.
+   committed lead phase context, acts on every `turn_context.directives` item,
+   submits its semantic summary and presentation through `statectl finish`, and
+   emits only the controller-rendered response.
 10. Each assistant turn handles at most one operation. Once `begin` succeeds,
     that operation consumes the turn. After `finish` succeeds, emit the rendered
     response and stop; do not open or begin again until a new user message. The
@@ -175,12 +176,17 @@ route-required `scope_transition`, `discovery_scope`, or `artifact`.
 ```json
 {"expected_project_id": "<uuid>", "expected_revision": 9,
  "operation_id": "<uuid>", "presentation": {},
- "updates": {"project_summary": {}}}
+ "updates": {"project_summary": {}},
+ "question_actions": []}
 ```
 
-`finish` uses the team lead `presentation` and optional
-`updates: {project_summary: ...}`. Use `finish --cancel` only after explicit
-cancellation.
+`finish` uses the team lead `presentation`, optional
+`updates: {project_summary: ...}`, and optional controller-owned
+`question_actions`. A record action supplies `action: "record"`,
+`question_id` (`null` for a new question), canonical `source_text`, and boolean
+`surface`; later surface and retire actions use the controller-generated
+`question_id`, and retirement supplies `resolution: {kind, note}`. Use
+`finish --cancel` only after explicit cancellation and omit question actions.
 
 Patch maps merge recursively, supplied arrays replace complete arrays, `null`
 is explicit, and omitted fields stay unchanged. When evidence supersedes

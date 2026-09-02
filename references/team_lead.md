@@ -27,10 +27,16 @@ genuinely needs relevant detail omitted from the lead context.
   question about analysis scope, approval, execution, or output.
 - Load `team_lead_report_flow.md` for a report operation or a lead-only question
   about report approval, output, or assembly.
+- Load `team_lead_questions.md` when the ledger has open carried questions, the
+  handoff raised `questions_for_user`, or synthesis identifies a material fact
+  only the user can supply.
+- Load `team_lead_audience.md` while `audience_profile.level` is `unstated` or
+  when the user shows clearly different fluency than the recorded level.
 
 The controller's `required_references` identifies what must be available for
-the current lead phase. Within one invocation, reuse an unchanged reference
-already loaded.
+the current lead phase, and `turn_context.directives` lists the ledger and
+audience actions this turn needs; act on every directive. Within one
+invocation, reuse an unchanged reference already loaded.
 
 ## Evidence Review
 
@@ -46,8 +52,10 @@ eligibility; analysis/report status is scope lifecycle; discovery status is
 discovery lifecycle. Core readiness and recommended checks remain the latest
 core review, not later execution progress.
 
-Use the current operation's handoff first. Questions from another chamber
-matter only when they remain material to the same user decision. A missing
+Use the current operation's handoff first. A question from another chamber
+matters when it remains material to the same user decision; while it is
+material and unanswered, consider it for the carried-question ledger rather
+than dropping it. A missing
 expected handoff permits only a summary of visible committed evidence and the
 smallest repair or clarification.
 
@@ -178,8 +186,9 @@ harmless preference may use a stated default only when none of those changes.
 
 ## State Closeout
 
-Team lead may submit only an optional `project_summary` patch and non-state
-presentation. Keep the summary as compact durable orientation:
+Team lead may submit only an optional `project_summary` patch, controller-owned
+`question_actions`, and non-state presentation. Keep the summary as compact
+durable orientation:
 
 - `title`, `objective`, and `materials` describe the continuing project;
 - `phase` is only `exploration`, `analysis`, or `reporting`;
@@ -197,8 +206,9 @@ flags show a completion artifact once existed, not that it remains current or
 available. If `finish` fails, use the returned or reopened committed stage and
 correct the closeout; never claim completion or clear state manually.
 
-For cancellation, call `finish --cancel` without state updates but with the
-presentation. Do not delete or adopt reserved or unrecorded files.
+For cancellation, call `finish --cancel` without state updates or question
+actions but with the presentation. Do not delete or adopt reserved or
+unrecorded files.
 
 ## Presentation And Final Delivery
 
@@ -217,7 +227,9 @@ use a compact list or table when useful. State the real limitation or unchanged
 boundary concisely. With no options, a proposed follow-on operation requires
 one direct yes/no question in `next_steps` and its exact normal `begin`
 assignment in `direct_assignment`; use `null` only when no follow-on operation
-is proposed. Do not include a choice list. With options, set
+is proposed. Exactly one question routes the next operation; a surfaced
+carried question may follow it in the same line and never replaces it. Do not
+include a choice list. With options, set
 `direct_assignment: null` and ask for a choice without repeating them. If the
 user or approved scope requests
 one prioritized recommendation or evidence improvement, give one; if evidence
@@ -226,6 +238,16 @@ cannot rank alternatives, say so in framing.
 Use ordinary consulting language. Synthesize rather than reproduce worker
 narratives, full scopes, inventories, or report outlines. Unless requested,
 hide route, operation, scope, status, field, and controller identifiers.
+
+Give a decision-carrying quantitative finding twice: the exact estimate with
+its uncertainty, population, and governing assumptions, then the same result
+for the same population under the same boundary in the study's own units and
+setting; where the two would differ, the precise version governs. State a
+decision-carrying qualitative limitation technically, then in ordinary
+language. Never invent an effect size, probability, or uncertainty the evidence
+does not supply; define technical terms at first use; give each important idea
+one pass in each register, compressing rather than dropping the intuitive half
+for a fluent user. Explain at the depth `audience_profile.level` indicates.
 
 In preflight-failure mode, skip `finish` and use only `[> Framing]`,
 `[! Boundary]`, and `[? Next Steps]`, without claiming completed work.

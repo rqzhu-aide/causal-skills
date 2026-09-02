@@ -255,32 +255,125 @@ function isOwnedCapsule(value) {
   }
 }
 
-function removeOwnedContextFile(projectRoot, expectedProjectId) {
+function contextCapsuleOwnershipError(capsule, expectedProjectId, expectedOperationId) {
+  if (!isOwnedCapsule(capsule)) {
+    return `${CONTEXT_RELATIVE_PATH} is not a controller phase capsule and was left unchanged`;
+  }
+  if (capsule.turn_context?.project_id !== expectedProjectId) {
+    return `${CONTEXT_RELATIVE_PATH} belongs to a different project and was left unchanged`;
+  }
+  if (capsule.turn_context?.operation?.id !== expectedOperationId) {
+    return `${CONTEXT_RELATIVE_PATH} belongs to a different operation and was left unchanged`;
+  }
+  return null;
+}
+
+function holdContextCleanupForTest(variable) {
+  if (process.env[variable] === undefined) return;
+  const milliseconds = Number(process.env[variable]);
+  if (!Number.isInteger(milliseconds) || milliseconds < 1 || milliseconds > 5_000) {
+    fail(
+      "CONTEXT_FILE_CLEANUP_FAILED",
+      `${variable} must be an integer from 1 to 5000`,
+    );
+  }
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function signalContextCleanupPreviewForTest(paths) {
+  const markerName = process.env.STATECTL_TEST_CONTEXT_CLEANUP_PREVIEW_MARKER;
+  if (markerName === undefined) return;
+  if (
+    path.basename(markerName) !== markerName
+    || !/^\.phase-context\.preview-ready-[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(markerName)
+  ) {
+    fail(
+      "CONTEXT_FILE_CLEANUP_FAILED",
+      "STATECTL_TEST_CONTEXT_CLEANUP_PREVIEW_MARKER must be a generated preview-marker filename",
+    );
+  }
+  fs.writeFileSync(path.join(paths.directory, markerName), "", { flag: "wx" });
+}
+
+function restoreClaimedContextFile(paths, claimPath, cause) {
+  try {
+    if (process.env.STATECTL_FAIL_CONTEXT_RESTORE_LINK === "1") {
+      throw new Error("injected phase-context restore-link failure");
+    }
+    fs.linkSync(claimPath, paths.filePath);
+    fs.rmSync(claimPath);
+    return null;
+  } catch (error) {
+    return {
+      code: "CONTEXT_FILE_CLEANUP_FAILED",
+      message: [
+        cause && cause.message ? cause.message : String(cause),
+        `A claimed capsule was preserved at ${claimPath} because it could not be restored without replacing a concurrent writer: ${error.message}`,
+      ].join(" "),
+    };
+  }
+}
+
+function removeOwnedContextFile(projectRoot, expectedProjectId, expectedOperationId) {
   const paths = contextPaths(projectRoot);
   if (!fs.existsSync(paths.directory)) return null;
+  let claimPath = null;
+  let claimIsRegular = false;
   try {
     if (!validateDirectory(paths, { create: false })) return null;
     if (!fs.existsSync(paths.filePath)) return null;
-    const capsule = JSON.parse(fs.readFileSync(paths.filePath, "utf8"));
-    if (!isOwnedCapsule(capsule)) {
-      fail(
-        "CONTEXT_FILE_CLEANUP_FAILED",
-        `${CONTEXT_RELATIVE_PATH} is not a controller phase capsule and was left unchanged`,
-      );
-    }
-    if (capsule.turn_context?.project_id !== expectedProjectId) {
-      fail(
-        "CONTEXT_FILE_CLEANUP_FAILED",
-        `${CONTEXT_RELATIVE_PATH} belongs to a different project and was left unchanged`,
-      );
-    }
+    const preview = JSON.parse(fs.readFileSync(paths.filePath, "utf8"));
+    const previewError = contextCapsuleOwnershipError(
+      preview,
+      expectedProjectId,
+      expectedOperationId,
+    );
+    if (previewError !== null) fail("CONTEXT_FILE_CLEANUP_FAILED", previewError);
 
     if (process.env.STATECTL_FAIL_CONTEXT_CLEANUP === "1") {
       throw new Error("injected phase-context cleanup failure");
     }
-    fs.rmSync(paths.filePath);
+    signalContextCleanupPreviewForTest(paths);
+    holdContextCleanupForTest("STATECTL_TEST_CONTEXT_CLEANUP_HOLD_MS");
+    claimPath = path.join(
+      paths.directory,
+      `.phase-context.cleanup-${process.pid}-${crypto.randomUUID()}`,
+    );
+    try {
+      fs.renameSync(paths.filePath, claimPath);
+    } catch (error) {
+      if (error && error.code === "ENOENT") return null;
+      throw error;
+    }
+    holdContextCleanupForTest("STATECTL_TEST_CONTEXT_CLEANUP_CLAIM_HOLD_MS");
+    const claimStat = fs.lstatSync(claimPath);
+    claimIsRegular = claimStat.isFile() && !claimStat.isSymbolicLink();
+    if (!claimIsRegular) {
+      fail(
+        "CONTEXT_FILE_CLEANUP_FAILED",
+        "the atomically claimed phase context is not a regular file and was quarantined",
+      );
+    }
+    const claimed = JSON.parse(fs.readFileSync(claimPath, "utf8"));
+    const claimedError = contextCapsuleOwnershipError(
+      claimed,
+      expectedProjectId,
+      expectedOperationId,
+    );
+    if (claimedError !== null) fail("CONTEXT_FILE_CLEANUP_FAILED", claimedError);
+    fs.rmSync(claimPath);
     return null;
   } catch (error) {
+    if (claimPath !== null && fs.existsSync(claimPath)) {
+      if (!claimIsRegular) {
+        return {
+          code: "CONTEXT_FILE_CLEANUP_FAILED",
+          message: `${error.message} The claimed path was preserved at ${claimPath}.`,
+        };
+      }
+      const restoreWarning = restoreClaimedContextFile(paths, claimPath, error);
+      if (restoreWarning !== null) return restoreWarning;
+    }
     return {
       code: "CONTEXT_FILE_CLEANUP_FAILED",
       message: error && error.message ? error.message : String(error),

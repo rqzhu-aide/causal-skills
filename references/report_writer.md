@@ -13,7 +13,7 @@ not infer report evidence from unrelated historical records. A migration-only
 which evidence it intended to use. It is neither planning nor analysis scope;
 revise it to an explicit ID list or `[]`, then obtain approval.
 
-Approved report output is HTML by default. Requests for PPT, DOCX, PDF, slides,
+Approved report output is HTML. Requests for PPT, DOCX, PDF, slides,
 email, letter, memo, Markdown, or another form become scope, structure,
 audience, or writing-style cues unless a future workflow explicitly supports
 that file type; do not manage a separate file-format workflow or promise those
@@ -43,6 +43,8 @@ change resumed work. A non-null scope reference records approval at `begin`;
 never reinterpret approval later. For report output, that authorization is
 valid only when `analysis_artifact_ids` is a resolved array. A protocol-0
 operation with a `null` binding is repair-only: revise the evidence selection,
+return for approval, and create no output. Any migrated exact scope with a
+missing `claim_boundary` is also repair-only: revise the structural boundary,
 return for approval, and create no output. Use the full-state fallback only for
 relevant detail omitted from the context. During approved or output-bound work,
 recover analysis detail only for IDs already in the frozen binding, and recover
@@ -88,6 +90,16 @@ output, or claim boundary materially undecided. Preserve requested cardinality
 and priority. If the scope promises one next evidence step, store one concrete
 priority and carry it into the output; changing or adding alternatives requires
 a scope revision.
+
+The controller requires every ready scope to have a nonempty `report_goal`,
+`audience`, `planned_structure`, `wording_constraints`, and structural
+`claim_boundary`, plus an explicit `analysis_artifact_ids` list. Put the
+governing causal limit in `claim_boundary`; use `wording_constraints` for
+concrete drafting rules that preserve it. For a planning report, state explicitly that it contains
+no completed target-analysis result and must not present an empirical
+causal-effect conclusion. The output format is already fixed to HTML by this
+workflow, so keep
+`current_format: null` until an output is actually completed.
 
 Minor refinements include shorter or longer length, reviewer-facing tone,
 cautious wording, emphasizing or omitting a small section, adding a brief
@@ -182,6 +194,31 @@ output must not strengthen it. Keep prose concise and consistent: separate
 assumptions, methods, results, limitations, and interpretations, use consistent
 terms, and write clearly and directly.
 
+Where a quantitative finding carries the reader's decision, write it twice:
+first as the exact estimate, uncertainty, population, and governing assumptions,
+then in the study's own domain, units, and setting. The second rendering must
+describe the same result for the same population under the same boundary. It may
+not widen the claim, drop an assumption, or turn a bounded estimate into a
+general one, and it obeys the evidence-status wording above; where the two would
+differ, the precise version governs. Prefer the data's own units and a referent
+from this study over a generic analogy, and prefer a concrete consequence for
+the people in the study over a restatement of the statistic.
+
+Where a qualitative limitation or design tradeoff carries the reader's
+decision, state the exact technical condition and its consequence, then explain
+that same implication in ordinary language. Do not invent an effect size,
+probability, or numerical uncertainty when the evidence supplies none. Define a
+technical term at first use. Give each important idea one pass in each register,
+not every sentence.
+
+The approved `report_assembly.audience` governs the report artifact. Use
+`project_summary.audience_profile` only to explain the consultation to the
+current user and to help propose an audience before report approval; it never
+silently retargets an approved report. Changing the intended readership is a
+scope revision and requires new approval. Audience never moves the claim
+boundary, drops a required limitation, or removes a diagnostic the scope
+requires.
+
 ## Report Scope And Handoff
 
 Before doing report-writing work, decide whether this turn should prepare scope
@@ -219,6 +256,8 @@ Submit supported fields under `report_assembly`:
 - `report_goal`
 - `target_section`
 - `audience`
+- `claim_boundary`: the exact causal or empirical limit the report must not
+  exceed. Formatting guidance alone cannot satisfy this field.
 - `planned_structure`
 - `key_points`
 - `wording_constraints`
@@ -259,8 +298,7 @@ owns closeout synthesis.
 
 ## Report Outputs
 
-When report text, a draft, HTML, or another report artifact is actually
-created:
+When approved HTML report output is actually created:
 
 Treat the operation packet requirements as minimum coverage. Validate the
 rendered output against them, its evidence basis, and claim boundary;
@@ -274,9 +312,7 @@ supplemental writing is allowed within the bound report scope.
    inherited causal boundary, limitations, and reserved output location.
 3. Submit `scope_transition: preserve`, `current_status: done`, report state,
    and a `completion` artifact receipt through `statectl apply`. Use `report`,
-   `revised report`, or `derivative communication artifact` accurately. Use
-   "conversion" only for a literal format conversion that does not change
-   content.
+   `revised report`, or `derivative communication artifact` accurately.
 4. If execution demonstrates that the exact bound report cannot produce its
    promised output, keep `current_format: null` and submit
    `scope_transition: preserve`, `current_status: blocked`, and an

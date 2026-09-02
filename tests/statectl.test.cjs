@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { spawnSync } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const test = require("node:test");
 const YAML = require("yaml");
 const {
@@ -49,7 +49,7 @@ function execute(projectRoot, command, options = {}) {
   const args = [CLI, command, "--project-root", projectRoot, ...(options.args || [])];
   if (options.payload !== undefined) args.push("--input", "-");
   const child = spawnSync(process.execPath, args, {
-    cwd: projectRoot,
+    cwd: options.cwd ?? projectRoot,
     encoding: "utf8",
     input: options.payload === undefined ? undefined : JSON.stringify(options.payload),
     env: {
@@ -71,6 +71,67 @@ function execute(projectRoot, command, options = {}) {
   return { ...child, result };
 }
 
+function executeAsync(projectRoot, command, options = {}) {
+  const args = [CLI, command, "--project-root", projectRoot, ...(options.args || [])];
+  if (options.payload !== undefined) args.push("--input", "-");
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, {
+      cwd: options.cwd ?? projectRoot,
+      env: {
+        ...process.env,
+        STATECTL_SKILL_ROOT: SKILL_ROOT,
+        ...(options.env || {}),
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("close", (status) => {
+      const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
+      if (lines.length !== 1) {
+        reject(new Error(`statectl emitted ${lines.length} JSON lines\nstdout: ${stdout}\nstderr: ${stderr}`));
+        return;
+      }
+      let result;
+      try {
+        result = JSON.parse(lines[0]);
+      } catch (error) {
+        reject(new Error(`statectl emitted invalid JSON: ${error.message}\nstdout: ${stdout}`));
+        return;
+      }
+      resolve({ status, stdout, stderr, result });
+    });
+    if (options.payload === undefined) child.stdin.end();
+    else child.stdin.end(JSON.stringify(options.payload));
+  });
+}
+
+async function waitForPath(targetPath, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!fs.existsSync(targetPath)) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${targetPath}`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+async function waitForCondition(predicate, label, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      if (predicate()) return;
+    } catch (_error) {
+      // Retry across atomic file replacement.
+    }
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 function expectSuccess(execution, code) {
   assert.equal(execution.status, 0, `${execution.stderr}\n${execution.stdout}`);
   assert.equal(execution.result.ok, true);
@@ -89,6 +150,10 @@ function statePath(projectRoot) {
   return path.join(projectRoot, "project_state.yaml");
 }
 
+function stateLockPath(projectRoot) {
+  return path.join(projectRoot, ".causal-consultant-state.lock");
+}
+
 function readState(projectRoot) {
   const document = YAML.parseDocument(fs.readFileSync(statePath(projectRoot), "utf8"), {
     schema: "core",
@@ -102,8 +167,12 @@ function writeState(projectRoot, state) {
   fs.writeFileSync(statePath(projectRoot), YAML.stringify(state, { lineWidth: 0 }), "utf8");
 }
 
-function legacyReportContractBundle(reportAssembly) {
+function legacyReportContractBundle(reportAssembly, { includeEvidenceBinding = false } = {}) {
   const contract = {};
+  if (includeEvidenceBinding) {
+    assert.ok(Array.isArray(reportAssembly.analysis_artifact_ids));
+    contract.analysis_artifact_ids = [...reportAssembly.analysis_artifact_ids].sort();
+  }
   for (const field of ["report_goal", "audience", "target_section"]) {
     const value = reportAssembly[field];
     if (typeof value === "string" && value.trim()) contract[field] = value.trim();
@@ -124,6 +193,9 @@ function legacyReportContractBundle(reportAssembly) {
   }
   for (const field of ["planned_structure", "key_points", "wording_constraints"]) {
     for (const description of contract[field] ?? []) descriptions.push({ kind: field, description });
+  }
+  for (const description of contract.analysis_artifact_ids ?? []) {
+    descriptions.push({ kind: "analysis_artifact_id", description });
   }
   const requirements = descriptions.map((item, index) => ({
     id: `req-${crypto.createHash("sha256").update(JSON.stringify({
@@ -189,8 +261,11 @@ test("release metadata validation rejects local version drift", () => {
 
 function downgradeCurrentStateToV2(projectRoot) {
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 7);
+  assert.equal(state.state_meta.schema_version, 9);
   state.state_meta.schema_version = 2;
+  delete state.report_assembly.claim_boundary;
+  delete state.carried_questions;
+  delete state.project_summary.audience_profile;
   delete state.causal_facts.analysis_options;
   delete state.report_assembly.analysis_artifact_ids;
   delete state.state_meta.startup_notice;
@@ -219,8 +294,11 @@ function downgradeCurrentStateToV2(projectRoot) {
 
 function downgradeCurrentStateToV3(projectRoot) {
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 7);
+  assert.equal(state.state_meta.schema_version, 9);
   state.state_meta.schema_version = 3;
+  delete state.report_assembly.claim_boundary;
+  delete state.carried_questions;
+  delete state.project_summary.audience_profile;
   delete state.causal_facts.analysis_options;
   delete state.report_assembly.analysis_artifact_ids;
   if (state.response_receipt !== null) delete state.response_receipt.direct_assignment;
@@ -247,8 +325,11 @@ function downgradeCurrentStateToV3(projectRoot) {
 
 function downgradeCurrentStateToV4(projectRoot) {
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 7);
+  assert.equal(state.state_meta.schema_version, 9);
   state.state_meta.schema_version = 4;
+  delete state.report_assembly.claim_boundary;
+  delete state.carried_questions;
+  delete state.project_summary.audience_profile;
   delete state.causal_facts.analysis_options;
   delete state.report_assembly.analysis_artifact_ids;
   if (state.response_receipt !== null) delete state.response_receipt.direct_assignment;
@@ -271,8 +352,11 @@ function downgradeCurrentStateToV4(projectRoot) {
 
 function downgradeCurrentStateToV5(projectRoot) {
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 7);
+  assert.equal(state.state_meta.schema_version, 9);
   state.state_meta.schema_version = 5;
+  delete state.report_assembly.claim_boundary;
+  delete state.carried_questions;
+  delete state.project_summary.audience_profile;
   delete state.causal_facts.analysis_options;
   delete state.report_assembly.analysis_artifact_ids;
   for (const slot of Object.values(state.council_chamber.analysis_execution)) {
@@ -288,8 +372,10 @@ function downgradeCurrentStateToV5(projectRoot) {
 
 function downgradeCurrentStateToV6(projectRoot) {
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 7);
+  assert.equal(state.state_meta.schema_version, 9);
   state.state_meta.schema_version = 6;
+  delete state.carried_questions;
+  delete state.project_summary.audience_profile;
   if (
     state.state_meta.active_operation !== null
     && state.next_step_plan[0]?.id === "report_writer"
@@ -298,9 +384,48 @@ function downgradeCurrentStateToV6(projectRoot) {
     state.state_meta.active_operation.contract_hash =
       legacyReportContractBundle(state.report_assembly).contractHash;
   }
+  delete state.report_assembly.claim_boundary;
   delete state.report_assembly.analysis_artifact_ids;
   if (state.state_meta.active_operation !== null) {
     delete state.state_meta.active_operation.report_evidence_binding_protocol;
+  }
+  writeState(projectRoot, state);
+  return state;
+}
+
+function downgradeCurrentStateToV7(projectRoot) {
+  const state = readState(projectRoot);
+  assert.equal(state.state_meta.schema_version, 9);
+  state.state_meta.schema_version = 7;
+  delete state.report_assembly.claim_boundary;
+  delete state.carried_questions;
+  delete state.project_summary.audience_profile;
+  writeState(projectRoot, state);
+  return state;
+}
+
+function downgradeCurrentStateToV8(projectRoot, { legacySources = false } = {}) {
+  const state = readState(projectRoot);
+  assert.equal(state.state_meta.schema_version, 9);
+  state.state_meta.schema_version = 8;
+  if (
+    state.state_meta.active_operation !== null
+    && state.next_step_plan[0]?.id === "report_writer"
+    && [1, 2].includes(state.state_meta.active_operation.completion_protocol)
+  ) {
+    state.state_meta.active_operation.contract_hash = legacyReportContractBundle(
+      state.report_assembly,
+      { includeEvidenceBinding: true },
+    ).contractHash;
+  }
+  delete state.report_assembly.claim_boundary;
+  if (legacySources) {
+    for (const entry of state.carried_questions) {
+      for (const field of ["first_source", "last_source"]) {
+        delete entry[field].source_kind;
+        delete entry[field].source_text;
+      }
+    }
   }
   writeState(projectRoot, state);
   return state;
@@ -334,6 +459,7 @@ function assertTurnContext(projectRoot, result, expectedContext) {
     "artifact_status",
     "artifact_warnings",
     "audience",
+    "directives",
     "operation",
     "previous_response_cue",
     "project_id",
@@ -362,7 +488,7 @@ function assertTurnContext(projectRoot, result, expectedContext) {
   assert.equal("turn_context" in state, false);
   assert.equal("required_references" in state, false);
   assert.equal("operation_packet_ref" in state, false);
-  assert.equal(state.state_meta.schema_version, 7);
+  assert.equal(state.state_meta.schema_version, 9);
 }
 
 function begin(projectRoot, prior, route, extras = {}) {
@@ -488,8 +614,73 @@ function finish(projectRoot, prior, updates = {}, options = {}) {
       operation_id: prior.operation_id,
       updates,
       presentation: options.presentation ?? defaultPresentation,
+      ...(options.questionActions === undefined
+        ? {}
+        : { question_actions: options.questionActions }),
     },
   });
+}
+
+function recordQuestion(sourceText, options = {}) {
+  return {
+    action: "record",
+    question_id: options.questionId ?? null,
+    source_text: sourceText,
+    surface: options.surface ?? false,
+  };
+}
+
+function surfaceQuestion(questionId) {
+  return { action: "surface", question_id: questionId };
+}
+
+function retireQuestion(questionId, kind, note) {
+  return {
+    action: "retire",
+    question_id: questionId,
+    resolution: { kind, note },
+  };
+}
+
+function projectedOpenQuestion(entry) {
+  return {
+    question: entry.question,
+    status: "open",
+    source_operation_count: entry.source_operation_count,
+    surfaced: entry.first_surfaced_revision !== null,
+  };
+}
+
+function projectedRetiredQuestion(entry) {
+  return {
+    question: entry.question,
+    status: "retired",
+    resolution: structuredClone(entry.resolution),
+  };
+}
+
+function applyDataAuditQuestion(projectRoot, started, question) {
+  return expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "data_audit",
+      updates: {
+        data_facts: {
+          data_checked: "limited",
+          audit_scope: "Question-led audit handoff.",
+        },
+        council_chamber: {
+          data_audit: {
+            current_status: "limited",
+            summary: "The audit found one material user-only question.",
+            questions_for_user: [question],
+            feedback_to_route: [],
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
 }
 
 function analysisSlot(status, summary, support = null, executionContract = DEFAULT_ANALYSIS_EXECUTION_CONTRACT) {
@@ -759,7 +950,9 @@ function prepareReportScope(projectRoot, options = {}) {
           report_goal: "Report the approved findings",
           audience: "Clinical collaborators",
           target_section: "Results",
+          claim_boundary: "Report only evidence supported by the approved causal scope.",
           planned_structure: ["Findings", "Limitations"],
+          wording_constraints: ["Preserve the approved causal claim boundary."],
           analysis_artifact_ids: analysisArtifactIds,
         },
         council_chamber: {
@@ -826,7 +1019,7 @@ test("open creates a valid state and a normal open is a byte-preserving no-op", 
   const firstBytes = fs.readFileSync(statePath(projectRoot), "utf8");
   const state = readState(projectRoot);
 
-  assert.equal(state.state_meta.schema_version, 7);
+  assert.equal(state.state_meta.schema_version, 9);
   assert.equal(state.state_meta.project_id, created.project_id);
   assert.equal(state.state_meta.revision, 0);
   assert.equal(state.state_meta.active_operation, null);
@@ -835,6 +1028,7 @@ test("open creates a valid state and a normal open is a byte-preserving no-op", 
     archive_path: null,
   });
   assert.deepEqual(state.next_step_plan, []);
+  assert.deepEqual(state.carried_questions, []);
   assert.equal(state.pending_decision, null);
   assert.equal(state.response_receipt, null);
 
@@ -846,14 +1040,116 @@ test("open creates a valid state and a normal open is a byte-preserving no-op", 
   expectSuccess(execute(projectRoot, "validate"), "VALID");
 });
 
-test("template validation advertises strategy and requirement-evidence support", () => {
+test("open creates a missing project root before acquiring its state lock", (t) => {
+  const parent = temporaryProject(t);
+  const projectRoot = path.join(parent, "nested", "new-project");
+  assert.equal(fs.existsSync(projectRoot), false);
+  const opened = expectSuccess(execute(projectRoot, "open", { cwd: parent }), "CREATED");
+  assert.equal(fs.existsSync(projectRoot), true);
+  assert.equal(readState(projectRoot).state_meta.project_id, opened.project_id);
+  assert.equal(fs.existsSync(stateLockPath(projectRoot)), false);
+});
+
+test("project-state mutation locking prevents concurrent lost updates", async (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const payload = {
+    ...expected(opened),
+    route: "team_lead",
+    intent_summary: "Start exactly one concurrent operation.",
+  };
+  const before = fs.readFileSync(statePath(projectRoot));
+  const firstPromise = executeAsync(projectRoot, "begin", {
+    env: { STATECTL_TEST_HOLD_LOCK_MS: "750" },
+    payload,
+  });
+  await waitForPath(stateLockPath(projectRoot));
+
+  expectFailure(execute(projectRoot, "begin", { payload }), "STATE_LOCKED");
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+
+  const winner = expectSuccess(await firstPromise, "BEGAN_LEAD");
+  const state = readState(projectRoot);
+  assert.equal(state.state_meta.revision, 1);
+  assert.equal(state.state_meta.active_operation.id, winner.operation_id);
+  assert.equal(fs.existsSync(stateLockPath(projectRoot)), false);
+  expectFailure(execute(projectRoot, "begin", { payload }), "STALE_REVISION");
+  expectSuccess(finish(projectRoot, winner, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
+test("project-state mutation locking reaps dead owners but never a live owner", async (t) => {
+  await t.test("dead owner", async () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const child = spawn(process.execPath, ["-e", "process.exit(0)"]);
+    const deadPid = child.pid;
+    await new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", resolve);
+    });
+    const lockPath = stateLockPath(projectRoot);
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(path.join(lockPath, "owner.json"), JSON.stringify({
+      protocol: 1,
+      pid: deadPid,
+      hostname: os.hostname().trim().toLowerCase() || "unknown-host",
+      token: crypto.randomUUID(),
+      created_at: new Date().toISOString(),
+    }));
+
+    const started = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    assert.equal(fs.existsSync(lockPath), false);
+    expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+  });
+
+  await t.test("live owner", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const lockPath = stateLockPath(projectRoot);
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(path.join(lockPath, "owner.json"), JSON.stringify({
+      protocol: 1,
+      pid: process.pid,
+      hostname: os.hostname().trim().toLowerCase() || "unknown-host",
+      token: crypto.randomUUID(),
+      created_at: new Date(0).toISOString(),
+    }));
+    const old = new Date(0);
+    fs.utimesSync(lockPath, old, old);
+
+    expectFailure(begin(projectRoot, opened, "team_lead"), "STATE_LOCKED");
+    assert.equal(fs.existsSync(lockPath), true);
+    fs.rmSync(lockPath, { recursive: true, force: true });
+    const started = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+  });
+
+  await t.test("unexpected lock path", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const lockPath = stateLockPath(projectRoot);
+    const marker = Buffer.from("not a controller lock\n");
+    fs.writeFileSync(lockPath, marker);
+
+    expectFailure(begin(projectRoot, opened, "team_lead"), "STATE_LOCKED");
+    assert.deepEqual(fs.readFileSync(lockPath), marker);
+    fs.rmSync(lockPath);
+    const started = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+    expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+  });
+});
+
+test("template validation advertises the required controller capabilities", () => {
   const result = validateSourceTemplate({ skillRoot: SKILL_ROOT });
-  assert.equal(result.schema_version, 7);
+  assert.equal(result.schema_version, 9);
   assert.equal(result.capabilities.analysis_options, 1);
   assert.equal(result.capabilities.requirement_evidence, 1);
   assert.equal(result.capabilities.direct_assignment, 1);
+  assert.equal(result.capabilities.audience_profile, 1);
+  assert.equal(result.capabilities.carried_questions, 2);
   assert.equal(result.capabilities.causal_scope_basis, 1);
   assert.equal(result.capabilities.conditional_references, 1);
+  assert.equal(result.capabilities.lead_directives, 1);
   assert.equal(result.capabilities.report_evidence_binding, 1);
 });
 
@@ -1239,7 +1535,7 @@ test("supported v4.5 migration preserves evidence, adds identities, and is idemp
   }]);
 
   const state = readState(projectRoot);
-  assert.equal(state.state_meta.schema_version, 7);
+  assert.equal(state.state_meta.schema_version, 9);
   assert.equal(state.state_meta.startup_notice, null);
   assert.equal(state.pending_decision, null);
   assert.equal(state.response_receipt, null);
@@ -1835,8 +2131,12 @@ test("begin returns comprehensive actor context and exact route references", asy
       audience: "team_lead",
       actor: "team_lead",
       stage: "lead_pending",
-      references: ["references/team_lead.md"],
+      references: ["references/team_lead.md", "references/team_lead_audience.md"],
     });
+    assert.deepEqual(started.turn_context.directives, [{
+      kind: "audience_unstated",
+      instruction: "The audience level is unstated. Set project_summary.audience_profile only if this turn's message or committed project evidence demonstrates the user's statistical fluency; otherwise leave it unstated and explain at a neutral depth.",
+    }]);
     assert.deepEqual(started.turn_context.state.report_assembly, readState(projectRoot).report_assembly);
     expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
   });
@@ -2095,6 +2395,104 @@ test("command input type failures use INVALID_INPUT without mutating state", (t)
   expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
 });
 
+test("ready report scopes require a goal, audience, structure, and claim boundary", async (t) => {
+  const completeScope = () => ({
+    report_goal: "Explain the approved evidence for a clinical decision.",
+    audience: "Clinical collaborators",
+    claim_boundary: "Do not exceed the approved causal interpretation.",
+    planned_structure: ["Main finding", "Limitations"],
+    wording_constraints: ["Do not exceed the approved causal claim boundary."],
+    analysis_artifact_ids: [],
+  });
+  const cases = [
+    { field: "report_goal", value: null },
+    { field: "audience", value: null },
+    { field: "claim_boundary", value: null },
+    { field: "planned_structure", value: [] },
+    { field: "wording_constraints", value: [] },
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.field, () => {
+      const projectRoot = temporaryProject(t);
+      const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+      const started = expectSuccess(begin(projectRoot, opened, "report_writer"), "BEGAN_WORKER");
+      const scope = completeScope();
+      scope[scenario.field] = scenario.value;
+      const before = fs.readFileSync(statePath(projectRoot));
+      const failure = expectFailure(execute(projectRoot, "apply", {
+        payload: {
+          ...expected(started),
+          operation_id: started.operation_id,
+          actor: "report_writer",
+          scope_transition: "new",
+          updates: {
+            report_assembly: scope,
+            council_chamber: {
+              report_writer: {
+                current_status: "ready",
+                summary: "This incomplete scope must not become approval-ready.",
+                questions_for_user: [],
+                feedback_to_route: [],
+              },
+            },
+          },
+        },
+      }), "INVALID_INPUT");
+      assert.ok(failure.details.missing_fields.includes(scenario.field));
+      assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+      expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+    });
+  }
+
+  for (const status of ["ready", "blocked"]) {
+    await t.test(`${status} rejects a completed-output format`, () => {
+      const projectRoot = temporaryProject(t);
+      const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+      const started = expectSuccess(begin(projectRoot, opened, "report_writer"), "BEGAN_WORKER");
+      const scope = { ...completeScope(), current_format: "html" };
+      const before = fs.readFileSync(statePath(projectRoot));
+      const failure = expectFailure(execute(projectRoot, "apply", {
+        payload: {
+          ...expected(started),
+          operation_id: started.operation_id,
+          actor: "report_writer",
+          scope_transition: "new",
+          updates: {
+            report_assembly: scope,
+            council_chamber: {
+              report_writer: {
+                current_status: status,
+                summary: "No report output exists for this handoff.",
+                questions_for_user: [],
+                feedback_to_route: [],
+              },
+            },
+          },
+        },
+      }), "INVALID_INPUT");
+      assert.equal(failure.details.current_format, "html");
+      assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+      expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+    });
+  }
+
+  const projectRoot = temporaryProject(t);
+  const prepared = prepareReportScope(projectRoot);
+  const ready = readState(projectRoot).report_assembly;
+  assert.equal(ready.current_format, null);
+  ready.audience = null;
+  const state = readState(projectRoot);
+  state.report_assembly = ready;
+  writeState(projectRoot, state);
+  const before = fs.readFileSync(statePath(projectRoot));
+  const failure = expectFailure(begin(projectRoot, prepared, "report_writer", {
+    scope_ref: prepared.scope_ref,
+  }), "SCOPE_MISMATCH");
+  assert.deepEqual(failure.details.missing_fields, ["audience"]);
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+});
+
 test("revision checks, ownership, worker resume, lead resume, and closeout form one lifecycle", (t) => {
   const projectRoot = temporaryProject(t);
   const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
@@ -2171,7 +2569,7 @@ test("revision checks, ownership, worker resume, lead resume, and closeout form 
     audience: "team_lead",
     actor: "data_audit",
     stage: "lead_pending",
-    references: ["references/team_lead.md"],
+    references: ["references/team_lead.md", "references/team_lead_audience.md"],
   });
   const appliedState = readState(projectRoot);
   assert.equal(appliedState.project_summary.data_audit_complete, true);
@@ -3573,7 +3971,9 @@ test("analysis and report scope identities are controller-owned and exact refere
             report_goal: "Report the approved findings",
             audience: "Clinical collaborators",
             target_section: "Results",
+            claim_boundary: "Report only evidence supported by the approved causal scope.",
             planned_structure: ["Findings", "Limitations"],
+            wording_constraints: ["Preserve the approved causal claim boundary."],
             analysis_artifact_ids: [],
           },
           council_chamber: {
@@ -3834,6 +4234,7 @@ test("apply returns a full replacement packet when a new scope changes the work 
     references: [
       "references/team_lead.md",
       "references/team_lead_analysis_flow.md",
+      "references/team_lead_audience.md",
     ],
   });
 
@@ -6651,15 +7052,17 @@ test("a historical report artifact remains valid with a new scope but cannot be 
       actor: "report_writer",
       scope_transition: "new",
       updates: {
-        report_assembly: {
-          current_format: null,
-          report_goal: "Prepare a follow-up report",
-          audience: "Policy collaborators",
-          target_section: "Updated results",
-          planned_structure: ["Updated findings", "Limitations"],
-          analysis_artifact_ids: [],
-          draft_notes: [],
-        },
+          report_assembly: {
+            current_format: null,
+            report_goal: "Prepare a follow-up report",
+            audience: "Policy collaborators",
+            target_section: "Updated results",
+            claim_boundary: "Do not extend the approved evidence to unstudied policies.",
+            planned_structure: ["Updated findings", "Limitations"],
+            wording_constraints: ["Preserve the approved causal claim boundary."],
+            analysis_artifact_ids: [],
+            draft_notes: [],
+          },
         council_chamber: {
           report_writer: {
             current_status: "ready",
@@ -6891,6 +7294,10 @@ test("new scope transitions clear only the replaced scope state", async (t) => {
         updates: {
           report_assembly: {
             report_goal: "Replacement report scope",
+            audience: "Replacement report readers",
+            claim_boundary: "Do not exceed the replacement scope evidence.",
+            planned_structure: ["Replacement findings", "Replacement limitations"],
+            wording_constraints: ["Preserve the replacement scope's causal claim boundary."],
             analysis_artifact_ids: [],
           },
           council_chamber: {
@@ -6905,10 +7312,16 @@ test("new scope transitions clear only the replaced scope state", async (t) => {
     const state = readState(projectRoot);
     assert.notEqual(state.report_assembly.scope_id, prepared.scope_ref.id);
     assert.equal(state.report_assembly.scope_revision, 1);
-    assert.equal(state.report_assembly.audience, null);
-    assert.deepEqual(state.report_assembly.planned_structure, []);
+    assert.equal(state.report_assembly.audience, "Replacement report readers");
+    assert.deepEqual(
+      state.report_assembly.planned_structure,
+      ["Replacement findings", "Replacement limitations"],
+    );
     assert.deepEqual(state.report_assembly.key_points, []);
-    assert.deepEqual(state.report_assembly.wording_constraints, []);
+    assert.deepEqual(
+      state.report_assembly.wording_constraints,
+      ["Preserve the replacement scope's causal claim boundary."],
+    );
     assert.deepEqual(state.report_assembly.draft_notes, []);
     assert.deepEqual(state.council_chamber.report_writer.questions_for_user, []);
     assert.deepEqual(state.council_chamber.report_writer.feedback_to_route, []);
@@ -7355,7 +7768,7 @@ test("--discard-legacy-plan is rejected when no legacy v4.5 state exists", async
     assert.equal(fs.existsSync(statePath(projectRoot)), false);
   });
 
-  await t.test("current v7 state", () => {
+  await t.test("current v9 state", () => {
     const projectRoot = temporaryProject(t);
     expectSuccess(execute(projectRoot, "open"), "CREATED");
     const before = fs.readFileSync(statePath(projectRoot), "utf8");
@@ -7711,7 +8124,9 @@ test("ready analysis and report handoffs require direct approval without options
             report_goal: "Report the completed evidence",
             audience: "Decision makers",
             target_section: "Results",
+            claim_boundary: "Do not exceed the completed analysis evidence.",
             planned_structure: ["Findings", "Limitations"],
+            wording_constraints: ["Preserve the approved causal claim boundary."],
             analysis_artifact_ids: [],
           },
           council_chamber: {
@@ -8074,12 +8489,14 @@ test("schema-6 migration preserves unresolved legacy report provenance", async (
     assert.equal(readState(projectRoot).report_assembly.analysis_artifact_ids, null);
   });
 
-  await t.test("scoped report with no analysis history gets an intentional empty binding", () => {
+  await t.test("scoped report with no analysis history keeps an empty binding but loses stale approval", () => {
     const projectRoot = temporaryProject(t);
     prepareReportScope(projectRoot);
     downgradeCurrentStateToV6(projectRoot);
     expectSuccess(execute(projectRoot, "open"), "MIGRATED_V6");
     assert.deepEqual(readState(projectRoot).report_assembly.analysis_artifact_ids, []);
+    assert.equal(readState(projectRoot).report_assembly.claim_boundary, null);
+    assert.equal(readState(projectRoot).response_receipt.direct_assignment, null);
   });
 
   await t.test("unbound report state stays empty despite analysis history", () => {
@@ -8513,6 +8930,7 @@ test("schema-6 active report execution opens for repair without allowing unresol
         updates: {
           report_assembly: {
             report_goal: "Repair the migrated evidence provenance",
+            claim_boundary: "Do not exceed the explicitly selected analysis evidence.",
             analysis_artifact_ids: [artifactId],
           },
           council_chamber: {
@@ -8701,6 +9119,10 @@ test("migrated report preparation upgrades new and revised scopes to binding pro
           updates: {
             report_assembly: {
               report_goal: `${transition} report scope`,
+              audience: "Migration test readers",
+              claim_boundary: "Do not exceed the migrated report evidence.",
+              planned_structure: ["Scope", "Evidence", "Limitations"],
+              wording_constraints: ["Preserve the approved causal claim boundary."],
               analysis_artifact_ids: selectedArtifactId === null ? [] : [selectedArtifactId],
             },
             council_chamber: {
@@ -8736,6 +9158,28 @@ test("the source Stop hook blocks an active v6 state without migrating it on dis
     assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
   }
   assert.equal(readState(projectRoot).state_meta.schema_version, 6);
+});
+
+test("source and bundled Stop hooks inspect active legacy-shape v8 state without writing", (t) => {
+  const projectRoot = temporaryProject(t);
+  const question = "Was treatment timing fixed before outcomes were observed?";
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const worker = expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+  const applied = applyDataAuditQuestion(projectRoot, worker, question);
+  const closed = expectSuccess(finish(projectRoot, applied, {}, {
+    questionActions: [recordQuestion(question)],
+  }), "OPERATION_FINISHED");
+  expectSuccess(begin(projectRoot, closed, "team_lead"), "BEGAN_LEAD");
+  downgradeCurrentStateToV8(projectRoot, { legacySources: true });
+  const before = fs.readFileSync(statePath(projectRoot));
+
+  for (const hook of [SOURCE_HOOK, CODEX_SOURCE_HOOK, CODEX_HOOK, CLAUDE_HOOK]) {
+    const result = runHook(projectRoot, { hook });
+    assert.equal(result.decision, "block", JSON.stringify(result));
+    assert.match(result.reason, /still active/);
+    assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+  }
+  assert.equal(readState(projectRoot).state_meta.schema_version, 8);
 });
 
 test("schema-4 migration archives exact bytes, preserves identity, and is idempotent", (t) => {
@@ -8794,7 +9238,7 @@ test("schema-4 migration archives exact bytes, preserves identity, and is idempo
   assert.deepEqual(migrated.warnings, []);
 
   const current = readState(projectRoot);
-  assert.equal(current.state_meta.schema_version, 7);
+  assert.equal(current.state_meta.schema_version, 9);
   assert.equal(current.state_meta.project_id, v4.state_meta.project_id);
   assert.equal(current.state_meta.active_operation.completion_protocol, 0);
   assert.equal(current.state_meta.active_operation.contract_hash, null);
@@ -8838,7 +9282,7 @@ test("schema-5 migration adds an empty strategy portfolio without invalidating p
   const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V5");
   assert.deepEqual(fs.readFileSync(migrated.archive_path), original);
   const current = readState(projectRoot);
-  assert.equal(current.state_meta.schema_version, 7);
+  assert.equal(current.state_meta.schema_version, 9);
   assert.deepEqual(current.causal_facts.analysis_options, []);
   assert.equal(current.causal_facts.analysis_readiness, v5.causal_facts.analysis_readiness);
   assert.deepEqual(
@@ -9056,7 +9500,7 @@ test("schema-2 migration preserves idle and active route boundaries", async (t) 
       assert.deepEqual(migrated.plan, priorPlan);
 
       const current = readState(projectRoot);
-      assert.equal(current.state_meta.schema_version, 7);
+      assert.equal(current.state_meta.schema_version, 9);
       assert.equal(current.state_meta.project_id, v2.state_meta.project_id);
       assert.equal(current.state_meta.revision, v2.state_meta.revision + 1);
       assert.equal(current.state_meta.startup_notice, null);
@@ -9065,16 +9509,21 @@ test("schema-2 migration preserves idle and active route boundaries", async (t) 
       assert.equal(current.pending_decision, null);
       assert.equal(current.response_receipt, null);
       for (const section of [
-        "project_summary",
         "data_facts",
         "domain_knowledge",
         "artifact_records",
       ]) {
         assert.deepEqual(current[section], v2[section], `${section} changed during v2 migration`);
       }
+      assert.deepEqual(current.project_summary, {
+        ...v2.project_summary,
+        audience_profile: { level: "unstated", evidence: null, preferences: [] },
+      }, "project_summary changed during v2 migration beyond the added audience profile");
+      assert.deepEqual(current.carried_questions, []);
       assert.deepEqual(current.report_assembly, {
         ...v2.report_assembly,
         analysis_artifact_ids: [],
+        claim_boundary: null,
       });
       assert.deepEqual(current.causal_facts, {
         ...v2.causal_facts,
@@ -9775,6 +10224,108 @@ test("late context delivery and cleanup failures remain nonfatal after controlle
     assert.equal(readState(projectRoot).state_meta.active_operation, null);
   });
 
+  await t.test("finish leaves a newer same-project operation capsule unchanged", () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open", {
+      args: ["--context-file"],
+    }), "CREATED");
+    const started = expectSuccess(execute(projectRoot, "begin", {
+      args: ["--context-file"],
+      payload: {
+        ...expected(opened),
+        route: "team_lead",
+        intent_summary: "Close without deleting a newer operation capsule.",
+      },
+    }), "BEGAN_LEAD");
+
+    const newerCapsule = JSON.parse(fs.readFileSync(phaseContextPath(projectRoot), "utf8"));
+    newerCapsule.turn_context.operation.id = crypto.randomUUID();
+    newerCapsule.context_id = capsuleContextId(newerCapsule);
+    writeFullCapsule(projectRoot, newerCapsule);
+    const newerBytes = fs.readFileSync(phaseContextPath(projectRoot));
+
+    const closed = expectSuccess(finish(projectRoot, started), "OPERATION_FINISHED");
+    assert.deepEqual(closed.delivery_warnings, [{
+      code: "CONTEXT_FILE_CLEANUP_FAILED",
+      message: ".statectl-tmp/phase-context.json belongs to a different operation and was left unchanged",
+    }]);
+    assert.deepEqual(fs.readFileSync(phaseContextPath(projectRoot)), newerBytes);
+    assert.equal(readState(projectRoot).state_meta.active_operation, null);
+  });
+
+  await t.test("cleanup cannot delete replacements across preview and claim races", async () => {
+    const projectRoot = temporaryProject(t);
+    const opened = expectSuccess(execute(projectRoot, "open", {
+      args: ["--context-file"],
+    }), "CREATED");
+    const started = expectSuccess(execute(projectRoot, "begin", {
+      args: ["--context-file"],
+      payload: {
+        ...expected(opened),
+        route: "team_lead",
+        intent_summary: "Exercise atomic context cleanup.",
+      },
+    }), "BEGAN_LEAD");
+    const originalCapsule = JSON.parse(
+      fs.readFileSync(phaseContextPath(projectRoot), "utf8"),
+    );
+    const previewMarkerName = `.phase-context.preview-ready-${crypto.randomUUID()}`;
+    const previewMarkerPath = path.join(
+      path.dirname(phaseContextPath(projectRoot)),
+      previewMarkerName,
+    );
+    const finishPromise = executeAsync(projectRoot, "finish", {
+      env: {
+        STATECTL_TEST_CONTEXT_CLEANUP_HOLD_MS: "1500",
+        STATECTL_TEST_CONTEXT_CLEANUP_CLAIM_HOLD_MS: "1500",
+        STATECTL_TEST_CONTEXT_CLEANUP_PREVIEW_MARKER: previewMarkerName,
+      },
+      payload: {
+        ...expected(started),
+        operation_id: started.operation_id,
+        updates: {},
+        presentation: structuredClone(DEFAULT_PRESENTATION),
+      },
+    });
+
+    await waitForPath(previewMarkerPath, 10_000);
+    assert.equal(readState(projectRoot).state_meta.active_operation, null);
+    const firstReplacement = structuredClone(originalCapsule);
+    firstReplacement.turn_context.operation.id = crypto.randomUUID();
+    firstReplacement.context_id = capsuleContextId(firstReplacement);
+    writeFullCapsule(projectRoot, firstReplacement);
+    const firstReplacementBytes = fs.readFileSync(phaseContextPath(projectRoot));
+
+    const contextDirectory = path.dirname(phaseContextPath(projectRoot));
+    await waitForCondition(
+      () => fs.readdirSync(contextDirectory).some(
+        (name) => name.startsWith(".phase-context.cleanup-"),
+      ),
+      "the atomic cleanup claim",
+      10_000,
+    );
+    const secondReplacement = structuredClone(firstReplacement);
+    secondReplacement.turn_context.operation.id = crypto.randomUUID();
+    secondReplacement.context_id = capsuleContextId(secondReplacement);
+    writeFullCapsule(projectRoot, secondReplacement);
+    const secondReplacementBytes = fs.readFileSync(phaseContextPath(projectRoot));
+
+    const closed = expectSuccess(await finishPromise, "OPERATION_FINISHED");
+    assert.equal(closed.delivery_warnings.length, 1);
+    assert.equal(closed.delivery_warnings[0].code, "CONTEXT_FILE_CLEANUP_FAILED");
+    assert.match(closed.delivery_warnings[0].message, /different operation/);
+    assert.match(closed.delivery_warnings[0].message, /preserved at/);
+    assert.deepEqual(fs.readFileSync(phaseContextPath(projectRoot)), secondReplacementBytes);
+    const claims = fs.readdirSync(contextDirectory).filter(
+      (name) => name.startsWith(".phase-context.cleanup-"),
+    );
+    assert.equal(claims.length, 1);
+    assert.deepEqual(
+      fs.readFileSync(path.join(contextDirectory, claims[0])),
+      firstReplacementBytes,
+    );
+  });
+
   await t.test("finish reports cleanup failure without reversing closeout", () => {
     const projectRoot = temporaryProject(t);
     const opened = expectSuccess(execute(projectRoot, "open", {
@@ -10076,7 +10627,7 @@ test("context-file mode supports a team-lead-only lifecycle", (t) => {
   assert.equal(lead.completion_command, "finish");
   assert.equal(lead.turn_context.actor, "team_lead");
   assert.equal(lead.turn_context.stage, "lead_pending");
-  assertRequiredReferences(lead, ["references/team_lead.md"]);
+  assertRequiredReferences(lead, ["references/team_lead.md", "references/team_lead_audience.md"]);
   assertContextReference(started, lead, "lead");
 
   const stateBytes = fs.readFileSync(statePath(projectRoot));
@@ -10272,4 +10823,806 @@ test("legacy, inline capsule, and context-file open modes are equivalent at ever
 
   compareModes("RESUME_LEAD");
   expectSuccess(finish(projectRoot, applied), "OPERATION_FINISHED");
+});
+
+test("audience_profile defaults to unstated and round-trips through team-lead finish", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  assert.deepEqual(readState(projectRoot).project_summary.audience_profile, {
+    level: "unstated",
+    evidence: null,
+    preferences: [],
+  });
+
+  const started = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+  expectSuccess(finish(projectRoot, started, {
+    project_summary: {
+      audience_profile: {
+        level: "novice",
+        evidence: "User said they know very little about causal inference.",
+        preferences: ["Plain language first"],
+      },
+    },
+  }), "OPERATION_FINISHED");
+
+  const profile = readState(projectRoot).project_summary.audience_profile;
+  assert.deepEqual(profile, {
+    level: "novice",
+    evidence: "User said they know very little about causal inference.",
+    preferences: ["Plain language first"],
+  });
+  const reopened = expectSuccess(execute(projectRoot, "open"), "OPENED");
+  assert.deepEqual(reopened.turn_context.state.project_summary.audience_profile, profile);
+  const reportWorker = expectSuccess(
+    begin(projectRoot, reopened, "report_writer"),
+    "BEGAN_WORKER",
+  );
+  assert.deepEqual(
+    reportWorker.turn_context.state.project_summary.audience_profile,
+    profile,
+  );
+  const reportCancelled = expectSuccess(
+    finish(projectRoot, reportWorker, {}, { cancel: true }),
+    "OPERATION_CANCELLED",
+  );
+  const lead = expectSuccess(begin(projectRoot, reportCancelled, "team_lead"), "BEGAN_LEAD");
+  assert.deepEqual(lead.turn_context.state.project_summary.audience_profile, profile);
+  expectSuccess(finish(projectRoot, lead, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
+test("audience_profile rejects unsupported shapes without mutating state", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+  const before = fs.readFileSync(statePath(projectRoot), "utf8");
+
+  const rejected = [
+    { level: "guru", evidence: "Made up level.", preferences: [] },
+    { level: "novice", evidence: null, preferences: [] },
+    { level: "unstated", evidence: "Cannot justify an unstated level.", preferences: [] },
+    { level: "expert", evidence: "  untrimmed  ", preferences: [] },
+    { level: "applied", evidence: "Fine.", preferences: ["a", "b", "c", "d"] },
+    { level: "applied", evidence: "Fine.", preferences: ["same", "same"] },
+    { level: "applied", evidence: "Fine.", preferences: [""] },
+    { level: "applied", evidence: "Fine.", preferences: [], extra: true },
+    { level: "applied", preferences: [] },
+    "novice",
+  ];
+  for (const audience_profile of rejected) {
+    expectFailure(finish(projectRoot, started, {
+      project_summary: { audience_profile },
+    }), "INVALID_STATE");
+    assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+  }
+  expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
+test("a worker route cannot write the audience profile", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+  const before = fs.readFileSync(statePath(projectRoot), "utf8");
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      actor: "data_audit",
+      updates: {
+        project_summary: {
+          audience_profile: { level: "expert", evidence: "Not this route's call.", preferences: [] },
+        },
+      },
+    },
+  }), "OWNERSHIP_VIOLATION");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+  expectSuccess(finish(projectRoot, started, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
+test("schema-7 migration adds conservative schema-9 consultation state", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+  expectSuccess(finish(projectRoot, started, {
+    project_summary: {
+      title: "Pre-migration project",
+      audience_profile: {
+        level: "trained",
+        evidence: "User referenced their own IV specification.",
+        preferences: [],
+      },
+    },
+  }), "OPERATION_FINISHED");
+
+  const v7 = downgradeCurrentStateToV7(projectRoot);
+  assert.equal("audience_profile" in v7.project_summary, false);
+  assert.equal("carried_questions" in v7, false);
+  const original = fs.readFileSync(statePath(projectRoot), "utf8");
+
+  const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V7");
+  assert.equal(fs.readFileSync(migrated.archive_path, "utf8"), original);
+  assert.equal(migrated.project_id, v7.state_meta.project_id);
+  assert.equal(migrated.revision, v7.state_meta.revision + 1);
+
+  const current = readState(projectRoot);
+  assert.equal(current.state_meta.schema_version, 9);
+  // the migration must not invent a level from prior content
+  assert.deepEqual(current.project_summary, {
+    ...v7.project_summary,
+    audience_profile: { level: "unstated", evidence: null, preferences: [] },
+  });
+  assert.deepEqual(current.carried_questions, []);
+  assert.deepEqual(current.report_assembly, {
+    ...v7.report_assembly,
+    claim_boundary: null,
+  });
+  assert.deepEqual(current.causal_facts, v7.causal_facts);
+
+  // migrating again is a no-op beyond the version it already carries
+  const reopened = expectSuccess(execute(projectRoot, "open"), "OPENED");
+  assert.equal(reopened.revision, current.state_meta.revision);
+});
+
+test("a state claiming v7 while already carrying newer consultation controls is refused", (t) => {
+  const projectRoot = temporaryProject(t);
+  expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const state = readState(projectRoot);
+  state.state_meta.schema_version = 7;
+  delete state.carried_questions;
+  writeState(projectRoot, state);
+  expectFailure(execute(projectRoot, "open"), "UNSUPPORTED_SCHEMA");
+});
+
+test("schema-8 migration preserves current provenance and marks missing wording explicitly", async (t) => {
+  for (const legacySources of [true, false]) {
+    await t.test(legacySources ? "legacy source shape" : "current source shape", () => {
+      const projectRoot = temporaryProject(t);
+      const question = "Was treatment timing recorded before outcome measurement?";
+      const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+      const started = expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+      const applied = applyDataAuditQuestion(projectRoot, started, question);
+      let prior = expectSuccess(finish(projectRoot, applied, {}, {
+        questionActions: [recordQuestion(question)],
+      }), "OPERATION_FINISHED");
+
+      if (legacySources) {
+        const entry = readState(projectRoot).carried_questions[0];
+        const lead = expectSuccess(begin(projectRoot, prior, "team_lead"), "BEGAN_LEAD");
+        prior = expectSuccess(finish(projectRoot, lead, {}, {
+          questionActions: [retireQuestion(
+            entry.question_id,
+            "answered",
+            "The researcher confirmed treatment timing precedes outcome measurement.",
+          )],
+        }), "OPERATION_FINISHED");
+      } else {
+        prior = expectSuccess(begin(projectRoot, prior, "data_audit"), "BEGAN_WORKER");
+      }
+
+      const v8 = downgradeCurrentStateToV8(projectRoot, { legacySources });
+      const original = fs.readFileSync(statePath(projectRoot));
+      const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V8");
+      assert.deepEqual(fs.readFileSync(migrated.archive_path), original);
+      assert.equal(migrated.revision, v8.state_meta.revision + 1);
+      assert.equal(migrated.mode, legacySources ? "idle" : "resume_worker");
+
+      const current = readState(projectRoot);
+      assert.equal(current.state_meta.schema_version, 9);
+      assert.equal(current.report_assembly.claim_boundary, null);
+      const expectedEntry = structuredClone(v8.carried_questions[0]);
+      if (legacySources) {
+        for (const field of ["first_source", "last_source"]) {
+          expectedEntry[field].source_kind = "legacy_v8";
+          expectedEntry[field].source_text = null;
+        }
+      }
+      assert.deepEqual(current.carried_questions, [expectedEntry]);
+      if (legacySources) {
+        assert.equal(current.carried_questions[0].status, "retired");
+        assert.deepEqual(
+          current.carried_questions[0].resolution,
+          v8.carried_questions[0].resolution,
+        );
+        assert.deepEqual(current.response_receipt, {
+          ...v8.response_receipt,
+          revision: v8.state_meta.revision + 1,
+        });
+      } else {
+        assert.deepEqual(current.state_meta.active_operation, v8.state_meta.active_operation);
+      }
+
+      const migratedBytes = fs.readFileSync(statePath(projectRoot));
+      expectSuccess(execute(projectRoot, "open"), legacySources ? "OPENED" : "RESUME_WORKER");
+      assert.deepEqual(fs.readFileSync(statePath(projectRoot)), migratedBytes);
+      if (!legacySources) {
+        expectSuccess(finish(projectRoot, {
+          ...migrated,
+          operation_id: migrated.active_operation.id,
+        }, {}, { cancel: true }), "OPERATION_CANCELLED");
+      }
+    });
+  }
+
+  await t.test("empty ledger", () => {
+    const projectRoot = temporaryProject(t);
+    expectSuccess(execute(projectRoot, "open"), "CREATED");
+    const v8 = downgradeCurrentStateToV8(projectRoot);
+    const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V8");
+    assert.equal(migrated.revision, v8.state_meta.revision + 1);
+    assert.deepEqual(readState(projectRoot).carried_questions, []);
+  });
+});
+
+test("schema-8 active report must revise a missing claim boundary before completion", (t) => {
+  const projectRoot = temporaryProject(t);
+  const prepared = prepareReportScope(projectRoot);
+  expectSuccess(begin(projectRoot, prepared, "report_writer", {
+    scope_ref: prepared.scope_ref,
+  }), "BEGAN_WORKER");
+  downgradeCurrentStateToV8(projectRoot);
+
+  const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V8");
+  assert.equal(migrated.mode, "resume_worker");
+  assert.equal(readState(projectRoot).report_assembly.claim_boundary, null);
+  const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+    payload: {
+      ...expected(migrated),
+      operation_id: migrated.active_operation.id,
+      kind: "file",
+      slug: "migrated-v8-report",
+      extension: "html",
+    },
+  }), "ARTIFACT_RESERVED");
+  const beforeRejectedCompletion = fs.readFileSync(statePath(projectRoot));
+
+  const rejected = expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: reserved.operation_id,
+      actor: "report_writer",
+      scope_transition: "preserve",
+      updates: {
+        report_assembly: { current_format: "html" },
+        council_chamber: {
+          report_writer: { current_status: "done" },
+        },
+      },
+      artifact: scopedArtifact(reserved, "Rejected boundary-free report."),
+    },
+  }), "SCOPE_MISMATCH");
+  assert.deepEqual(rejected.details.missing_fields, ["claim_boundary"]);
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), beforeRejectedCompletion);
+
+  const repaired = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: reserved.operation_id,
+      actor: "report_writer",
+      scope_transition: "revise",
+      updates: {
+        report_assembly: {
+          claim_boundary: "Report only claims supported by the explicitly bound evidence.",
+          analysis_artifact_ids: [],
+        },
+        council_chamber: {
+          report_writer: { current_status: "ready" },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+  const repairClosed = expectSuccess(finish(projectRoot, repaired), "OPERATION_FINISHED");
+  const repairedScope = readState(projectRoot).report_assembly;
+  const approved = expectSuccess(begin(projectRoot, repairClosed, "report_writer", {
+    scope_ref: {
+      kind: "report",
+      id: repairedScope.scope_id,
+      revision: repairedScope.scope_revision,
+    },
+  }), "BEGAN_WORKER");
+  const output = expectSuccess(execute(projectRoot, "reserve-artifact", {
+    payload: {
+      ...expected(approved),
+      operation_id: approved.operation_id,
+      kind: "file",
+      slug: "repaired-v8-report",
+      extension: "html",
+    },
+  }), "ARTIFACT_RESERVED");
+  writeReservedTemporary(projectRoot, output, "<!doctype html><title>Repaired report</title>\n");
+  const completed = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(output),
+      operation_id: output.operation_id,
+      actor: "report_writer",
+      scope_transition: "preserve",
+      updates: {
+        report_assembly: { current_format: "html" },
+        council_chamber: {
+          report_writer: { current_status: "done" },
+        },
+      },
+      artifact: scopedArtifact(output, "Completed repaired schema-8 report."),
+    },
+  }), "WORKER_APPLIED");
+  expectSuccess(finish(projectRoot, completed), "OPERATION_FINISHED");
+  assert.equal(
+    readState(projectRoot).report_assembly.claim_boundary,
+    "Report only claims supported by the explicitly bound evidence.",
+  );
+});
+
+test("schema-8 completed report closes under its frozen legacy contract", (t) => {
+  const projectRoot = temporaryProject(t);
+  const prepared = prepareReportScope(projectRoot);
+  const started = expectSuccess(begin(projectRoot, prepared, "report_writer", {
+    scope_ref: prepared.scope_ref,
+  }), "BEGAN_WORKER");
+  const reserved = expectSuccess(execute(projectRoot, "reserve-artifact", {
+    payload: {
+      ...expected(started),
+      operation_id: started.operation_id,
+      kind: "file",
+      slug: "completed-v8-report",
+      extension: "html",
+    },
+  }), "ARTIFACT_RESERVED");
+  writeReservedTemporary(projectRoot, reserved, "<!doctype html><title>Legacy completed report</title>\n");
+  expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(reserved),
+      operation_id: reserved.operation_id,
+      actor: "report_writer",
+      scope_transition: "preserve",
+      updates: {
+        report_assembly: { current_format: "html" },
+        council_chamber: {
+          report_writer: { current_status: "done" },
+        },
+      },
+      artifact: scopedArtifact(reserved, "Completed report before migration."),
+    },
+  }), "WORKER_APPLIED");
+
+  const reportState = readState(projectRoot);
+  const schema8Bundle = legacyReportContractBundle(
+    reportState.report_assembly,
+    { includeEvidenceBinding: true },
+  );
+  const manifestPath = path.join(projectRoot, ...reserved.manifest_path.split("/"));
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const evidenceFile = manifest.execution_receipt.evidence_files[0];
+  manifest.requirements = schema8Bundle.requirements;
+  manifest.execution_receipt.contract_hash = schema8Bundle.contractHash;
+  manifest.execution_receipt.completed_requirements =
+    schema8Bundle.requirements.map((requirement) => requirement.id);
+  manifest.execution_receipt.unmet_requirements = [];
+  manifest.execution_receipt.requirement_evidence =
+    schema8Bundle.requirements.map((requirement) => ({
+      requirement_id: requirement.id,
+      file: evidenceFile,
+      locator: `Evidence for ${requirement.id}`,
+    }));
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  downgradeCurrentStateToV8(projectRoot);
+
+  const migrated = expectSuccess(execute(projectRoot, "open"), "MIGRATED_V8");
+  assert.equal(migrated.mode, "resume_lead");
+  assert.equal(migrated.artifact_status.location_state, "complete");
+  assert.equal(readState(projectRoot).report_assembly.claim_boundary, null);
+  expectSuccess(finish(projectRoot, {
+    ...migrated,
+    operation_id: migrated.active_operation.id,
+  }), "OPERATION_FINISHED");
+  assert.equal(readState(projectRoot).state_meta.active_operation, null);
+});
+
+test("partial schema-8 question provenance fails without mutation or archive", (t) => {
+  const projectRoot = temporaryProject(t);
+  const question = "Was the treatment timestamp recorded prospectively?";
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+  const applied = applyDataAuditQuestion(projectRoot, started, question);
+  const closed = expectSuccess(finish(projectRoot, applied, {}, {
+    questionActions: [recordQuestion(question)],
+  }), "OPERATION_FINISHED");
+  const v8 = downgradeCurrentStateToV8(projectRoot);
+  delete v8.carried_questions[0].first_source.source_text;
+  writeState(projectRoot, v8);
+  const before = fs.readFileSync(statePath(projectRoot));
+
+  expectFailure(execute(projectRoot, "open"), "UNSUPPORTED_SCHEMA");
+  assert.deepEqual(fs.readFileSync(statePath(projectRoot)), before);
+  assert.equal(fs.existsSync(path.join(projectRoot, "project_state.archives")), false);
+  assert.equal(closed.project_id, v8.state_meta.project_id);
+});
+
+test("schema 9 requires the carried-question ledger", (t) => {
+  const projectRoot = temporaryProject(t);
+  expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const state = readState(projectRoot);
+  delete state.carried_questions;
+  writeState(projectRoot, state);
+  expectFailure(execute(projectRoot, "open"), "INVALID_STATE");
+});
+
+test("lead phase selects question and audience modules from state and computes directives", (t) => {
+  const projectRoot = temporaryProject(t);
+  const question = "Is the enrollment date recorded per patient or only per site cohort?";
+  const audienceUnstated = {
+    kind: "audience_unstated",
+    instruction: "The audience level is unstated. Set project_summary.audience_profile only if this turn's message or committed project evidence demonstrates the user's statistical fluency; otherwise leave it unstated and explain at a neutral depth.",
+  };
+
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  assert.deepEqual(opened.turn_context.directives, []);
+  const firstStarted = expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+  assert.deepEqual(firstStarted.turn_context.directives, []);
+  assertRequiredReferences(firstStarted, ["references/data_audit.md"]);
+
+  const firstApplied = applyDataAuditQuestion(projectRoot, firstStarted, question);
+  assertRequiredReferences(firstApplied, [
+    "references/team_lead.md",
+    "references/team_lead_questions.md",
+    "references/team_lead_audience.md",
+  ]);
+  assert.deepEqual(firstApplied.turn_context.directives, [
+    audienceUnstated,
+    {
+      kind: "handoff_questions",
+      count: 1,
+      instruction: "The current handoff raised 1 question(s) for the user. Record each material one through question_actions with its exact committed text; surface at most one this turn.",
+    },
+  ]);
+
+  expectSuccess(finish(projectRoot, firstApplied, {
+    project_summary: {
+      audience_profile: { level: "applied", evidence: "runs regressions in R", preferences: [] },
+    },
+  }, { questionActions: [recordQuestion(question)] }), "OPERATION_FINISHED");
+  const questionId = readState(projectRoot).carried_questions[0].question_id;
+
+  const idle = expectSuccess(execute(projectRoot, "open"), "OPENED");
+  const leadOnly = expectSuccess(begin(projectRoot, idle, "team_lead"), "BEGAN_LEAD");
+  assertRequiredReferences(leadOnly, ["references/team_lead.md", "references/team_lead_questions.md"]);
+  assert.deepEqual(leadOnly.turn_context.directives, [{
+    kind: "open_questions_summary",
+    open: 1,
+    never_surfaced: 1,
+    overdue: 0,
+    omitted_from_directives: 0,
+    instruction: "Surface at most one carried question per turn: the one whose answer would change the most. Omitting an open question from question_actions holds it unchanged.",
+  }]);
+  expectSuccess(finish(projectRoot, leadOnly, {}, { cancel: true }), "OPERATION_CANCELLED");
+
+  const secondIdle = expectSuccess(execute(projectRoot, "open"), "OPENED");
+  const secondStarted = expectSuccess(begin(projectRoot, secondIdle, "data_audit"), "BEGAN_WORKER");
+  const secondApplied = applyDataAuditQuestion(projectRoot, secondStarted, question);
+  expectSuccess(finish(projectRoot, secondApplied, {}, {
+    questionActions: [recordQuestion(question, { questionId })],
+  }), "OPERATION_FINISHED");
+
+  const thirdIdle = expectSuccess(execute(projectRoot, "open"), "OPENED");
+  const overdueLead = expectSuccess(begin(projectRoot, thirdIdle, "team_lead"), "BEGAN_LEAD");
+  assert.equal(overdueLead.turn_context.directives[0].kind, "question_overdue");
+  assert.equal(overdueLead.turn_context.directives[0].question_id, questionId);
+  assert.equal(overdueLead.turn_context.directives[0].source_operation_count, 2);
+  assert.equal(overdueLead.turn_context.directives.at(-1).overdue, 1);
+  const surfacePresentation = structuredClone(DEFAULT_PRESENTATION);
+  surfacePresentation.next_steps = "Share your data files. " + question;
+  expectSuccess(finish(projectRoot, overdueLead, {}, {
+    presentation: surfacePresentation,
+    questionActions: [surfaceQuestion(questionId)],
+  }), "OPERATION_FINISHED");
+
+  const fourthIdle = expectSuccess(execute(projectRoot, "open"), "OPENED");
+  const awaitingLead = expectSuccess(begin(projectRoot, fourthIdle, "team_lead"), "BEGAN_LEAD");
+  assert.equal(awaitingLead.turn_context.directives[0].kind, "question_awaiting_answer");
+  assert.equal(awaitingLead.turn_context.directives[0].question_id, questionId);
+  expectSuccess(finish(projectRoot, awaitingLead, {}, {
+    questionActions: [retireQuestion(questionId, "answered", "Per patient, confirmed by the user.")],
+  }), "OPERATION_FINISHED");
+
+  const fifthIdle = expectSuccess(execute(projectRoot, "open"), "OPENED");
+  const quietLead = expectSuccess(begin(projectRoot, fifthIdle, "team_lead"), "BEGAN_LEAD");
+  assertRequiredReferences(quietLead, ["references/team_lead.md"]);
+  assert.deepEqual(quietLead.turn_context.directives, []);
+  expectSuccess(finish(projectRoot, quietLead, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
+test("carried questions preserve provenance and lifecycle across operations", (t) => {
+  const projectRoot = temporaryProject(t);
+  const firstQuestion = "Does treatment begin before outcome measurement?";
+  const repeatedQuestion = "Can you confirm whether treatment begins before the outcome is measured?";
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+
+  const firstStarted = expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+  const firstApplied = applyDataAuditQuestion(projectRoot, firstStarted, firstQuestion);
+  const firstClosed = expectSuccess(finish(projectRoot, firstApplied, {}, {
+    questionActions: [recordQuestion(firstQuestion)],
+  }), "OPERATION_FINISHED");
+
+  const firstState = readState(projectRoot);
+  assert.equal(firstState.carried_questions.length, 1);
+  const initial = structuredClone(firstState.carried_questions[0]);
+  assert.match(initial.question_id, /^[0-9a-f-]{36}$/);
+  assert.equal(initial.question, firstQuestion);
+  assert.deepEqual(initial.first_source, {
+    actor: "data_audit",
+    operation_id: firstStarted.operation_id,
+    revision: firstClosed.revision,
+    source_kind: "handoff",
+    source_text: firstQuestion,
+  });
+  assert.deepEqual(initial.last_source, initial.first_source);
+  assert.equal(initial.source_operation_count, 1);
+  assert.equal(initial.status, "open");
+  assert.equal(initial.first_surfaced_revision, null);
+  assert.equal(initial.retired_revision, null);
+  assert.equal(initial.resolution, null);
+  const summaryUpdated = firstState.project_summary.last_updated;
+
+  const idle = expectSuccess(execute(projectRoot, "open"), "OPENED");
+  assert.deepEqual(idle.turn_context.state.carried_questions, [projectedOpenQuestion(initial)]);
+  const secondStarted = expectSuccess(begin(projectRoot, idle, "data_audit"), "BEGAN_WORKER");
+  assert.equal(readState(projectRoot).response_receipt, null);
+  assert.deepEqual(
+    secondStarted.turn_context.state.carried_questions,
+    [projectedOpenQuestion(initial)],
+  );
+  const secondApplied = applyDataAuditQuestion(projectRoot, secondStarted, repeatedQuestion);
+  assert.deepEqual(secondApplied.turn_context.state.carried_questions, [initial]);
+
+  const surfacePresentation = structuredClone(DEFAULT_PRESENTATION);
+  surfacePresentation.next_steps = "Please answer this before the next analysis: " + firstQuestion;
+  const secondClosed = expectSuccess(finish(projectRoot, secondApplied, {}, {
+    presentation: surfacePresentation,
+    questionActions: [recordQuestion(repeatedQuestion, {
+      questionId: initial.question_id,
+      surface: true,
+    })],
+  }), "OPERATION_FINISHED");
+  const repeated = readState(projectRoot).carried_questions[0];
+  assert.equal(repeated.question, firstQuestion);
+  assert.deepEqual(repeated.first_source, initial.first_source);
+  assert.deepEqual(repeated.last_source, {
+    actor: "data_audit",
+    operation_id: secondStarted.operation_id,
+    revision: secondClosed.revision,
+    source_kind: "handoff",
+    source_text: repeatedQuestion,
+  });
+  assert.equal(repeated.source_operation_count, 2);
+  assert.equal(repeated.first_surfaced_revision, secondClosed.revision);
+
+  const retirementStarted = expectSuccess(
+    begin(projectRoot, secondClosed, "team_lead"),
+    "BEGAN_LEAD",
+  );
+  assert.deepEqual(retirementStarted.turn_context.state.carried_questions, [repeated]);
+  const retirementClosed = expectSuccess(finish(projectRoot, retirementStarted, {}, {
+    questionActions: [retireQuestion(
+      repeated.question_id,
+      "answered",
+      "The user confirmed that treatment precedes outcome measurement.",
+    )],
+  }), "OPERATION_FINISHED");
+  const retired = readState(projectRoot).carried_questions[0];
+  assert.equal(retired.status, "retired");
+  assert.equal(retired.retired_revision, retirementClosed.revision);
+  assert.deepEqual(retired.resolution, {
+    kind: "answered",
+    note: "The user confirmed that treatment precedes outcome measurement.",
+  });
+  assert.equal(readState(projectRoot).project_summary.last_updated, summaryUpdated);
+
+  const reopened = expectSuccess(execute(projectRoot, "open"), "OPENED");
+  assert.deepEqual(
+    reopened.turn_context.state.carried_questions,
+    [projectedRetiredQuestion(retired)],
+  );
+  const worker = expectSuccess(begin(projectRoot, reopened, "data_audit"), "BEGAN_WORKER");
+  assert.deepEqual(
+    worker.turn_context.state.carried_questions,
+    [projectedRetiredQuestion(retired)],
+  );
+  const lead = expectSuccess(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(worker),
+      operation_id: worker.operation_id,
+      actor: "data_audit",
+      updates: {
+        data_facts: { data_checked: "limited" },
+        council_chamber: {
+          data_audit: {
+            current_status: "limited",
+            summary: "No new question was raised.",
+            questions_for_user: [],
+            feedback_to_route: [],
+          },
+        },
+      },
+    },
+  }), "WORKER_APPLIED");
+  assert.deepEqual(lead.turn_context.state.carried_questions, [retired]);
+  expectSuccess(finish(projectRoot, lead, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
+test("surface actions are atomic and must match the rendered presentation", (t) => {
+  const projectRoot = temporaryProject(t);
+  const question = "Which outcome definition should govern the primary claim?";
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+  const before = fs.readFileSync(statePath(projectRoot), "utf8");
+
+  expectFailure(finish(projectRoot, started, {}, {
+    questionActions: [recordQuestion(question, { surface: true })],
+  }), "INVALID_INPUT");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), before);
+
+  const presentation = structuredClone(DEFAULT_PRESENTATION);
+  presentation.next_steps = "Please answer this design question: " + question;
+  const closed = expectSuccess(finish(projectRoot, started, {}, {
+    presentation,
+    questionActions: [recordQuestion(question, { surface: true })],
+  }), "OPERATION_FINISHED");
+  const entry = readState(projectRoot).carried_questions[0];
+  assert.equal(entry.first_source.actor, "team_lead");
+  assert.equal(entry.first_surfaced_revision, closed.revision);
+
+  const optionsStarted = expectSuccess(
+    begin(projectRoot, closed, "team_lead"),
+    "BEGAN_LEAD",
+  );
+  const optionQuestion = "What decision threshold would change the recommendation?";
+  const optionPresentation = optionsPresentation([
+    decisionOption("Audit", "data_audit"),
+    decisionOption("Domain review", "domain_expert"),
+  ]);
+  optionPresentation.next_steps = optionQuestion;
+  const optionsBefore = fs.readFileSync(statePath(projectRoot), "utf8");
+  expectFailure(finish(projectRoot, optionsStarted, {}, {
+    presentation: optionPresentation,
+    questionActions: [recordQuestion(optionQuestion, { surface: true })],
+  }), "INVALID_INPUT");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), optionsBefore);
+
+  optionPresentation.framing += " " + optionQuestion;
+  expectSuccess(finish(projectRoot, optionsStarted, {}, {
+    presentation: optionPresentation,
+    questionActions: [recordQuestion(optionQuestion, { surface: true })],
+  }), "OPERATION_FINISHED");
+
+  const secondRoot = temporaryProject(t);
+  const secondOpened = expectSuccess(execute(secondRoot, "open"), "CREATED");
+  const secondStarted = expectSuccess(begin(secondRoot, secondOpened, "team_lead"), "BEGAN_LEAD");
+  const first = "Is treatment timing known?";
+  const second = "Is outcome measurement blinded?";
+  const twoQuestionPresentation = structuredClone(DEFAULT_PRESENTATION);
+  twoQuestionPresentation.next_steps = first + " " + second;
+  const secondBefore = fs.readFileSync(statePath(secondRoot), "utf8");
+  expectFailure(finish(secondRoot, secondStarted, {}, {
+    presentation: twoQuestionPresentation,
+    questionActions: [
+      recordQuestion(first, { surface: true }),
+      recordQuestion(second, { surface: true }),
+    ],
+  }), "INVALID_INPUT");
+  assert.equal(fs.readFileSync(statePath(secondRoot), "utf8"), secondBefore);
+  expectSuccess(finish(secondRoot, secondStarted, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
+test("question actions enforce ownership, cancellation, and canonical identity", (t) => {
+  const projectRoot = temporaryProject(t);
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const worker = expectSuccess(begin(projectRoot, opened, "data_audit"), "BEGAN_WORKER");
+  const workerBefore = fs.readFileSync(statePath(projectRoot), "utf8");
+  expectFailure(execute(projectRoot, "apply", {
+    payload: {
+      ...expected(worker),
+      operation_id: worker.operation_id,
+      actor: "data_audit",
+      updates: { carried_questions: [] },
+    },
+  }), "OWNERSHIP_VIOLATION");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), workerBefore);
+  expectFailure(finish(projectRoot, worker, {}, {
+    cancel: true,
+    questionActions: [recordQuestion("Should this be stored?")],
+  }), "OWNERSHIP_VIOLATION");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), workerBefore);
+  const cancelled = expectSuccess(
+    finish(projectRoot, worker, {}, { cancel: true }),
+    "OPERATION_CANCELLED",
+  );
+
+  const lead = expectSuccess(begin(projectRoot, cancelled, "team_lead"), "BEGAN_LEAD");
+  const leadBefore = fs.readFileSync(statePath(projectRoot), "utf8");
+  expectFailure(finish(projectRoot, lead, { carried_questions: [] }), "OWNERSHIP_VIOLATION");
+  assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), leadBefore);
+
+  const malformed = [
+    null,
+    [{}],
+    [{ action: "record", question_id: null, source_text: "Missing surface." }],
+    [recordQuestion("Two\nlines")],
+    [recordQuestion("Invalid id.", { questionId: "not-a-uuid" })],
+    [
+      recordQuestion("Is the population fixed?"),
+      recordQuestion("  IS   THE POPULATION FIXED?  "),
+    ],
+    [surfaceQuestion(crypto.randomUUID())],
+    [retireQuestion(crypto.randomUUID(), "answered", "Unknown question.")],
+    Array.from({ length: 21 }, (_, index) => recordQuestion("Question " + index + "?")),
+  ];
+  for (const questionActions of malformed) {
+    expectFailure(finish(projectRoot, lead, {}, { questionActions }), "INVALID_INPUT");
+    assert.equal(fs.readFileSync(statePath(projectRoot), "utf8"), leadBefore);
+  }
+  expectSuccess(finish(projectRoot, lead, {}, { cancel: true }), "OPERATION_CANCELLED");
+});
+
+test("strict validation rejects corrupted carried-question history", (t) => {
+  const projectRoot = temporaryProject(t);
+  const question = "Is the coded exposure the intervention of scientific interest?";
+  const opened = expectSuccess(execute(projectRoot, "open"), "CREATED");
+  const started = expectSuccess(begin(projectRoot, opened, "team_lead"), "BEGAN_LEAD");
+  expectSuccess(finish(projectRoot, started, {}, {
+    questionActions: [recordQuestion(question)],
+  }), "OPERATION_FINISHED");
+  const valid = readState(projectRoot);
+
+  const mutations = [
+    (state) => {
+      state.carried_questions.push({
+        ...structuredClone(state.carried_questions[0]),
+        question_id: crypto.randomUUID(),
+      });
+    },
+    (state) => {
+      state.carried_questions[0].first_source.actor = "unknown_actor";
+      state.carried_questions[0].last_source.actor = "unknown_actor";
+    },
+    (state) => {
+      state.carried_questions[0].first_source.source_text = "A different first source.";
+      state.carried_questions[0].last_source.source_text = "A different first source.";
+    },
+    (state) => {
+      state.carried_questions[0].first_source.source_kind = "handoff";
+      state.carried_questions[0].last_source.source_kind = "handoff";
+    },
+    (state) => {
+      state.carried_questions[0].first_source.source_kind = "legacy_v8";
+      state.carried_questions[0].last_source.source_kind = "legacy_v8";
+    },
+    (state) => {
+      state.carried_questions[0].first_source.source_text = null;
+      state.carried_questions[0].last_source.source_text = null;
+    },
+    (state) => {
+      state.carried_questions[0].source_operation_count = 2;
+    },
+    (state) => {
+      state.carried_questions[0].first_surfaced_revision = state.state_meta.revision + 1;
+    },
+    (state) => {
+      state.carried_questions[0].resolution = {
+        kind: "answered",
+        note: "Open questions cannot carry retirement data.",
+      };
+    },
+    (state) => {
+      const entry = state.carried_questions[0];
+      entry.status = "retired";
+      entry.retired_revision = entry.last_source.revision - 1;
+      entry.resolution = { kind: "answered", note: "Invalid revision order." };
+    },
+  ];
+
+  for (const mutate of mutations) {
+    const corrupted = structuredClone(valid);
+    mutate(corrupted);
+    writeState(projectRoot, corrupted);
+    expectFailure(execute(projectRoot, "open"), "INVALID_STATE");
+  }
+  writeState(projectRoot, valid);
+  expectSuccess(execute(projectRoot, "open"), "OPENED");
 });

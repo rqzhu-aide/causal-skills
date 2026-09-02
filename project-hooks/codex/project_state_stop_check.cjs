@@ -7393,18 +7393,31 @@ var require_core = __commonJS({
     "use strict";
     var crypto = require("node:crypto");
     var fs = require("node:fs");
+    var os = require("node:os");
     var path = require("node:path");
     var { isDeepStrictEqual } = require("node:util");
     var YAML = require_dist();
     var ROUTES = require_route_catalog();
-    var SCHEMA_VERSION = 7;
+    var SCHEMA_VERSION = 9;
     var MANIFEST_VERSION = 3;
     var RECEIPT_MANIFEST_VERSION = 2;
     var LEGACY_MANIFEST_VERSION = 1;
     var PHASE_CAPSULE_PROTOCOL = "phase-capsule-v1";
     var PHASE_CAPSULE_VERSION = 1;
     var STATE_FILE = "project_state.yaml";
+    var STATE_LOCK_FILE = ".causal-consultant-state.lock";
+    var STATE_LOCK_OWNER_FILE = "owner.json";
+    var STATE_LOCK_INITIALIZATION_GRACE_MS = 3e4;
     var ARCHIVE_DIR = "project_state.archives";
+    var AUDIENCE_LEVELS = ["unstated", "novice", "applied", "trained", "expert"];
+    var MAX_AUDIENCE_PREFERENCES = 3;
+    var MAX_AUDIENCE_TEXT_LENGTH = 300;
+    var MAX_CARRIED_QUESTIONS = 100;
+    var MAX_CARRIED_QUESTION_ACTIONS = 20;
+    var MAX_CARRIED_QUESTION_TEXT_LENGTH = 500;
+    var CARRIED_QUESTION_STATUSES = ["open", "retired"];
+    var CARRIED_QUESTION_RESOLUTION_KINDS = ["answered", "immaterial", "unavailable"];
+    var CARRIED_QUESTION_SOURCE_KINDS = ["handoff", "synthesized", "legacy_v8"];
     var MAX_INTENT_LENGTH = 1e3;
     var MAX_RESPONSE_TEXT_LENGTH = 1e3;
     var MAX_RESPONSE_FRAMING_LENGTH = 6e3;
@@ -7490,6 +7503,7 @@ var require_core = __commonJS({
       "report_goal",
       "audience",
       "target_section",
+      "claim_boundary",
       "planned_structure",
       "key_points",
       "wording_constraints",
@@ -7498,6 +7512,7 @@ var require_core = __commonJS({
     var REQUIRED_TOP_LEVEL = [
       "state_meta",
       "project_summary",
+      "carried_questions",
       "council_chamber",
       "next_step_plan",
       "pending_decision",
@@ -7509,10 +7524,11 @@ var require_core = __commonJS({
       "report_assembly",
       "artifact_records"
     ];
-    var LEGACY_TOP_LEVEL = REQUIRED_TOP_LEVEL.filter(
+    var PRE_V8_TOP_LEVEL = REQUIRED_TOP_LEVEL.filter((key) => key !== "carried_questions");
+    var LEGACY_TOP_LEVEL = PRE_V8_TOP_LEVEL.filter(
       (key) => !["state_meta", "pending_decision", "response_receipt"].includes(key)
     );
-    var V2_TOP_LEVEL = REQUIRED_TOP_LEVEL.filter(
+    var V2_TOP_LEVEL = PRE_V8_TOP_LEVEL.filter(
       (key) => !["pending_decision", "response_receipt"].includes(key)
     );
     var CORE_WORKERS = new Set(ROUTES.core.filter((id) => id !== "team_lead"));
@@ -7530,6 +7546,7 @@ var require_core = __commonJS({
         "materials",
         "last_updated",
         "phase",
+        "audience_profile",
         "data_audit_complete",
         "domain_knowledge_complete",
         "causal_check_complete",
@@ -7607,6 +7624,7 @@ var require_core = __commonJS({
         "report_goal",
         "audience",
         "target_section",
+        "claim_boundary",
         "planned_structure",
         "key_points",
         "wording_constraints",
@@ -7781,7 +7799,7 @@ var require_core = __commonJS({
         }
         base.analysis_artifact_ids = [...reportAssembly.analysis_artifact_ids].sort();
       }
-      for (const field of ["report_goal", "audience", "target_section"]) {
+      for (const field of ["report_goal", "audience", "target_section", "claim_boundary"]) {
         const value = reportAssembly[field];
         if (typeof value === "string" && value.trim()) base[field] = value.trim();
       }
@@ -7791,6 +7809,36 @@ var require_core = __commonJS({
       }
       if (reportAssembly.current_format === null) return [base];
       return [{ ...base, current_format: reportAssembly.current_format }, base];
+    }
+    function assertReportScopeStructureComplete(reportAssembly, code = "SCOPE_MISMATCH") {
+      const missing = [];
+      for (const field of ["report_goal", "audience", "claim_boundary"]) {
+        if (typeof reportAssembly[field] !== "string" || !reportAssembly[field].trim()) {
+          missing.push(field);
+        }
+      }
+      for (const field of ["planned_structure", "wording_constraints"]) {
+        if (!Array.isArray(reportAssembly[field]) || !reportAssembly[field].some((item) => typeof item === "string" && item.trim())) {
+          missing.push(field);
+        }
+      }
+      if (missing.length) {
+        fail(
+          code,
+          "a ready report scope requires a goal, audience, structure, wording constraints, and explicit claim boundary",
+          { missing_fields: missing }
+        );
+      }
+    }
+    function assertReadyReportScopeComplete(reportAssembly, code = "SCOPE_MISMATCH") {
+      assertReportScopeStructureComplete(reportAssembly, code);
+      if (reportAssembly.current_format !== null) {
+        fail(
+          code,
+          "a ready report scope requires current_format null until report output is completed",
+          { current_format: reportAssembly.current_format }
+        );
+      }
     }
     function requirementDescriptions(scopeKind, contract) {
       const requirements = [];
@@ -7815,7 +7863,7 @@ var require_core = __commonJS({
         add("output_type", contract.output_type);
         add("claim_boundary", contract.claim_boundary);
       } else if (scopeKind === "report") {
-        for (const field of ["report_goal", "audience", "target_section"]) {
+        for (const field of ["report_goal", "audience", "target_section", "claim_boundary"]) {
           if (contract[field] !== void 0) add(field, contract[field]);
         }
         for (const field of ["planned_structure", "key_points", "wording_constraints"]) {
@@ -8558,6 +8606,195 @@ var require_core = __commonJS({
       assertStringArray(slot.questions_for_user, `${label}.questions_for_user`);
       assertStringArray(slot.feedback_to_route, `${label}.feedback_to_route`);
     }
+    function validateAudienceProfile(profile) {
+      const label = "project_summary.audience_profile";
+      assertObject(profile, label);
+      assertKnownKeys(profile, /* @__PURE__ */ new Set(["level", "evidence", "preferences"]), label);
+      for (const key of ["level", "evidence", "preferences"]) {
+        if (!Object.prototype.hasOwnProperty.call(profile, key)) {
+          fail("INVALID_STATE", `${label}.${key} is required`);
+        }
+      }
+      assertEnum(profile.level, AUDIENCE_LEVELS, `${label}.level`);
+      if (profile.evidence !== null) {
+        if (typeof profile.evidence !== "string" || !profile.evidence.trim()) {
+          fail("INVALID_STATE", `${label}.evidence must be a nonempty string or null`);
+        }
+        if (profile.evidence !== profile.evidence.trim()) {
+          fail("INVALID_STATE", `${label}.evidence must use a trimmed canonical string`);
+        }
+        if (profile.evidence.length > MAX_AUDIENCE_TEXT_LENGTH) {
+          fail("INVALID_STATE", `${label}.evidence may contain at most ${MAX_AUDIENCE_TEXT_LENGTH} characters`);
+        }
+      }
+      if (profile.level === "unstated" && profile.evidence !== null) {
+        fail("INVALID_STATE", `${label}.evidence must be null while level is unstated`);
+      }
+      if (profile.level !== "unstated" && profile.evidence === null) {
+        fail("INVALID_STATE", `${label}.level requires evidence naming what established it`);
+      }
+      assertStringArray(profile.preferences, `${label}.preferences`);
+      if (profile.preferences.length > MAX_AUDIENCE_PREFERENCES) {
+        fail("INVALID_STATE", `${label}.preferences may contain at most ${MAX_AUDIENCE_PREFERENCES} items`);
+      }
+      profile.preferences.forEach((item, index) => {
+        if (!item.trim() || item !== item.trim()) {
+          fail("INVALID_STATE", `${label}.preferences[${index}] must be a trimmed nonempty string`);
+        }
+        if (item.length > MAX_AUDIENCE_TEXT_LENGTH) {
+          fail("INVALID_STATE", `${label}.preferences[${index}] may contain at most ${MAX_AUDIENCE_TEXT_LENGTH} characters`);
+        }
+      });
+      if (new Set(profile.preferences).size !== profile.preferences.length) {
+        fail("INVALID_STATE", `${label}.preferences must not contain duplicates`);
+      }
+    }
+    function isKnownQuestionActor(actor) {
+      if (actor === "team_lead" || CORE_WORKERS.has(actor)) return true;
+      if (typeof actor !== "string" || !actor.startsWith("analysis_execution.")) return false;
+      return DESIGN_IDS.has(actor.slice("analysis_execution.".length));
+    }
+    function canonicalQuestionKey(value) {
+      return value.toLowerCase().replace(/\s+/g, " ");
+    }
+    function validateCarriedQuestionText(value, label, code = "INVALID_STATE") {
+      if (typeof value !== "string" || !value.trim() || value !== value.trim() || /[\r\n]/.test(value)) {
+        fail(code, `${label} must be a trimmed nonempty single-line string`);
+      }
+      if (value.length > MAX_CARRIED_QUESTION_TEXT_LENGTH) {
+        fail(code, `${label} may contain at most ${MAX_CARRIED_QUESTION_TEXT_LENGTH} characters`);
+      }
+    }
+    function validateCarriedQuestionSource(source, label, stateRevision) {
+      assertKnownKeys(
+        source,
+        /* @__PURE__ */ new Set(["actor", "operation_id", "revision", "source_kind", "source_text"]),
+        label
+      );
+      for (const key of ["actor", "operation_id", "revision", "source_kind", "source_text"]) {
+        if (!Object.prototype.hasOwnProperty.call(source, key)) {
+          fail("INVALID_STATE", `${label}.${key} is required`);
+        }
+      }
+      if (!isKnownQuestionActor(source.actor)) {
+        fail("INVALID_STATE", `${label}.actor is not a supported operation actor`);
+      }
+      if (!isUuid(source.operation_id)) {
+        fail("INVALID_STATE", `${label}.operation_id must be a UUID`);
+      }
+      assertEnum(source.source_kind, CARRIED_QUESTION_SOURCE_KINDS, `${label}.source_kind`);
+      if (source.source_kind === "legacy_v8") {
+        if (source.source_text !== null) {
+          fail("INVALID_STATE", `${label}.source_text must be null for legacy_v8 provenance`);
+        }
+      } else {
+        validateCarriedQuestionText(source.source_text, `${label}.source_text`);
+        if (source.source_kind === "handoff" && source.actor === "team_lead" || source.source_kind === "synthesized" && source.actor !== "team_lead") {
+          fail("INVALID_STATE", `${label}.source_kind does not match its actor`);
+        }
+      }
+      if (!Number.isInteger(source.revision) || source.revision < 1 || source.revision > stateRevision) {
+        fail("INVALID_STATE", `${label}.revision must be a committed positive revision`);
+      }
+    }
+    function validateCarriedQuestions(questions, stateRevision, templateMode = false) {
+      assertArray(questions, "carried_questions");
+      if (questions.length > MAX_CARRIED_QUESTIONS) {
+        fail("INVALID_STATE", `carried_questions may contain at most ${MAX_CARRIED_QUESTIONS} entries`);
+      }
+      if (templateMode && questions.length !== 0) {
+        fail("INVALID_STATE", "the bundled template must leave carried_questions empty");
+      }
+      const ids = /* @__PURE__ */ new Set();
+      const canonicalQuestions = /* @__PURE__ */ new Set();
+      questions.forEach((entry, index) => {
+        const label = `carried_questions[${index}]`;
+        assertKnownKeys(entry, /* @__PURE__ */ new Set([
+          "question_id",
+          "question",
+          "first_source",
+          "last_source",
+          "source_operation_count",
+          "status",
+          "first_surfaced_revision",
+          "retired_revision",
+          "resolution"
+        ]), label);
+        for (const key of [
+          "question_id",
+          "question",
+          "first_source",
+          "last_source",
+          "source_operation_count",
+          "status",
+          "first_surfaced_revision",
+          "retired_revision",
+          "resolution"
+        ]) {
+          if (!Object.prototype.hasOwnProperty.call(entry, key)) {
+            fail("INVALID_STATE", `${label}.${key} is required`);
+          }
+        }
+        if (!isUuid(entry.question_id)) {
+          fail("INVALID_STATE", `${label}.question_id must be a UUID`);
+        }
+        if (ids.has(entry.question_id)) {
+          fail("INVALID_STATE", "carried_questions must use unique question IDs");
+        }
+        ids.add(entry.question_id);
+        validateCarriedQuestionText(entry.question, `${label}.question`);
+        const questionKey = canonicalQuestionKey(entry.question);
+        if (canonicalQuestions.has(questionKey)) {
+          fail("INVALID_STATE", "carried_questions must use unique canonical question text");
+        }
+        canonicalQuestions.add(questionKey);
+        validateCarriedQuestionSource(entry.first_source, `${label}.first_source`, stateRevision);
+        validateCarriedQuestionSource(entry.last_source, `${label}.last_source`, stateRevision);
+        if (entry.first_source.source_kind !== "legacy_v8" && entry.first_source.source_text !== entry.question) {
+          fail("INVALID_STATE", `${label}.first_source.source_text must equal the canonical question`);
+        }
+        if (entry.last_source.revision < entry.first_source.revision) {
+          fail("INVALID_STATE", `${label}.last_source cannot precede first_source`);
+        }
+        if (!Number.isInteger(entry.source_operation_count) || entry.source_operation_count < 1 || entry.source_operation_count > stateRevision) {
+          fail("INVALID_STATE", `${label}.source_operation_count must be a positive integer`);
+        }
+        if (entry.source_operation_count === 1 && !deepEqual(entry.first_source, entry.last_source)) {
+          fail("INVALID_STATE", `${label} with one source operation must have identical first and last sources`);
+        }
+        if (entry.source_operation_count > 1 && entry.first_source.operation_id === entry.last_source.operation_id) {
+          fail("INVALID_STATE", `${label} with multiple source operations must have distinct first and last operations`);
+        }
+        assertEnum(entry.status, CARRIED_QUESTION_STATUSES, `${label}.status`);
+        if (entry.first_surfaced_revision !== null) {
+          if (!Number.isInteger(entry.first_surfaced_revision) || entry.first_surfaced_revision < entry.first_source.revision || entry.first_surfaced_revision > stateRevision) {
+            fail("INVALID_STATE", `${label}.first_surfaced_revision must be a valid committed revision`);
+          }
+        }
+        if (entry.status === "open") {
+          if (entry.retired_revision !== null || entry.resolution !== null) {
+            fail("INVALID_STATE", `${label} cannot have retirement data while open`);
+          }
+          return;
+        }
+        if (!Number.isInteger(entry.retired_revision) || entry.retired_revision < entry.last_source.revision || entry.retired_revision > stateRevision) {
+          fail("INVALID_STATE", `${label}.retired_revision must be a valid committed revision`);
+        }
+        if (entry.first_surfaced_revision !== null && entry.retired_revision < entry.first_surfaced_revision) {
+          fail("INVALID_STATE", `${label}.retired_revision cannot precede first_surfaced_revision`);
+        }
+        assertKnownKeys(entry.resolution, /* @__PURE__ */ new Set(["kind", "note"]), `${label}.resolution`);
+        if (!Object.prototype.hasOwnProperty.call(entry.resolution, "kind") || !Object.prototype.hasOwnProperty.call(entry.resolution, "note")) {
+          fail("INVALID_STATE", `${label}.resolution requires kind and note`);
+        }
+        assertEnum(
+          entry.resolution.kind,
+          CARRIED_QUESTION_RESOLUTION_KINDS,
+          `${label}.resolution.kind`
+        );
+        validateCarriedQuestionText(entry.resolution.note, `${label}.resolution.note`);
+      });
+    }
     function validateArtifactRecord(record, index) {
       const label = `artifact_records[${index}]`;
       assertKnownKeys(record, /* @__PURE__ */ new Set([
@@ -8827,9 +9064,15 @@ var require_core = __commonJS({
       for (const key of ["data_audit_complete", "domain_knowledge_complete", "causal_check_complete", "exploration_complete"]) {
         if (typeof state.project_summary[key] !== "boolean") fail("INVALID_STATE", `project_summary.${key} must be boolean`);
       }
+      validateAudienceProfile(state.project_summary.audience_profile);
       assertStringOrNull(state.project_summary.exploration_summary, "project_summary.exploration_summary");
       assertEnum(state.project_summary.analysis_output, ["exist", "non_exist"], "project_summary.analysis_output");
       assertEnum(state.project_summary.report_output, ["exist", "non_exist"], "project_summary.report_output");
+      validateCarriedQuestions(
+        state.carried_questions,
+        state.state_meta.revision,
+        templateMode
+      );
       assertObject(state.council_chamber, "council_chamber");
       const chamberKeys = /* @__PURE__ */ new Set(["data_audit", "domain_expert", "causal_check", "causal_discovery", "analysis_execution", "report_writer"]);
       assertKnownKeys(state.council_chamber, chamberKeys, "council_chamber");
@@ -8929,7 +9172,11 @@ var require_core = __commonJS({
       }
       assertStringArrayFields(state.discovery_sidecar, ["findings", "diagnostics", "limitations", "artifact_refs", "reviewer_requests"], "discovery_sidecar");
       assertEnum(state.report_assembly.current_format, [null, "md", "html"], "report_assembly.current_format");
-      assertStringOrNullFields(state.report_assembly, ["report_goal", "audience", "target_section"], "report_assembly");
+      assertStringOrNullFields(
+        state.report_assembly,
+        ["report_goal", "audience", "target_section", "claim_boundary"],
+        "report_assembly"
+      );
       assertStringArrayFields(state.report_assembly, ["planned_structure", "key_points", "wording_constraints", "draft_notes"], "report_assembly");
       if (state.report_assembly.analysis_artifact_ids !== null) {
         const normalizedReportEvidence = normalizeAnalysisArtifactIds(
@@ -9131,6 +9378,72 @@ var require_core = __commonJS({
         state.response_receipt.direct_assignment = null;
       }
     }
+    function addSchema8Controls(state) {
+      assertObject(state.project_summary, "project_summary");
+      if (Object.prototype.hasOwnProperty.call(state.project_summary, "audience_profile")) {
+        fail("UNSUPPORTED_SCHEMA", "pre-v8 project_summary cannot already contain audience_profile");
+      }
+      if (Object.prototype.hasOwnProperty.call(state, "carried_questions")) {
+        fail("UNSUPPORTED_SCHEMA", "pre-v8 project state cannot already contain carried_questions");
+      }
+      state.project_summary.audience_profile = {
+        level: "unstated",
+        evidence: null,
+        preferences: []
+      };
+      state.carried_questions = [];
+    }
+    function upgradeV8QuestionSource(source, label) {
+      assertObject(source, label);
+      const keys = Object.keys(source).sort();
+      const legacyKeys = ["actor", "operation_id", "revision"].sort();
+      const currentKeys = [
+        "actor",
+        "operation_id",
+        "revision",
+        "source_kind",
+        "source_text"
+      ].sort();
+      if (deepEqual(keys, legacyKeys)) {
+        return {
+          ...clone(source),
+          source_kind: "legacy_v8",
+          source_text: null
+        };
+      }
+      if (deepEqual(keys, currentKeys)) return clone(source);
+      fail(
+        "UNSUPPORTED_SCHEMA",
+        `${label} is neither a legacy nor current schema-8 question source`
+      );
+    }
+    function addSchema9Controls(state) {
+      assertObject(state.report_assembly, "report_assembly");
+      if (Object.prototype.hasOwnProperty.call(state.report_assembly, "claim_boundary")) {
+        fail("UNSUPPORTED_SCHEMA", "pre-v9 report_assembly cannot already contain claim_boundary");
+      }
+      state.report_assembly.claim_boundary = null;
+      const targetsCurrentReportScope = (assignment) => assignment?.route === "report_writer" && assignment.scope_ref?.kind === "report" && assignment.scope_ref.id === state.report_assembly.scope_id && assignment.scope_ref.revision === state.report_assembly.scope_revision;
+      if (targetsCurrentReportScope(state.response_receipt?.direct_assignment)) {
+        state.response_receipt.direct_assignment = null;
+      }
+      if (state.pending_decision !== null && state.pending_decision.options.some((option) => targetsCurrentReportScope(option.assignment))) {
+        state.pending_decision = null;
+      }
+      assertArray(state.carried_questions, "carried_questions");
+      state.carried_questions.forEach((entry, index) => {
+        assertObject(entry, `carried_questions[${index}]`);
+        for (const field of ["first_source", "last_source"]) {
+          if (!Object.prototype.hasOwnProperty.call(entry, field)) {
+            fail("UNSUPPORTED_SCHEMA", `schema-8 carried_questions[${index}].${field} is missing`);
+          }
+          entry[field] = upgradeV8QuestionSource(
+            entry[field],
+            `carried_questions[${index}].${field}`
+          );
+        }
+      });
+    }
     function addSchema7Controls(state, projectRoot) {
       assertObject(state.report_assembly, "report_assembly");
       if (Object.prototype.hasOwnProperty.call(state.report_assembly, "analysis_artifact_ids")) {
@@ -9219,6 +9532,8 @@ var require_core = __commonJS({
       addSchema5Controls(reordered);
       addSchema6Controls(reordered);
       addSchema7Controls(reordered, projectRoot);
+      addSchema8Controls(reordered);
+      addSchema9Controls(reordered);
       validateState(reordered);
       return reordered;
     }
@@ -9237,11 +9552,13 @@ var require_core = __commonJS({
       addSchema5Controls(migrated);
       addSchema6Controls(migrated);
       addSchema7Controls(migrated, projectRoot);
+      addSchema8Controls(migrated);
+      addSchema9Controls(migrated);
       validateState(migrated);
       return finalizeSchemaMigration(migrated);
     }
     function migrateV3State(v3, projectRoot) {
-      assertExactTopLevel(v3);
+      assertExactTopLevel(v3, PRE_V8_TOP_LEVEL);
       assertObject(v3.state_meta, "state_meta");
       if (v3.state_meta.schema_version !== 3) {
         fail("UNSUPPORTED_SCHEMA", `unsupported schema version: ${v3.state_meta.schema_version}`);
@@ -9252,11 +9569,13 @@ var require_core = __commonJS({
       addSchema5Controls(migrated);
       addSchema6Controls(migrated);
       addSchema7Controls(migrated, projectRoot);
+      addSchema8Controls(migrated);
+      addSchema9Controls(migrated);
       validateState(migrated);
       return finalizeSchemaMigration(migrated);
     }
     function migrateV4State(v4, projectRoot) {
-      assertExactTopLevel(v4);
+      assertExactTopLevel(v4, PRE_V8_TOP_LEVEL);
       assertObject(v4.state_meta, "state_meta");
       if (v4.state_meta.schema_version !== 4) {
         fail("UNSUPPORTED_SCHEMA", `unsupported schema version: ${v4.state_meta.schema_version}`);
@@ -9266,11 +9585,13 @@ var require_core = __commonJS({
       addSchema5Controls(migrated);
       addSchema6Controls(migrated);
       addSchema7Controls(migrated, projectRoot);
+      addSchema8Controls(migrated);
+      addSchema9Controls(migrated);
       validateState(migrated);
       return finalizeSchemaMigration(migrated);
     }
     function migrateV5State(v5, projectRoot) {
-      assertExactTopLevel(v5);
+      assertExactTopLevel(v5, PRE_V8_TOP_LEVEL);
       assertObject(v5.state_meta, "state_meta");
       if (v5.state_meta.schema_version !== 5) {
         fail("UNSUPPORTED_SCHEMA", `unsupported schema version: ${v5.state_meta.schema_version}`);
@@ -9279,11 +9600,13 @@ var require_core = __commonJS({
       migrated.state_meta.schema_version = SCHEMA_VERSION;
       addSchema6Controls(migrated);
       addSchema7Controls(migrated, projectRoot);
+      addSchema8Controls(migrated);
+      addSchema9Controls(migrated);
       validateState(migrated);
       return finalizeSchemaMigration(migrated);
     }
     function upgradeV6State(v6, projectRoot) {
-      assertExactTopLevel(v6);
+      assertExactTopLevel(v6, PRE_V8_TOP_LEVEL);
       assertObject(v6.state_meta, "state_meta");
       if (v6.state_meta.schema_version !== 6) {
         fail("UNSUPPORTED_SCHEMA", `unsupported schema version: ${v6.state_meta.schema_version}`);
@@ -9291,11 +9614,44 @@ var require_core = __commonJS({
       const migrated = clone(v6);
       migrated.state_meta.schema_version = SCHEMA_VERSION;
       addSchema7Controls(migrated, projectRoot);
+      addSchema8Controls(migrated);
+      addSchema9Controls(migrated);
       validateState(migrated);
       return migrated;
     }
     function migrateV6State(v6, projectRoot) {
       return finalizeSchemaMigration(upgradeV6State(v6, projectRoot));
+    }
+    function upgradeV7State(v7) {
+      assertExactTopLevel(v7, PRE_V8_TOP_LEVEL);
+      assertObject(v7.state_meta, "state_meta");
+      if (v7.state_meta.schema_version !== 7) {
+        fail("UNSUPPORTED_SCHEMA", `unsupported schema version: ${v7.state_meta.schema_version}`);
+      }
+      const migrated = clone(v7);
+      migrated.state_meta.schema_version = SCHEMA_VERSION;
+      addSchema8Controls(migrated);
+      addSchema9Controls(migrated);
+      validateState(migrated);
+      return migrated;
+    }
+    function migrateV7State(v7) {
+      return finalizeSchemaMigration(upgradeV7State(v7));
+    }
+    function upgradeV8State(v8) {
+      assertExactTopLevel(v8);
+      assertObject(v8.state_meta, "state_meta");
+      if (v8.state_meta.schema_version !== 8) {
+        fail("UNSUPPORTED_SCHEMA", `unsupported schema version: ${v8.state_meta.schema_version}`);
+      }
+      const migrated = clone(v8);
+      migrated.state_meta.schema_version = SCHEMA_VERSION;
+      addSchema9Controls(migrated);
+      validateState(migrated);
+      return migrated;
+    }
+    function migrateV8State(v8) {
+      return finalizeSchemaMigration(upgradeV8State(v8));
     }
     function availableRegularFile(filePath) {
       try {
@@ -9585,6 +9941,202 @@ var require_core = __commonJS({
     function statePathFor(projectRoot) {
       return path.join(path.resolve(projectRoot), STATE_FILE);
     }
+    function stateLockPathFor(projectRoot) {
+      return path.join(path.resolve(projectRoot), STATE_LOCK_FILE);
+    }
+    function stateLockOwnerPath(lockPath) {
+      return path.join(lockPath, STATE_LOCK_OWNER_FILE);
+    }
+    function currentLockHostname() {
+      return os.hostname().trim().toLowerCase() || "unknown-host";
+    }
+    function processAppearsAlive(pid) {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (error) {
+        return error && error.code !== "ESRCH";
+      }
+    }
+    function readStateLockOwner(lockPath) {
+      const ownerPath = stateLockOwnerPath(lockPath);
+      try {
+        const stat = fs.lstatSync(ownerPath);
+        if (!stat.isFile() || stat.isSymbolicLink()) {
+          return { text: null, owner: null, unsafe: true };
+        }
+        const text = fs.readFileSync(ownerPath, "utf8");
+        try {
+          return { text, owner: JSON.parse(text), unsafe: false };
+        } catch (_error) {
+          return { text, owner: null, unsafe: false };
+        }
+      } catch (error) {
+        if (error && error.code === "ENOENT") {
+          return { text: null, owner: null, unsafe: false };
+        }
+        return { text: null, owner: null, unsafe: true };
+      }
+    }
+    function validStateLockOwner(owner) {
+      return isObject(owner) && owner.protocol === 1 && Number.isInteger(owner.pid) && owner.pid > 0 && typeof owner.hostname === "string" && owner.hostname.length > 0 && typeof owner.token === "string" && isUuid(owner.token) && isTimestamp(owner.created_at);
+    }
+    function removeQuarantinedLock(quarantinePath) {
+      try {
+        fs.rmSync(quarantinePath, { recursive: true, force: true });
+      } catch (_error) {
+      }
+    }
+    function quarantineStateLock(lockPath, label) {
+      const quarantinePath = `${lockPath}.${label}-${crypto.randomUUID()}`;
+      fs.renameSync(lockPath, quarantinePath);
+      removeQuarantinedLock(quarantinePath);
+    }
+    function reclaimAbandonedStateLock(lockPath) {
+      let lockStat;
+      try {
+        lockStat = fs.lstatSync(lockPath);
+      } catch (error) {
+        return Boolean(error && error.code === "ENOENT");
+      }
+      if (!lockStat.isDirectory() || lockStat.isSymbolicLink()) return false;
+      const initial = readStateLockOwner(lockPath);
+      if (initial.unsafe) return false;
+      const validOwner = validStateLockOwner(initial.owner);
+      if (validOwner) {
+        if (initial.owner.hostname !== currentLockHostname()) return false;
+        if (processAppearsAlive(initial.owner.pid)) return false;
+      } else if (Date.now() - lockStat.mtimeMs < STATE_LOCK_INITIALIZATION_GRACE_MS) {
+        return false;
+      }
+      const claimPath = path.join(lockPath, "reap.claim");
+      let claimHandle;
+      let quarantined = false;
+      try {
+        claimHandle = fs.openSync(claimPath, "wx", 384);
+        fs.writeFileSync(claimHandle, crypto.randomUUID(), "utf8");
+        fs.fsyncSync(claimHandle);
+        fs.closeSync(claimHandle);
+        claimHandle = void 0;
+        const current = readStateLockOwner(lockPath);
+        if (current.unsafe || current.text !== initial.text) return false;
+        quarantineStateLock(lockPath, "reaped");
+        quarantined = true;
+        return true;
+      } catch (error) {
+        return Boolean(error && error.code === "ENOENT");
+      } finally {
+        if (claimHandle !== void 0) {
+          try {
+            fs.closeSync(claimHandle);
+          } catch (_closeError) {
+          }
+        }
+        if (!quarantined) {
+          try {
+            fs.rmSync(claimPath, { force: true });
+          } catch (_removeError) {
+          }
+        }
+      }
+    }
+    function acquireStateLock(projectRoot, { createProjectRoot = false } = {}) {
+      if (createProjectRoot) {
+        try {
+          fs.mkdirSync(path.resolve(projectRoot), { recursive: true, mode: 448 });
+        } catch (error) {
+          fail("IO_ERROR", `could not create the project root: ${error.message}`);
+        }
+      }
+      const lockPath = stateLockPathFor(projectRoot);
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        let handle;
+        let created = false;
+        try {
+          fs.mkdirSync(lockPath, { mode: 448 });
+          created = true;
+          const lock = {
+            protocol: 1,
+            pid: process.pid,
+            hostname: currentLockHostname(),
+            token: crypto.randomUUID(),
+            created_at: nowIso()
+          };
+          handle = fs.openSync(stateLockOwnerPath(lockPath), "wx", 384);
+          fs.writeFileSync(handle, JSON.stringify(lock), "utf8");
+          fs.fsyncSync(handle);
+          fs.closeSync(handle);
+          return { lockPath, token: lock.token };
+        } catch (error) {
+          if (handle !== void 0) {
+            try {
+              fs.closeSync(handle);
+            } catch (_closeError) {
+            }
+          }
+          if (error && error.code === "EEXIST" && !created) {
+            if (reclaimAbandonedStateLock(lockPath)) continue;
+            fail("STATE_LOCKED", "another causal-consultant state mutation is in progress");
+          }
+          if (created) {
+            try {
+              quarantineStateLock(lockPath, "failed");
+            } catch (_cleanupError) {
+            }
+          }
+          fail("IO_ERROR", `could not acquire the project-state lock: ${error.message}`);
+        }
+      }
+      fail("STATE_LOCKED", "another causal-consultant state mutation is in progress");
+    }
+    function releaseStateLock(lock) {
+      const claimPath = path.join(lock.lockPath, "release.claim");
+      let claimHandle;
+      let quarantined = false;
+      try {
+        claimHandle = fs.openSync(claimPath, "wx", 384);
+        fs.writeFileSync(claimHandle, lock.token, "utf8");
+        fs.fsyncSync(claimHandle);
+        fs.closeSync(claimHandle);
+        claimHandle = void 0;
+        const current = readStateLockOwner(lock.lockPath);
+        if (!current.unsafe && validStateLockOwner(current.owner) && current.owner.token === lock.token) {
+          quarantineStateLock(lock.lockPath, "released");
+          quarantined = true;
+        }
+      } catch (_error) {
+      } finally {
+        if (claimHandle !== void 0) {
+          try {
+            fs.closeSync(claimHandle);
+          } catch (_closeError) {
+          }
+        }
+        if (!quarantined) {
+          try {
+            fs.rmSync(claimPath, { force: true });
+          } catch (_removeError) {
+          }
+        }
+      }
+    }
+    function holdStateLockForTest() {
+      if (process.env.STATECTL_TEST_HOLD_LOCK_MS === void 0) return;
+      const milliseconds = Number(process.env.STATECTL_TEST_HOLD_LOCK_MS);
+      if (!Number.isInteger(milliseconds) || milliseconds < 1 || milliseconds > 5e3) {
+        fail("INVALID_INPUT", "STATECTL_TEST_HOLD_LOCK_MS must be an integer from 1 to 5000");
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+    }
+    function withStateMutationLock(projectRoot, action, options = {}) {
+      const lock = acquireStateLock(projectRoot, options);
+      try {
+        holdStateLockForTest();
+        return action();
+      } finally {
+        releaseStateLock(lock);
+      }
+    }
     function templatePathFor(skillRoot) {
       return path.join(path.resolve(skillRoot), "assets", "project_state_template.yaml");
     }
@@ -9693,12 +10245,12 @@ var require_core = __commonJS({
           ...context2
         };
       }
-      if ([2, 3, 4, 5, 6].includes(parsed.state_meta.schema_version)) {
+      if ([2, 3, 4, 5, 6, 7, 8].includes(parsed.state_meta.schema_version)) {
         if (discardLegacyPlan) {
           fail("INVALID_INPUT", "--discard-legacy-plan applies only to a recognized unversioned v4.5 state");
         }
         const sourceVersion = parsed.state_meta.schema_version;
-        const migrated = sourceVersion === 2 ? migrateV2State(parsed, root) : sourceVersion === 3 ? migrateV3State(parsed, root) : sourceVersion === 4 ? migrateV4State(parsed, root) : sourceVersion === 5 ? migrateV5State(parsed, root) : migrateV6State(parsed, root);
+        const migrated = sourceVersion === 2 ? migrateV2State(parsed, root) : sourceVersion === 3 ? migrateV3State(parsed, root) : sourceVersion === 4 ? migrateV4State(parsed, root) : sourceVersion === 5 ? migrateV5State(parsed, root) : sourceVersion === 6 ? migrateV6State(parsed, root) : sourceVersion === 7 ? migrateV7State(parsed) : migrateV8State(parsed);
         const { planInfo: planInfo2 } = validateState(migrated);
         const operation2 = migrated.state_meta.active_operation;
         const packet2 = operationPacket(migrated, operation2, planInfo2);
@@ -9828,6 +10380,7 @@ var require_core = __commonJS({
         }
         current = state.report_assembly;
         status = state.council_chamber.report_writer.current_status;
+        assertReadyReportScopeComplete(current);
       } else if (route === "causal_discovery") {
         if (scopeRef.kind !== "discovery") fail("SCOPE_MISMATCH", "causal_discovery requires a discovery scope reference");
         current = state.discovery_sidecar;
@@ -10957,6 +11510,7 @@ var require_core = __commonJS({
         report_goal: null,
         audience: null,
         target_section: null,
+        claim_boundary: null,
         planned_structure: [],
         key_points: [],
         wording_constraints: [],
@@ -11097,8 +11651,11 @@ var require_core = __commonJS({
         if (!chamberPatch || chamberPatch.current_status !== requiredStatus) {
           fail("SCOPE_MISMATCH", `report output requires an explicit transition to ${requiredStatus}`);
         }
-        if (artifactRole === "completion" && state.report_assembly.current_format !== "html") {
-          fail("SCOPE_MISMATCH", "report completion requires report_assembly.current_format html");
+        if (artifactRole === "completion") {
+          assertReportScopeStructureComplete(state.report_assembly);
+          if (state.report_assembly.current_format !== "html") {
+            fail("SCOPE_MISMATCH", "report completion requires report_assembly.current_format html");
+          }
         }
       }
     }
@@ -11335,7 +11892,17 @@ var require_core = __commonJS({
       const completionPacket = operationPacket(merged, mergedOperation, planInfo);
       validateCausalCheckReadiness(merged, payload.actor, updates, state);
       validateScopeCompletion(merged, payload.actor, updates, artifactRole);
+      if (payload.actor === "report_writer" && ["ready", "blocked"].includes(
+        merged.council_chamber.report_writer.current_status
+      ) && merged.report_assembly.current_format !== null) {
+        fail(
+          "INVALID_INPUT",
+          "a ready or blocked report handoff requires current_format null until output is completed",
+          { current_format: merged.report_assembly.current_format }
+        );
+      }
       if (payload.actor === "report_writer" && merged.council_chamber.report_writer.current_status === "ready") {
+        assertReadyReportScopeComplete(merged.report_assembly, "INVALID_INPUT");
         assertBoundReportAnalysisArtifactsAvailable(projectRoot, merged);
       }
       const abandonedLegacyDiscoveryArtifact = payload.actor === "causal_discovery" && operation.discovery_scope === null && operation.scope_ref === null && !hasArtifact && updates.council_chamber.causal_discovery.current_status === "blocked";
@@ -11430,6 +11997,9 @@ var require_core = __commonJS({
       const planInfo = validatePlan(state.next_step_plan);
       const unresolvedReportRepair = planInfo.actor === "report_writer" && state.report_assembly.analysis_artifact_ids === null;
       if (cancel || plannedScopeStatus(state) !== "ready" || unresolvedReportRepair) return;
+      if (planInfo.actor === "report_writer") {
+        assertReadyReportScopeComplete(state.report_assembly);
+      }
       if (presentation.options.length > 0 || presentation.direct_assignment === null) {
         fail(
           "INVALID_INPUT",
@@ -11565,6 +12135,224 @@ ${presentation.boundary}`);
 ${presentation.next_steps}`);
       return blocks.join("\n\n");
     }
+    function currentOperationQuestionTexts(state, planInfo) {
+      if (planInfo.actor === "team_lead") return null;
+      let slot;
+      if (planInfo.actor.startsWith("analysis_execution.")) {
+        const design = planInfo.actor.slice("analysis_execution.".length);
+        slot = state.council_chamber.analysis_execution[design];
+      } else {
+        slot = state.council_chamber[planInfo.actor];
+      }
+      if (slot === void 0) return /* @__PURE__ */ new Set();
+      return new Set(
+        slot.questions_for_user.map((item) => item.trim()).filter(Boolean)
+      );
+    }
+    function carriedQuestionById(questions, questionId, label) {
+      const entry = questions.find((item) => item.question_id === questionId);
+      if (!entry) fail("INVALID_INPUT", label + " does not identify a carried question");
+      if (entry.status !== "open") {
+        fail("INVALID_INPUT", label + " identifies a retired carried question");
+      }
+      return entry;
+    }
+    function normalizeQuestionResolution(value, label) {
+      assertKnownKeys(value, /* @__PURE__ */ new Set(["kind", "note"]), label, "INVALID_INPUT");
+      for (const key of ["kind", "note"]) {
+        if (!Object.prototype.hasOwnProperty.call(value, key)) {
+          fail("INVALID_INPUT", label + "." + key + " is required");
+        }
+      }
+      assertEnum(value.kind, CARRIED_QUESTION_RESOLUTION_KINDS, label + ".kind", "INVALID_INPUT");
+      const note = normalizeRequiredString(value.note, label + ".note", "INVALID_INPUT");
+      validateCarriedQuestionText(note, label + ".note", "INVALID_INPUT");
+      return { kind: value.kind, note };
+    }
+    function surfaceCarriedQuestion(entry, presentation, revision, label) {
+      const location = presentation.options.length ? "framing" : "next_steps";
+      if (!presentation[location].includes(entry.question)) {
+        fail(
+          "INVALID_INPUT",
+          label + " must place the canonical question text in presentation." + location
+        );
+      }
+      if (entry.first_surfaced_revision === null) {
+        entry.first_surfaced_revision = revision;
+      }
+    }
+    function applyQuestionActions({
+      target,
+      sourceState,
+      planInfo,
+      operation,
+      actions,
+      presentation
+    }) {
+      assertArray(actions, "finish question_actions", "INVALID_INPUT");
+      if (actions.length > MAX_CARRIED_QUESTION_ACTIONS) {
+        fail(
+          "INVALID_INPUT",
+          "finish question_actions may contain at most " + MAX_CARRIED_QUESTION_ACTIONS + " entries"
+        );
+      }
+      if (actions.length === 0) return;
+      const sourceTexts = currentOperationQuestionTexts(sourceState, planInfo);
+      const revision = sourceState.state_meta.revision + 1;
+      const targetedIds = /* @__PURE__ */ new Set();
+      let surfacedCount = 0;
+      actions.forEach((action, index) => {
+        const label = "finish question_actions[" + index + "]";
+        assertObject(action, label, "INVALID_INPUT");
+        if (action.action === "record") {
+          assertKnownKeys(
+            action,
+            /* @__PURE__ */ new Set(["action", "question_id", "source_text", "surface"]),
+            label,
+            "INVALID_INPUT"
+          );
+          for (const key of ["question_id", "source_text", "surface"]) {
+            if (!Object.prototype.hasOwnProperty.call(action, key)) {
+              fail("INVALID_INPUT", label + "." + key + " is required");
+            }
+          }
+          if (action.question_id !== null && !isUuid(action.question_id)) {
+            fail("INVALID_INPUT", label + ".question_id must be a UUID or null");
+          }
+          if (typeof action.surface !== "boolean") {
+            fail("INVALID_INPUT", label + ".surface must be boolean");
+          }
+          const sourceText = normalizeRequiredString(
+            action.source_text,
+            label + ".source_text",
+            "INVALID_INPUT"
+          );
+          validateCarriedQuestionText(sourceText, label + ".source_text", "INVALID_INPUT");
+          const sourceFromHandoff = sourceTexts !== null && sourceTexts.has(sourceText);
+          const sourceActor = sourceFromHandoff ? planInfo.actor : "team_lead";
+          const sourceKind = sourceFromHandoff ? "handoff" : "synthesized";
+          let entry;
+          if (action.question_id === null) {
+            if (target.carried_questions.length >= MAX_CARRIED_QUESTIONS) {
+              fail("INVALID_INPUT", "carried_questions has reached its maximum size");
+            }
+            const questionKey = canonicalQuestionKey(sourceText);
+            if (target.carried_questions.some(
+              (item) => canonicalQuestionKey(item.question) === questionKey
+            )) {
+              fail(
+                "INVALID_INPUT",
+                label + ".source_text already has a carried-question identity"
+              );
+            }
+            const source = {
+              actor: sourceActor,
+              operation_id: operation.id,
+              revision,
+              source_kind: sourceKind,
+              source_text: sourceText
+            };
+            entry = {
+              question_id: crypto.randomUUID(),
+              question: sourceText,
+              first_source: source,
+              last_source: clone(source),
+              source_operation_count: 1,
+              status: "open",
+              first_surfaced_revision: null,
+              retired_revision: null,
+              resolution: null
+            };
+            target.carried_questions.push(entry);
+          } else {
+            if (targetedIds.has(action.question_id)) {
+              fail("INVALID_INPUT", label + ".question_id is targeted more than once");
+            }
+            targetedIds.add(action.question_id);
+            entry = carriedQuestionById(
+              target.carried_questions,
+              action.question_id,
+              label + ".question_id"
+            );
+            if (entry.last_source.operation_id !== operation.id) {
+              entry.last_source = {
+                actor: sourceActor,
+                operation_id: operation.id,
+                revision,
+                source_kind: sourceKind,
+                source_text: sourceText
+              };
+              entry.source_operation_count += 1;
+            }
+          }
+          if (action.surface) {
+            surfacedCount += 1;
+            if (surfacedCount > 1) {
+              fail("INVALID_INPUT", "finish may surface at most one carried question");
+            }
+            surfaceCarriedQuestion(entry, presentation, revision, label);
+          }
+          return;
+        }
+        if (action.action === "surface") {
+          assertKnownKeys(
+            action,
+            /* @__PURE__ */ new Set(["action", "question_id"]),
+            label,
+            "INVALID_INPUT"
+          );
+          if (!isUuid(action.question_id)) {
+            fail("INVALID_INPUT", label + ".question_id must be a UUID");
+          }
+          if (targetedIds.has(action.question_id)) {
+            fail("INVALID_INPUT", label + ".question_id is targeted more than once");
+          }
+          targetedIds.add(action.question_id);
+          const entry = carriedQuestionById(
+            target.carried_questions,
+            action.question_id,
+            label + ".question_id"
+          );
+          surfacedCount += 1;
+          if (surfacedCount > 1) {
+            fail("INVALID_INPUT", "finish may surface at most one carried question");
+          }
+          surfaceCarriedQuestion(entry, presentation, revision, label);
+          return;
+        }
+        if (action.action === "retire") {
+          assertKnownKeys(
+            action,
+            /* @__PURE__ */ new Set(["action", "question_id", "resolution"]),
+            label,
+            "INVALID_INPUT"
+          );
+          if (!isUuid(action.question_id)) {
+            fail("INVALID_INPUT", label + ".question_id must be a UUID");
+          }
+          if (!Object.prototype.hasOwnProperty.call(action, "resolution")) {
+            fail("INVALID_INPUT", label + ".resolution is required");
+          }
+          if (targetedIds.has(action.question_id)) {
+            fail("INVALID_INPUT", label + ".question_id is targeted more than once");
+          }
+          targetedIds.add(action.question_id);
+          const entry = carriedQuestionById(
+            target.carried_questions,
+            action.question_id,
+            label + ".question_id"
+          );
+          entry.status = "retired";
+          entry.retired_revision = revision;
+          entry.resolution = normalizeQuestionResolution(
+            action.resolution,
+            label + ".resolution"
+          );
+          return;
+        }
+        fail("INVALID_INPUT", label + ".action must be one of: record, surface, retire");
+      });
+    }
     function finishOperation({ projectRoot, payload, cancel = false }) {
       const { statePath, state } = loadCurrentState(projectRoot);
       assertExpected(state, payload);
@@ -11573,7 +12361,8 @@ ${presentation.next_steps}`);
         "expected_revision",
         "operation_id",
         "updates",
-        "presentation"
+        "presentation",
+        "question_actions"
       ]);
       assertKnownKeys(payload, allowedInput, "finish input", "INVALID_INPUT");
       const operation = assertOperation(state, payload, cancel ? null : "lead_pending");
@@ -11585,9 +12374,16 @@ ${presentation.next_steps}`);
         fail("INVALID_INPUT", "finish input requires presentation");
       }
       const updates = payload.updates ?? {};
+      const questionActions = Object.prototype.hasOwnProperty.call(payload, "question_actions") ? payload.question_actions : [];
       assertObject(updates, "updates", "INVALID_INPUT");
       if (cancel && Object.keys(updates).length > 0) {
         fail("OWNERSHIP_VIOLATION", "finish --cancel preserves durable state and does not accept updates");
+      }
+      if (cancel && (!Array.isArray(questionActions) || questionActions.length > 0)) {
+        fail(
+          "OWNERSHIP_VIOLATION",
+          "finish --cancel preserves carried questions and does not accept question actions"
+        );
       }
       assertKnownKeys(updates, /* @__PURE__ */ new Set(["project_summary"]), "finish updates", "OWNERSHIP_VIOLATION");
       if (updates.project_summary !== void 0) {
@@ -11615,6 +12411,14 @@ ${presentation.next_steps}`);
       merged.pending_decision = null;
       const presentation = normalizePresentation(merged, payload.presentation);
       rejectReadyScopeMenu(state, presentation, cancel);
+      applyQuestionActions({
+        target: merged,
+        sourceState: state,
+        planInfo,
+        operation,
+        actions: questionActions,
+        presentation
+      });
       merged.pending_decision = decisionFromPresentation(presentation, operation.id);
       const responseMarkdown = renderPresentation(
         presentation,
@@ -11699,9 +12503,22 @@ ${candidate}`, bodyStart);
         next_steps: responseHeadingBody(receipt.response_markdown, "[? Next Steps]")
       };
     }
+    function carriedQuestionContext(state) {
+      return state.carried_questions.map((entry) => entry.status === "open" ? {
+        question: entry.question,
+        status: entry.status,
+        source_operation_count: entry.source_operation_count,
+        surfaced: entry.first_surfaced_revision !== null
+      } : {
+        question: entry.question,
+        status: entry.status,
+        resolution: clone(entry.resolution)
+      });
+    }
     function routerStateProjection(state) {
       return {
         project_summary: clone(state.project_summary),
+        carried_questions: carriedQuestionContext(state),
         core_status: {
           data_audit: {
             last_updated: state.data_facts.last_updated,
@@ -11771,6 +12588,7 @@ ${candidate}`, bodyStart);
     function workerStateProjection(state, planInfo) {
       const projected = {
         project_summary: clone(state.project_summary),
+        carried_questions: carriedQuestionContext(state),
         council_chamber: workerCouncilProjection(state, planInfo),
         data_facts: clone(state.data_facts),
         domain_knowledge: clone(state.domain_knowledge),
@@ -11787,9 +12605,14 @@ ${candidate}`, bodyStart);
       return projected;
     }
     function leadStateProjection(state, planInfo) {
-      if (planInfo.actor !== "team_lead") return workerStateProjection(state, planInfo);
+      if (planInfo.actor !== "team_lead") {
+        const projected = workerStateProjection(state, planInfo);
+        projected.carried_questions = clone(state.carried_questions);
+        return projected;
+      }
       return {
         project_summary: clone(state.project_summary),
+        carried_questions: clone(state.carried_questions),
         council_chamber: clone(state.council_chamber),
         data_facts: clone(state.data_facts),
         domain_knowledge: clone(state.domain_knowledge),
@@ -11819,7 +12642,8 @@ ${candidate}`, bodyStart);
         state: projected,
         previous_response_cue: audience === "router" ? previousResponseCue(state.response_receipt) : null,
         artifact_status: clone(artifactStatus),
-        artifact_warnings: audience !== "router" && planInfo.actor === "report_writer" ? visibleReportArtifactWarnings(state, planInfo, warnings) : clone(warnings)
+        artifact_warnings: audience !== "router" && planInfo.actor === "report_writer" ? visibleReportArtifactWarnings(state, planInfo, warnings) : clone(warnings),
+        directives: audience === "team_lead" ? leadDirectives(state, planInfo) : []
       };
     }
     function phaseName(audience) {
@@ -11855,6 +12679,69 @@ ${candidate}`, bodyStart);
       }
       return value;
     }
+    var MAX_QUESTION_DIRECTIVES = 5;
+    function audienceLevelUnstated(state) {
+      const profile = state.project_summary.audience_profile;
+      return !isObject(profile) || profile.level === "unstated";
+    }
+    function openCarriedQuestions(state) {
+      return state.carried_questions.filter((entry) => entry.status === "open");
+    }
+    function leadQuestionsReferenceNeeded(state, planInfo) {
+      if (openCarriedQuestions(state).length > 0) return true;
+      const handoffTexts = currentOperationQuestionTexts(state, planInfo);
+      return handoffTexts !== null && handoffTexts.size > 0;
+    }
+    function leadDirectives(state, planInfo) {
+      const directives = [];
+      if (audienceLevelUnstated(state)) {
+        directives.push({
+          kind: "audience_unstated",
+          instruction: "The audience level is unstated. Set project_summary.audience_profile only if this turn's message or committed project evidence demonstrates the user's statistical fluency; otherwise leave it unstated and explain at a neutral depth."
+        });
+      }
+      const handoffTexts = currentOperationQuestionTexts(state, planInfo);
+      if (handoffTexts !== null && handoffTexts.size > 0) {
+        directives.push({
+          kind: "handoff_questions",
+          count: handoffTexts.size,
+          instruction: `The current handoff raised ${handoffTexts.size} question(s) for the user. Record each material one through question_actions with its exact committed text; surface at most one this turn.`
+        });
+      }
+      const open = openCarriedQuestions(state);
+      if (open.length > 0) {
+        const overdue = open.filter(
+          (entry) => entry.first_surfaced_revision === null && entry.source_operation_count >= 2
+        );
+        const awaiting = open.filter((entry) => entry.first_surfaced_revision !== null);
+        const questionDirectives = [
+          ...overdue.map((entry) => ({
+            kind: "question_overdue",
+            question_id: entry.question_id,
+            question: entry.question,
+            source_operation_count: entry.source_operation_count,
+            instruction: `Overdue carried question: recorded by ${entry.source_operation_count} operations and never surfaced. Surface it this turn (verbatim, saying what changes either way) or retire it explicitly through question_actions.`
+          })),
+          ...awaiting.map((entry) => ({
+            kind: "question_awaiting_answer",
+            question_id: entry.question_id,
+            question: entry.question,
+            first_surfaced_revision: entry.first_surfaced_revision,
+            instruction: "Surfaced and still open. If this turn's message answers it, retire it as answered with an evidence note; if the user declined or cannot answer, treat it as a stated limitation rather than re-asking."
+          }))
+        ];
+        directives.push(...questionDirectives.slice(0, MAX_QUESTION_DIRECTIVES));
+        directives.push({
+          kind: "open_questions_summary",
+          open: open.length,
+          never_surfaced: open.filter((entry) => entry.first_surfaced_revision === null).length,
+          overdue: overdue.length,
+          omitted_from_directives: Math.max(0, questionDirectives.length - MAX_QUESTION_DIRECTIVES),
+          instruction: "Surface at most one carried question per turn: the one whose answer would change the most. Omitting an open question from question_actions holds it unchanged."
+        });
+      }
+      return directives;
+    }
     function requiredReferences(state, planInfo, audience, warnings) {
       const operation = state.state_meta.active_operation;
       const legacyProtocol = operation !== null && operation.completion_protocol === 1;
@@ -11863,6 +12750,10 @@ ${candidate}`, bodyStart);
         const references2 = ["references/team_lead.md"];
         if (planInfo.design !== null) references2.push("references/team_lead_analysis_flow.md");
         if (planInfo.actor === "report_writer") references2.push("references/team_lead_report_flow.md");
+        if (leadQuestionsReferenceNeeded(state, planInfo)) {
+          references2.push("references/team_lead_questions.md");
+        }
+        if (audienceLevelUnstated(state)) references2.push("references/team_lead_audience.md");
         if (legacyProtocol) references2.push("references/legacy_evidence.md");
         return references2;
       }
@@ -11910,6 +12801,12 @@ ${candidate}`, bodyStart);
       if (state.state_meta?.schema_version === 6) {
         state = upgradeV6State(state, root);
       }
+      if (state.state_meta?.schema_version === 7) {
+        state = upgradeV7State(state);
+      }
+      if (state.state_meta?.schema_version === 8) {
+        state = upgradeV8State(state);
+      }
       const { planInfo } = validateState(state);
       return {
         ok: true,
@@ -11953,18 +12850,37 @@ ${candidate}`, bodyStart);
           phase_capsule: 1,
           begin_artifact_reservation: 1,
           conditional_references: 1,
-          report_evidence_binding: 1
+          report_evidence_binding: 1,
+          audience_profile: 1,
+          carried_questions: 2,
+          lead_directives: 1
         }
       };
     }
     module2.exports = {
       PHASE_CAPSULE_PROTOCOL,
       StateError,
-      applyWorker,
-      beginOperation,
-      finishOperation,
-      openProject,
-      reserveArtifact,
+      applyWorker: (options) => withStateMutationLock(
+        options.projectRoot,
+        () => applyWorker(options)
+      ),
+      beginOperation: (options) => withStateMutationLock(
+        options.projectRoot,
+        () => beginOperation(options)
+      ),
+      finishOperation: (options) => withStateMutationLock(
+        options.projectRoot,
+        () => finishOperation(options)
+      ),
+      openProject: (options) => withStateMutationLock(
+        options.projectRoot,
+        () => openProject(options),
+        { createProjectRoot: true }
+      ),
+      reserveArtifact: (options) => withStateMutationLock(
+        options.projectRoot,
+        () => reserveArtifact(options)
+      ),
       validateProject,
       validateTemplate
     };

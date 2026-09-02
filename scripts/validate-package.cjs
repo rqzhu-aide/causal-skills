@@ -12,6 +12,14 @@ const EXPECTED_LOADERS = new Map([
   ["references/analysis_routing_workflow.md", "router_when_analysis_execution_needed"],
   ["references/team_lead_report_flow.md", "team_lead_when_report_needed"],
   ["references/team_lead_analysis_flow.md", "team_lead_when_analysis_needed"],
+  [
+    "references/team_lead_questions.md",
+    "controller_when_open_carried_questions_or_handoff_questions_else_team_lead_on_synthesis",
+  ],
+  [
+    "references/team_lead_audience.md",
+    "controller_while_audience_level_unstated_else_team_lead_on_new_evidence",
+  ],
   ["references/artifact_output_policy.md", "worker_when_creating_output"],
   ["references/design_execution_contract.md", "design_references"],
   [
@@ -218,6 +226,7 @@ function main() {
     || template.capabilities?.phase_capsule !== 1
     || template.capabilities?.begin_artifact_reservation !== 1
     || template.capabilities?.conditional_references !== 1
+    || template.capabilities?.lead_directives !== 1
   ) {
     throw new Error("state controller must advertise phase-context and packet capabilities");
   }
@@ -227,8 +236,10 @@ function main() {
     || template.capabilities?.response_receipt !== 1
     || template.capabilities?.direct_assignment !== 1
     || template.capabilities?.startup_notice !== 1
+    || template.capabilities?.audience_profile !== 1
+    || template.capabilities?.carried_questions !== 2
   ) {
-    throw new Error("state controller must advertise response rendering, direct assignment, and persistence capabilities");
+    throw new Error("state controller must advertise response rendering, direct assignment, audience-profile, carried-question, and persistence capabilities");
   }
   process.stdout.write("skill package is valid\n");
 }

@@ -32,7 +32,7 @@ Route `report_writer` when any of these match the inferred intention:
   force analysis routing.
 - The user asks for PPT, DOCX, PDF, slides, email, letter, memo, or another
   non-HTML form; report writer should handle this as report style or structure
-  guidance inside the HTML-default report workflow, not promise that file type.
+  guidance inside the fixed-HTML report workflow, not promise that file type.
 
 If no report route can reasonably match the inferred intention, plan only
 `team_lead`.

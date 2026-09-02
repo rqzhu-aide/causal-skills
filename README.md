@@ -1,7 +1,7 @@
 # Interactive Causal Consultant
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-6.2.1-blue.svg)]()
+[![Version](https://img.shields.io/badge/version-6.3.0-blue.svg)]()
 
 An interactive causal-inference consultant skill for Claude Code, Codex, and
 compatible agents. It takes a rough causal question to a defensible analysis
@@ -53,12 +53,13 @@ alternatives, each with requirements and risks, and an analysis plan goes stale
 automatically when the facts under it change. Second, every durable
 output is reserved, validated, and receipted under `output/`, and
 `project_state.yaml` is the single versioned, strictly validated record of the
-project, so interrupted work resumes at its exact boundary.
+project, so interrupted work resumes at its exact boundary. State mutations are
+serialized per project so simultaneous agents cannot overwrite one another.
 
 ## Install
 
 Copy this runtime subset from
-https://github.com/rqzhu-aide/causal-consultant/tree/v6.2.1 into a skill
+https://github.com/rqzhu-aide/causal-consultant/tree/v6.3.0 into a skill
 folder:
 
 ```text

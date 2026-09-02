@@ -216,7 +216,11 @@ function main() {
           payload: readPayload(options.input),
           cancel: Boolean(options.cancel),
         });
-        const cleanupWarning = removeOwnedContextFile(projectRoot, result.project_id);
+        const cleanupWarning = removeOwnedContextFile(
+          projectRoot,
+          result.project_id,
+          result.operation_id,
+        );
         if (cleanupWarning !== null) result.delivery_warnings = [cleanupWarning];
       }
       break;

@@ -34,8 +34,14 @@ approval or claiming report work.
 
 For `ready`, no report output should exist. Present the stored default
 faithfully using only its purpose and decision use, audience, evidence basis,
-format, main structure, and claim boundary. Use current worker questions to
-inform the Decision Gate without inventing or negating a consequential choice.
+fixed HTML output, main structure, and claim boundary. If `report_goal`,
+`audience`, `claim_boundary`, `planned_structure`, or `wording_constraints` is empty, treat the scope as
+incomplete and return it to `report_writer` for revision rather than offering
+approval. Otherwise include its evidence basis and the structural
+`claim_boundary`. Explain that approved output will be HTML;
+`current_format: null` means only that no output has yet been completed. Use
+current worker questions to inform the Decision Gate without inventing or
+negating a consequential choice.
 
 For `done`, require an available operation-matched report `completion`
 artifact. If absent or unavailable, treat it as a missing handoff. Otherwise

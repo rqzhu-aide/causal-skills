@@ -1,5 +1,5 @@
 state_meta:
-  schema_version: 7
+  schema_version: 9
   project_id: null
   revision: 0
   created_at: null
@@ -14,6 +14,11 @@ project_summary:
   last_updated: null
   phase: exploration
 
+  audience_profile:
+    level: unstated
+    evidence: null
+    preferences: []
+
   data_audit_complete: false
   domain_knowledge_complete: false
   causal_check_complete: false
@@ -24,6 +29,8 @@ project_summary:
   analysis_output: non_exist
 
   report_output: non_exist
+
+carried_questions: []
 
 council_chamber:
   data_audit:
@@ -131,6 +138,7 @@ report_assembly:
   report_goal: null
   audience: null
   target_section: null
+  claim_boundary: null
   planned_structure: []
   key_points: []
   wording_constraints: []
