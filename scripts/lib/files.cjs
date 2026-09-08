@@ -46,6 +46,9 @@ function safePath(root, relative) {
       /[. ]$/.test(s) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(s))) {
     fail("UNSAFE_PATH", "Unsafe path component: " + relative);
   }
+  // Compare canonical paths on both sides, including Windows short-name or
+  // linked-ancestor aliases of the explicitly selected project root.
+  root = rootPath(root);
   const target = path.resolve(root, ...parts);
   const rel = path.relative(root, target);
   if (!rel || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) fail("UNSAFE_PATH", relative);
