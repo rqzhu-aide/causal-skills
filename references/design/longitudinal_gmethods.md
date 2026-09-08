@@ -4,8 +4,9 @@ Use this file to plan or review a longitudinal causal analysis: repeated treatme
 
 Work in this order: construct the time grid, order histories, define the strategy, verify time-varying confounding and censoring, audit support over histories, choose an estimator lane, specify required diagnostics, then set the claim boundary. Do not collapse a longitudinal problem into a baseline contrast unless the target truly permits it.
 
-Runtime contract: `references/design_execution_contract.md`, design id
-`longitudinal_gmethods`.
+Use with [design_worker](../design_worker.md), design ID `longitudinal_gmethods`.
+Feasibility uses the data requirements, assumptions, and planned diagnostics;
+new target computation additionally follows the recorded-run instructions there.
 
 ## Use When
 
@@ -39,14 +40,19 @@ Facts that usually must be inspected, not merely assumed: time ordering, history
 
 ## Design-Specific Twists
 
+These are possible revisions, not permission to change the user's target.
+A changed population, contrast, follow-up, or estimand stays an explicit
+alternative until the user adopts it. Base data construction and restriction
+on design evidence, not attractive target results.
+
 - `direct_fit`: the time grid, histories, strategy, support, censoring, and outcome timing are coherent enough for a g-method target.
 - `data_shape_twist`: reshape to long format, construct lags/grace periods, encode eligibility/censoring, define regimes, preserve histories, or restrict unsupported histories.
-- `estimand_twist`: convert a static effect request into sustained strategy, dynamic regime, cumulative exposure, stochastic shift, LMTP, or simpler baseline target when appropriate.
+- `estimand_twist`: consider reframing a static effect request into sustained strategy, dynamic regime, cumulative exposure, stochastic shift, LMTP, or simpler baseline target when appropriate.
 - `diagnostic_twist`: prioritize history timing, strategy adherence/support, positivity over histories, treatment/censoring weights, balance over time, and sensitivity to grid/lag/truncation choices.
 - `implementation_twist`: use MSM/IPW, sequential g-formula, longitudinal TMLE, LMTP, sequential regression, or structural nested models only after the sequential data contract is clear.
 - `fallback_twist`: if histories, time ordering, support, or censoring cannot sustain g-methods, use trajectory audit, descriptive history summaries, simpler point-treatment target, or future-data plan.
 
-## Diagnostics for Approved Execution
+## Design Diagnostics
 
 Perform the analytic diagnostics relevant to the longitudinal design and chosen estimator lane:
 
@@ -58,7 +64,7 @@ Perform the analytic diagnostics relevant to the longitudinal design and chosen 
 - Weight diagnostics: treatment/censoring weight distributions, truncation, effective sample size, influential histories, and balance over time when MSM/IPW is used.
 - Censoring/missingness diagnostics: dropout, artificial censoring, competing events, administrative end, and outcome availability by history.
 - Sensitivity: time grid, lag, grace period, strategy variant, truncation, censoring assumption, model class, learner set, and support restriction.
-- Estimator benchmark: compare MSM/IPW, g-formula, sequential regression, LMTP, or longitudinal TMLE outputs to simpler descriptive/history summaries when execution is approved.
+- Estimator benchmark: compare MSM/IPW, g-formula, sequential regression, LMTP, or longitudinal TMLE outputs to simpler descriptive/history summaries during planned execution.
 - Support-route diagnostics: if a support file is active, run only the longitudinal diagnostics needed by that support task, such as dose histories, event/censoring support, dynamic-policy histories, or statistical-validity checks.
 
 ## Boundaries
@@ -87,15 +93,14 @@ Never rescue these failures with a generic mixed model or recurrent-outcome regr
 
 Key literature anchors: Robins g-methods, marginal structural models, sequential exchangeability, positivity over histories, parametric g-formula, longitudinal TMLE, modified treatment policies, stochastic interventions, and dynamic treatment regimes.
 
-## Rerouting Cues
+## Changes to Discuss with the Lead
 
-`causal_check` owns support-route selection. If a different support becomes
-central to the bound work, flag it in chamber feedback rather than loading the
-catalog or switching routes.
-
+A material change of identification frame or target returns to the lead;
+do not execute another design in this turn. A relevant support guide stays
+inside this same review and does not add a specialist.
 
 ## Execution Record
 
-In the artifact `summary`, emphasize the time grid, treatment
+In the saved review and run summary, emphasize the time grid, treatment
 history and strategy, sequential estimand, positivity/censoring diagnostics,
 and the sequential-assumption boundary.

@@ -1,126 +1,139 @@
-# Interactive Causal Consultant
+# Causal Consultant v7
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-6.3.0-blue.svg)]()
+Version: **7.0.1**, the active version at this repository's root.
+The September 7 folder reorganization moved the actual pre-v7 working files,
+including uncommitted edits, to the sibling `causal-consultant-v6` archive.
+Existing consultation projects are unchanged. This layout promotion is not a
+new installation or a claim that release qualification is complete.
 
-An interactive causal-inference consultant skill for Claude Code, Codex, and
-compatible agents. It takes a rough causal question to a defensible analysis
-plan, executes only after your explicit approval, and writes the report.
+## What Changes for the User
 
-> I cannot give you a definitive answer, but I can help you explore.
+The lead helps identify the uncertainty that most affects a causal study and
+explains how you can help resolve it. Your answer, choice, or instruction informs
+one specialist review. The lead returns with findings and a useful next step.
+Clear requests proceed without another approval question; a settled summary
+does not trigger another investigation.
 
-## Why
+All nine original design families and six scientific supports remain, with a
+new custom-identification path. One design worker can combine relevant guides
+for a single identifying argument. Requested data preparation belongs to the
+data auditor and does not require choosing a causal design first.
 
-Causal analyses rarely fail at the modeling step. They fail earlier: an
-unclear estimand, data that cannot support the claim, a design that does not
-match how treatment actually happened, or a result quietly rescued after the
-fact. Agents make this worse when they jump straight from a variable pair to a
-regression.
+Start with [SKILL.md](SKILL.md). The skill is explicit-use, not an implicit
+replacement for ordinary statistical discussion. Its metadata retains
+`allow_implicit_invocation: false`.
 
-This skill makes an agent work like a careful causal consulting team instead.
-It asks what you actually want to know, inspects the data you actually have,
-surfaces the hidden context that steers the design choice, proposes analysis
-plans with their requirements and risks, and computes target results only
-after you approve one exact plan. Everything it learns and produces is kept in
-a durable, auditable project state, so the work survives interruptions and
-later sessions.
+This revision makes material specialist questions the lead's responsibility:
+ask, explicitly defer, or close with a reason. Answers retain their qualifications
+and must inform advice. It adds focused memory retrieval and a measured replay
+optimization, while retaining rc.2's run-identity, retry and report-binding fixes.
+The lead-user-specialist loop and one-specialist-per-turn limit are unchanged.
 
-## How It Works
+## Use the Skill
 
-Each user turn is one bounded operation:
+Use this repository root as the skill root. For a standalone distribution copy
+`package.json` itself plus the runtime files it lists; exclude `architecture/`, tests and
+Git/development metadata from the consultant's installed instruction package.
+Invoke the skill explicitly and select a **new consultation folder**. Do
+not install both versions under the same name without deliberately choosing
+which one is active. No global setup, hooks, accounts, or package downloads are
+required for the memory helpers. Analysis dependencies depend on the actual
+study and are selected separately.
 
-```text
-you ──▶ router ──▶ one specialist ──▶ team lead ──▶ one reply
-              │
-              └─ statectl, the bundled state controller: validates
-                 project_state.yaml, gates assignments, freezes approved
-                 scopes, records artifacts, renders the reply
-```
-
-The specialists: `data_audit` (data reality: timing, leakage, missingness,
-support), `domain_expert` (constructs, measurement, field practice),
-`causal_check` (estimand, assumptions, claim boundary, method recommendation),
-`causal_discovery` (optional graph-hypothesis sidecar), `analysis_execution`
-(nine design routes from randomized assignment to synthetic control, plus six
-support routes), and `report_writer` (planning and analysis reports as HTML).
-`team_lead` closes every operation and is the only voice you hear.
-
-Two rules give the workflow its rigor. First, analysis executes only when data,
-domain, and causal review all pass or establish explicit limited boundaries,
-and you approve one exact written scope with a direct yes or no;
-recommendations arrive as one preferred strategy plus at most two real
-alternatives, each with requirements and risks, and an analysis plan goes stale
-automatically when the facts under it change. Second, every durable
-output is reserved, validated, and receipted under `output/`, and
-`project_state.yaml` is the single versioned, strictly validated record of the
-project, so interrupted work resumes at its exact boundary. State mutations are
-serialized per project so simultaneous agents cannot overwrite one another.
-
-## Install
-
-Copy this runtime subset from
-https://github.com/rqzhu-aide/causal-consultant/tree/v6.3.0 into a skill
-folder:
+Node.js 18.18 or newer is required. From this directory:
 
 ```text
-SKILL.md
-LICENSE
-agents/
-assets/
-references/
-scripts/statectl.cjs
-scripts/vendor-licenses/
+node scripts/validate.cjs
+npm test
+node scripts/project.cjs help
+node scripts/project.cjs init --project-root <new-consultation-folder>
+node scripts/project.cjs context --project-root <consultation-folder>
+node scripts/project.cjs status --project-root <consultation-folder>
+node scripts/project.cjs verify --project-root <consultation-folder>
 ```
 
-For Claude Code, use the personal skill folder
-`~/.claude/skills/causal-consultant`. For Codex, use the personal folder
-`$HOME/.agents/skills/causal-consultant` or the repository-local folder
-`$REPO_ROOT/.agents/skills/causal-consultant`.
-Requires Node.js 18+; the committed bundle needs no `npm install`. The
-repository's `project-hooks/`, build source, and tests are not part of the
-runtime.
+Keep active test files directly in `tests/` as `*.test.cjs`; nested fixture and
+historical copies are not discovered. Node test options are forwarded, for
+example `npm test -- --test-name-pattern="version"`.
 
-Optional per-project stop hook (checks persistent state from subdirectories).
-Either hook blocks one stop when an operation is unfinished so the session can
-resume it; when the host re-invokes it with `stop_hook_active` for the same
-stop, it yields with a notice instead of looping. From a clone or extracted
-release checkout, run the matching installer with the project that should
-receive the hook (all platforms):
+[Memory](references/memory.md) documents focused reads, records, history and recovery.
+[Runs](references/runs.md) documents pre-result plans, saved artifacts, and
+verification. These are conditional instructions, not a questionnaire for you.
 
-```text
-node scripts/install-claude-hook.cjs --project-root "/path/to/your/project"
-node scripts/install-codex-hook.cjs  --project-root "/path/to/your/project"
-```
+## Auditability and Containment
 
-The installer copies the hook bundle, merges only the causal-consultant `Stop`
-handler into an existing `.claude/settings.json` or `.codex/hooks.json`
-(permissions, environment settings, and unrelated hooks are preserved), and
-creates timestamped backups before changing existing files. Repeating the
-command is safe. Codex may ask you to review and trust the project hook before
-it runs; use `/hooks` to inspect its status.
+Each consultation has one authoritative `journal.jsonl` and a rebuildable
+`project.yaml`. Both use JSON serialization; JSON is a valid YAML subset.
+Relevant current facts and all older records remain available. A review is saved
+once; the projection contains its short index rather than a second full handoff.
+Use focused context for a known question or strategy, and complete status
+directly for broad reassessment. Context exposes omissions and history locators;
+it cannot infer missing scientific links or decide which conclusions are valid.
+Paging through everything can cost more than one complete read.
 
-## Use
+The context command, preparation operation, custom/composed plans and optional
+evidence excerpts are included in 7.0.0, having been introduced in rc.3. Earlier
+v7 journals remain readable without rewriting them; older helpers need not
+accept records using the newer features.
+Same-ID updates still replace the complete record, including optional fields.
 
-The skill activates only when you ask for it explicitly. It is deliberately
-too thorough for one-off statistics questions:
+Saved outputs live in `runs/<run-id>/`. A run retains its frozen plan, file input
+snapshots, code or configuration, outputs, and hashed manifest. A changed result
+belongs in a new run. A small audit without saved outputs needs a review record,
+not a run directory. Target estimation always needs a planned run.
 
-```text
-Use the causal-consultant skill to help me think through this causal question.
-```
+Managed writes reject path escapes and linked destinations. Short writer locks,
+stable event identities, and explicit recovery handle cooperating processes and
+interrupted writes. `verify` reports changed files and unfinished work.
+By default it also checks original source paths. An explicit read-only
+`verify --source-check snapshots` checks a moved or offline archive's recorded
+local contents without requiring those original paths. Its result labels the
+limited source check; it does not weaken finalization or update old plans.
 
-In Codex, invoke `$causal-consultant`, or open `/skills` and select it. In
-Claude Code, invoke `/causal-consultant`.
+These guarantees do **not** sandbox arbitrary code or prove that saved code was
+executed. Host tool permissions still govern execution. Retain the actual command
+and execution evidence when computing results. Hashes detect changes relative to
+the recorded history, not a malicious rewrite of that entire history. Local
+durability is not an off-device backup. Very large file snapshots and histories
+have not been performance-qualified.
 
-Then work conversationally. Describe your question and data; the team audits
-what you have, asks the few questions that actually change the design, and
-proposes what to do next. When an analysis or report plan is ready, you get
-its complete scope, including the target, method, diagnostics, and claim
-boundary, for a direct yes/no approval. No target analysis result is computed
-until you approve the exact scope. Results, diagnostics, and reports land under
-`output/`, the project memory lives in `project_state.yaml` next to your data,
-and a new session on the same folder picks up exactly where you left off. Say
-"start fresh" to archive the state and begin a new project.
+If a process crashes while recovering a lock, its `.consultant-recovery.lock`
+guard can remain. Automatic recovery intentionally refuses an unverifiable
+guard. For offline operator recovery, first stop all helpers for that project;
+check the exact guard is a regular file inside the resolved project folder,
+its recorded host is this machine, and its recorded PID is definitely no longer
+alive. Only then remove that exact guard, leaving the writer lock and project
+history intact, and retry `recover-lock` for the original writer if needed.
+If ownership or inactivity cannot be established, leave both locks in place.
+This rare recovery path is manual, not an automatic resumption guarantee.
 
-## License
+## Existing v6 Projects
 
-MIT. See [LICENSE](LICENSE).
+Continue them with v6, or start a new v7 folder and carry over explicitly reviewed
+source summaries. The helper refuses a folder containing `project_state.yaml`.
+No automatic conversion, deletion, or import of legacy claims as verified v7
+results occurs. Legacy evidence keeps its source version and verification label.
+The preserved local v6 controller is in the sibling `causal-consultant-v6`
+directory, not in this repository. Archives are filesystem snapshots; this
+repository retains its Git history and remotes. They are not separate remote
+backups, and their uncommitted v6 edits are not included in a future v7 commit.
+
+## Verification Status
+
+This publication includes the skill runtime and deterministic engineering tests.
+Developer design and historical smoke traces are retained separately in the
+local development workspace and its evidence branch. Passing unit tests is not
+evidence that every consulting trajectory or scientific method has been
+model-evaluated.
+
+Full behavioral qualification still requires fresh complete interaction and scientific
+trajectory comparisons, including full objective-level resource accounting.
+Earlier rc.3 testing used a separate, versioned sequential capture protocol with the installed
+Codex transport; targeted question-chain observations do not qualify the full
+scientific suite. Independent numerical fixtures check reference algebra, not
+the consultant's ability to reproduce it. The generic validator uses the existing
+user-wide Python 3.14.7 and PyYAML 6.0.3; no installation was needed.
+Use shared machine-wide or user-wide runtimes and packages; no project-local
+environment is required. No installation or reconfiguration is part of this
+revision.
+Host hooks are optional future integration, not required runtime.

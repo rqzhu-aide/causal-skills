@@ -1,0 +1,25 @@
+{
+  "fixture_version": 1,
+  "scope": "Serialization examples, not an observed consultant conversation",
+  "init": {"project_id": "project-questions", "event_id": "event-init", "project_understanding": {"objective": "Establish whether enrollment and visit records can support follow-up construction", "current_claim_boundary": "Preparation feasibility only; no effect estimate"}},
+  "audit": {
+    "type": "review_completed",
+    "payload": {
+      "checkpoint": {"checkpoint_id": "checkpoint-audit", "status": "ready_for_specialist", "primary_uncertainty": "Linkage and timing feasibility", "why_it_matters": "The requested inspection determines whether follow-up can be constructed", "user_contribution_refs": ["user-audit"]},
+      "changes": {
+        "evidence": [
+          {"evidence_id": "user-audit", "kind": "user_statement", "source_ref": "chat:turn-1", "summary": "Audit linkage and timing in the supplied files; do not estimate effects"},
+          {"evidence_id": "file-dictionary", "kind": "file", "source_ref": "data/dictionary.md", "summary": "start_date is described only as the start; its operational event is unspecified"}
+        ],
+        "questions": [{"question_id": "question-start", "statement": "What event does start_date record: booking, attendance, or something else?", "status": "open", "reason": "Its meaning changes time zero and eligible follow-up; the clinic operator or event log could resolve it", "basis_refs": ["file-dictionary", "strategy-followup"]}],
+        "candidate_routes": [{"strategy_id": "strategy-followup", "target": "Follow-up among enrolled people", "approach": "Link enrollment to dated visits", "status": "conditional", "reason": "The anchor date is unresolved", "data_requirements": ["Person keys and actual event dates"], "claim_boundary": "Preparation only", "evidence_for": ["file-dictionary"], "unmet_requirements": ["Define the follow-up anchor"], "reopen_or_promote_when": "Operational date meaning is established", "last_review_id": "review-audit"}],
+        "consultation": {"checkpoint_id": "checkpoint-start", "status": "awaiting_user", "primary_uncertainty": "The event recorded by start_date", "why_it_matters": "Booking and attendance imply different follow-up windows", "related_unresolved_question_refs": ["question-start"], "strategy_ids_it_could_change": ["strategy-followup"], "ways_user_can_help": ["Explain the event or identify a record that distinguishes it"]}
+      },
+      "review": {"review_id": "review-audit", "summary": "Timing meaning needs the clinic operator or an event record", "assignment": {"specialist_id": "data_audit", "operation": "review"}, "question_addressed": "Can enrollment and visits be linked with an interpretable timing anchor?", "selection_basis": {"checkpoint_id": "checkpoint-audit", "user_contribution_refs": ["user-audit"]}, "work_performed": ["Example inspection of the source dictionary"], "findings": ["The supplied definition does not identify the event"], "evidence_refs": ["file-dictionary"], "route_changes": ["strategy-followup"], "remaining_uncertainty": ["What event does start_date record? Ask the operator or inspect the event log because it changes eligible follow-up"], "suggested_next_uncertainty": "Whether a separate dated attendance record exists"}
+    }
+  },
+  "ambiguous_answer": {"evidence_id": "user-start-ambiguous", "kind": "user_statement", "source_ref": "chat:turn-2", "summary": "The operator confidently says this is when they start; the event is still unspecified", "limitations": ["Confidence does not resolve whether this means booking or attendance"]},
+  "precise_answer": {"evidence_id": "user-start-precise", "kind": "user_statement", "source_ref": "chat:turn-3", "summary": "The operator clarifies that start_date records booking, not attendance; an appointment-event table exists", "limitations": ["Operational account; the newly offered table has not yet been inspected"], "supersedes": "user-start-ambiguous"},
+  "deferral_reason": "Keep open while summarizing the current linkage finding; revisit before defining follow-up or preparing a dataset",
+  "resolution": "Answered by the operator: start_date is booking, not attendance. Retrieve the offered event table before constructing attendance-based follow-up"
+}

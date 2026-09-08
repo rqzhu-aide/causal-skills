@@ -1,6 +1,6 @@
 # Support: non-continuous-outcomes
 
-Context only. Relevant when the outcome is binary, ordinal, categorical, count, zero-inflated, time-to-event, recurrent event, competing risk, bounded, or otherwise not well represented by a simple continuous mean. The selected design route owns execution, diagnostics, and the controller submission.
+Context only. Relevant when the outcome is binary, ordinal, categorical, count, zero-inflated, time-to-event, recurrent event, competing risk, bounded, or otherwise not well represented by a simple continuous mean. The selected design worker owns this review and its diagnostics.
 
 ## Additional Information
 

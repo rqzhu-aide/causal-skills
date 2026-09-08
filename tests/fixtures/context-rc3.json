@@ -1,0 +1,93 @@
+{
+  "fixture_version": 1,
+  "project_id": "project-context-rc3",
+  "timestamp": "2026-09-07T12:00:00.000Z",
+  "project_understanding": {
+    "objective": "Assess the effect of offering the clinic program on visits.",
+    "causal_target": "The offer effect in eligible clinics, not the attendance effect.",
+    "intended_use": "Choose an analysis using supplied records within the existing data budget.",
+    "current_claim_boundary": "Assignment is disputed; no offer effect is established."
+  },
+  "events": [
+    {
+      "event_id": "event-assignment",
+      "type": "memory_updated",
+      "payload": {
+        "changes": {
+          "evidence": [
+            {
+              "evidence_id": "evidence-assignment-original",
+              "kind": "user_statement",
+              "source_ref": "chat:allocation-recollection",
+              "summary": "I think offers were randomized; I did not operate allocation.",
+              "limitations": ["Recollection is qualified and assignment has not been verified."]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event_id": "event-core-facts",
+      "type": "memory_updated",
+      "payload": {
+        "changes": {
+          "evidence": [
+            {"evidence_id": "evidence-request", "kind": "user_statement", "source_ref": "chat:request", "summary": "The user requests an offer-effect feasibility review."},
+            {"evidence_id": "evidence-schedule", "kind": "file", "source_ref": "records/schedule-notes.txt", "summary": "Offer order follows existing staffing; this is contrary evidence against the randomization recollection.", "limitations": ["These notes do not establish every allocation decision."]},
+            {"evidence_id": "evidence-population", "kind": "file", "source_ref": "records/eligibility.txt", "summary": "The clinic population has a stable stated eligibility rule."},
+            {"evidence_id": "evidence-budget", "kind": "user_statement", "source_ref": "chat:budget", "summary": "The project cannot purchase additional data this month."},
+            {"evidence_id": "evidence-unlinked", "kind": "file", "source_ref": "records/earnings.txt", "summary": "An unrelated earnings inquiry has separate material and no bearing on clinic assignment."}
+          ],
+          "questions": [
+            {"question_id": "question-old-resolution", "statement": "What did the user recall about assignment?", "status": "answered", "reason": "They thought offers were randomized but did not operate allocation; the answer was not verification.", "basis_refs": ["evidence-assignment-original"]},
+            {"question_id": "question-current", "statement": "Which offer-effect investigation is feasible with the current budget?", "status": "open", "basis_refs": ["strategy-offer", "decision-budget"]},
+            {"question_id": "question-unasked", "statement": "Were failed program contacts excluded from the delivered visit series?", "status": "open", "reason": "The data owner may know; not yet asked. Revisit before treating visits as complete."}
+          ],
+          "assumptions": [
+            {"assumption_id": "assumption-assignment", "statement": "Randomized offers were previously considered plausible.", "status": "active", "basis_refs": ["evidence-assignment-original"]}
+          ],
+          "decisions": [
+            {"decision_id": "decision-offer", "kind": "design", "statement": "The offer strategy needs reassessment if assignment changes.", "status": "current", "basis_refs": ["assumption-assignment"]},
+            {"decision_id": "decision-budget", "kind": "boundary", "statement": "Do not recommend purchasing data this month.", "status": "current", "basis_refs": ["evidence-budget"], "user_contribution_refs": ["evidence-budget"]}
+          ],
+          "candidate_routes": [
+            {"strategy_id": "strategy-offer", "target": "Effect of the offer on visits", "approach": "Assess the offer assignment argument.", "design_id": "randomized_assignment", "status": "conditional", "reason": "Assignment needs verification.", "claim_boundary": "No established causal result.", "evidence_for": ["evidence-assignment-original", "evidence-population"], "evidence_against": ["evidence-schedule"], "unmet_requirements": ["A defensible account of how offers were assigned."]},
+            {"strategy_id": "strategy-attendance", "target": "Effect of attendance on visits", "approach": "A distinct attendance estimand requiring its own identifying argument.", "design_id": "randomized_assignment", "status": "unsupported_with_current_evidence", "reason": "Shared design labels or eligibility do not identify the attendance effect.", "evidence_for": ["evidence-population"]}
+          ]
+        }
+      }
+    },
+    {
+      "event_id": "event-review",
+      "type": "review_completed",
+      "payload": {
+        "checkpoint": {"checkpoint_id": "checkpoint-reviewed", "status": "ready_for_specialist", "primary_uncertainty": "Whether the allocation account matches records", "why_it_matters": "It changes the offer identification argument.", "strategy_ids_it_could_change": ["strategy-offer"], "user_contribution_refs": ["evidence-request"]},
+        "review": {"review_id": "review-allocation", "summary": "The allocation account remains disputed.", "assignment": {"specialist_id": "data_audit", "operation": "review", "strategy_ids": ["strategy-offer"]}, "question_addressed": "Does the allocation account match records?", "selection_basis": {"checkpoint_id": "checkpoint-reviewed", "user_contribution_refs": ["evidence-request"]}, "work_performed": ["Inspected scheduling notes."], "findings": ["Staffing appears related to offer order."], "evidence_refs": ["evidence-schedule"], "limitations": ["No complete allocation protocol was available."], "remaining_uncertainty": ["How were offers actually assigned?"]},
+        "changes": {
+          "questions": [{"question_id": "question-review-basis", "statement": "What supports the allocation review?", "status": "answered", "reason": "The review and its selection checkpoint retain the precise provenance.", "basis_refs": ["review-allocation", "checkpoint-reviewed"]}],
+          "consultation": {"checkpoint_id": "checkpoint-current", "status": "awaiting_user", "primary_uncertainty": "What feasible offer investigation could resolve disputed assignment?", "why_it_matters": "The claim must match the known allocation process.", "strategy_ids_it_could_change": ["strategy-offer"], "related_unresolved_question_refs": ["question-current"], "user_contribution_refs": ["evidence-request"]}
+        }
+      }
+    },
+    {
+      "event_id": "event-correction",
+      "type": "correction",
+      "payload": {
+        "corrects_refs": ["event-assignment"],
+        "reason": "The user checked the assignment account and reports no randomized offer.",
+        "changes": {
+          "evidence": [{"evidence_id": "evidence-assignment-revised", "kind": "user_statement", "source_ref": "chat:allocation-correction", "summary": "No offer was randomized; local managers chose whom to offer it to.", "limitations": ["This account still needs the available assignment documents."], "supersedes": "evidence-assignment-original"}]
+        }
+      }
+    }
+  ],
+  "padding": {"answered_questions": 100, "file_evidence": 40, "query_questions": 6},
+  "cases": [
+    {"id": "focused", "request": {}, "required_refs": ["strategy-offer", "evidence-assignment-original", "evidence-assignment-revised", "evidence-schedule", "question-old-resolution", "question-current", "assumption-assignment", "decision-offer", "decision-budget", "evidence-budget", "run-pending"], "omitted_refs": ["strategy-attendance", "question-unasked", "evidence-unlinked"]},
+    {"id": "focal-premise", "request": {"focus_refs": ["evidence-population"]}, "required_refs": ["strategy-offer", "strategy-attendance", "evidence-population"], "omitted_refs": ["evidence-unlinked"]},
+    {"id": "review-history", "request": {"focus_refs": ["question-review-basis"]}, "required_refs": ["question-review-basis", "review-allocation", "evidence-schedule"], "historical_refs": ["checkpoint-reviewed"]},
+    {"id": "query-pages", "request": {"query": "retrieval-probe", "limit": 2}, "required_refs": ["strategy-offer", "evidence-schedule"], "query_matches": 6},
+    {"id": "missing-link-fallback", "request": {}, "fallback": "status", "required_after_fallback_refs": ["question-unasked"]},
+    {"id": "essential-overflow", "request": {"limit": 1}, "required_refs": ["strategy-offer", "evidence-assignment-original", "evidence-assignment-revised", "evidence-schedule", "question-old-resolution", "decision-budget", "run-pending"], "expect_overflow": true}
+  ]
+}

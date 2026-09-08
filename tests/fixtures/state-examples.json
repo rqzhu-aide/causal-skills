@@ -1,0 +1,368 @@
+{
+  "fixture_id": "v7-state-contract-1",
+  "schema_version": 7,
+  "source": "synthetic_contract_examples",
+  "notes": [
+    "These are storage and replay examples, not consultant observations or validated scientific findings.",
+    "Runtime-generated timestamps, sequence numbers, and hashes are deliberately omitted from requests.",
+    "Each run case starts from the completed semantic sequence in a separate temporary project.",
+    "A test stages files only inside its temporary project; examples never authorize writes to a live project."
+  ],
+  "init": {
+    "project_id": "project-demo",
+    "event_id": "event-init",
+    "project_understanding": {
+      "objective": "Assess possible district policy comparisons before selecting an analysis.",
+      "intended_use": "Research planning",
+      "audience": "Applied researcher",
+      "causal_target": "Effect of policy adoption on the district outcome.",
+      "materials": ["inputs/panel.csv"],
+      "current_claim_boundary": "No causal effect is established."
+    }
+  },
+  "records": [
+    {
+      "label": "A current user-facing checkpoint",
+      "request": {
+        "event_id": "event-checkpoint-1",
+        "expected_project_id": "project-demo",
+        "expected_last_event_id": "event-init",
+        "type": "checkpoint",
+        "payload": {
+          "checkpoint": {
+            "checkpoint_id": "checkpoint-adoption",
+            "status": "awaiting_user",
+            "primary_uncertainty": "Was adoption scheduled independently of expected outcome changes?",
+            "why_it_matters": "The assignment process could change which comparisons are defensible.",
+            "ways_user_can_help": ["Share the rollout protocol or explain how districts were selected."],
+            "consultant_led_options_if_unknown": ["Inspect available district identifiers and timing first."],
+            "related_unresolved_question_refs": ["question-adoption"]
+          },
+          "changes": {
+            "questions": [
+              {
+                "question_id": "question-adoption",
+                "statement": "How were districts selected for policy adoption?",
+                "status": "open"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "current_checkpoint_id": "checkpoint-adoption",
+        "current_checkpoint_status": "awaiting_user",
+        "completed_reviews": 0,
+        "open_question_ids": ["question-adoption"]
+      }
+    },
+    {
+      "label": "One direct audit with a synthesized selection checkpoint and a different next checkpoint",
+      "request": {
+        "event_id": "event-review-audit",
+        "expected_project_id": "project-demo",
+        "expected_last_event_id": "event-checkpoint-1",
+        "type": "review_completed",
+        "payload": {
+          "checkpoint": {
+            "checkpoint_id": "checkpoint-audit-request",
+            "status": "ready_for_specialist",
+            "primary_uncertainty": "Which district populations have usable repeated observations?",
+            "why_it_matters": "Available support may distinguish useful comparison populations.",
+            "user_contribution_refs": ["evidence-user-audit"],
+            "selected_assignment": {
+              "specialist_id": "data_audit",
+              "operation": "review"
+            }
+          },
+          "review": {
+            "review_id": "review-audit-1",
+            "summary": "Observed panel coverage distinguishes two possible study populations; identifier stability is not yet confirmed.",
+            "assignment": {
+              "specialist_id": "data_audit",
+              "operation": "review",
+              "strategy_ids": ["strategy-all-districts", "strategy-stable-panel"]
+            },
+            "question_addressed": "Which comparison populations have repeated records?",
+            "selection_basis": {
+              "checkpoint_id": "checkpoint-audit-request",
+              "user_contribution_refs": ["evidence-user-audit"]
+            },
+            "evidence_refs": ["evidence-panel-structure"],
+            "work_performed": ["Inspected the supplied panel's identifier and observation coverage."],
+            "findings": ["The same apparent district identifiers recur; some rows have longer coverage than others."],
+            "limitations": ["Identifier stability and adoption assignment are not established by repeated labels."],
+            "route_changes": ["strategy-all-districts", "strategy-stable-panel"],
+            "remaining_uncertainty": ["Identifier reuse could invalidate the apparent panel."],
+            "suggested_next_uncertainty": "Do repeated district labels identify the same districts?"
+          },
+          "changes": {
+            "evidence": [
+              {
+                "evidence_id": "evidence-user-audit",
+                "kind": "user_statement",
+                "source_ref": "chat:turn-2",
+                "summary": "Please audit the available panel structure now. I cannot yet explain the adoption process."
+              },
+              {
+                "evidence_id": "evidence-panel-structure",
+                "kind": "file",
+                "source_ref": "inputs/panel.csv",
+                "summary": "Repeated district labels and differing record coverage were observed.",
+                "limitations": ["Repeated labels have not been verified as stable entities."]
+              }
+            ],
+            "questions": [
+              {
+                "question_id": "question-identifier-stability",
+                "statement": "Do repeated district labels identify the same districts?",
+                "status": "open",
+                "basis_refs": ["evidence-panel-structure"]
+              }
+            ],
+            "candidate_routes": [
+              {
+                "strategy_id": "strategy-all-districts",
+                "target": "Effect among all adopting districts",
+                "approach": "Use an unbalanced district panel after linkage validation.",
+                "design_id": "difference_in_differences",
+                "status": "conditional",
+                "reason": "Potential coverage exists but assignment and entity linkage remain unresolved.",
+                "claim_boundary": "Candidate strategy only; no identification or result claim.",
+                "evidence_for": ["evidence-panel-structure"],
+                "unmet_requirements": ["Validate entity linkage.", "Clarify adoption assignment."],
+                "reopen_or_promote_when": "Linkage and assignment evidence support this population.",
+                "last_review_id": "review-audit-1"
+              },
+              {
+                "strategy_id": "strategy-stable-panel",
+                "target": "Effect among districts with stable pre-policy observation coverage",
+                "approach": "Restrict to a prespecified stable-coverage population after linkage validation.",
+                "design_id": "difference_in_differences",
+                "status": "conditional",
+                "reason": "The alternative population changes the target, not merely the estimator.",
+                "claim_boundary": "Candidate strategy only; user has not adopted this revised population.",
+                "evidence_for": ["evidence-panel-structure"],
+                "unmet_requirements": ["Validate entity linkage.", "Decide whether the narrower target serves the research question."],
+                "reopen_or_promote_when": "The user adopts this target and required evidence is available.",
+                "last_review_id": "review-audit-1"
+              }
+            ],
+            "consultation": {
+              "checkpoint_id": "checkpoint-identifier-stability",
+              "status": "awaiting_user",
+              "primary_uncertainty": "Do repeated district labels identify the same districts?",
+              "why_it_matters": "Label reuse would change the unit of analysis and invalidate apparent repeated coverage.",
+              "strategy_ids_it_could_change": ["strategy-all-districts", "strategy-stable-panel"],
+              "ways_user_can_help": ["Provide the identifier dictionary or describe district reorganizations."],
+              "consultant_led_options_if_unknown": ["Review available codebooks for identifier definitions."],
+              "related_unresolved_question_refs": ["question-adoption", "question-identifier-stability"]
+            }
+          }
+        }
+      },
+      "expect": {
+        "current_checkpoint_id": "checkpoint-identifier-stability",
+        "completed_reviews": 1,
+        "review_selection_checkpoint_id": "checkpoint-audit-request",
+        "same_design_distinct_strategy_ids": ["strategy-all-districts", "strategy-stable-panel"],
+        "open_question_ids": ["question-adoption", "question-identifier-stability"],
+        "review_only_in_journal": true
+      }
+    },
+    {
+      "label": "A correction preserves earlier interpretation and an answered question",
+      "request": {
+        "event_id": "event-identifier-correction",
+        "expected_project_id": "project-demo",
+        "expected_last_event_id": "event-review-audit",
+        "type": "correction",
+        "payload": {
+          "corrects_refs": ["evidence-panel-structure"],
+          "reason": "The user explains that district identifiers were reused after reorganization.",
+          "changes": {
+            "evidence": [
+              {
+                "evidence_id": "evidence-user-correction",
+                "kind": "user_statement",
+                "source_ref": "chat:turn-3",
+                "summary": "District labels were reused after reorganization; repeated labels need not identify the same district.",
+                "limitations": ["This account is user-reported and still needs a crosswalk or source verification."]
+              },
+              {
+                "evidence_id": "evidence-panel-linkage-corrected",
+                "kind": "user_statement",
+                "source_ref": "chat:turn-3",
+                "summary": "Interpret repeated labels as potentially different entities until a crosswalk verifies linkage.",
+                "supersedes": "evidence-panel-structure",
+                "limitations": ["The original file observation remains valid; the entity interpretation is corrected."]
+              }
+            ],
+            "questions": [
+              {
+                "question_id": "question-identifier-stability",
+                "statement": "Do repeated district labels identify the same districts?",
+                "status": "answered",
+                "reason": "The user's account says labels were reused, so label equality alone cannot establish entity stability.",
+                "basis_refs": ["evidence-user-correction"]
+              }
+            ],
+            "candidate_routes": [
+              {
+                "strategy_id": "strategy-stable-panel",
+                "target": "Effect among districts with stable pre-policy observation coverage",
+                "approach": "Use a stable-entity population only after obtaining a valid identifier crosswalk.",
+                "design_id": "difference_in_differences",
+                "status": "unsupported_with_current_evidence",
+                "reason": "The available identifiers do not currently establish a stable district panel.",
+                "claim_boundary": "No causal effect is established.",
+                "evidence_against": ["evidence-user-correction"],
+                "unmet_requirements": ["Obtain and validate an entity crosswalk."],
+                "reopen_or_promote_when": "A crosswalk establishes stable entities for the intended target."
+              }
+            ],
+            "consultation": null
+          }
+        }
+      },
+      "expect": {
+        "current_checkpoint_id": null,
+        "completed_reviews": 1,
+        "retrievable_ids": ["evidence-panel-structure", "question-identifier-stability", "checkpoint-audit-request"],
+        "retrievable_prior_events": ["event-review-audit"],
+        "open_question_ids": ["question-adoption"],
+        "strategy_stable_panel_status": "unsupported_with_current_evidence"
+      }
+    }
+  ],
+  "recovery_cases": [
+    {
+      "id": "projection-replacement-failure",
+      "stage": "Apply records[1] after records[0]. Inject failure after the complete event is appended and flushed, before projection replacement.",
+      "retry_request_from": "records[1].request",
+      "expect": {
+        "journal_last_event_id": "event-review-audit",
+        "projection_replays_before_use": true,
+        "review_count_after_retry": 1,
+        "no_repeat_specialist_work": true,
+        "current_checkpoint_id_after_recovery": "checkpoint-identifier-stability"
+      }
+    },
+    {
+      "id": "event-id-reuse-with-different-content",
+      "stage": "Retry records[1] after committing it, changing review.summary while keeping its event_id.",
+      "expect": {
+        "reject": true,
+        "journal_unchanged": true,
+        "review_count": 1
+      }
+    },
+    {
+      "id": "partial-journal-tail",
+      "stage": "After records[0], simulate a partial append ending in an incomplete JSON record without a newline.",
+      "expect": {
+        "partial_bytes_preserved": true,
+        "ordinary_append_rejected_until_explicit_repair": true,
+        "no_silent_history_loss": true
+      }
+    }
+  ],
+  "run_fixture_files": {
+    "inputs/panel.csv": "district,wave,outcome\na,1,10\na,2,12\n",
+    "code/summary.cjs": "const fs = require('node:fs'); const rows = fs.readFileSync('../../inputs/panel.csv', 'utf8').trim().split(/\\r?\\n/).slice(1); const values = rows.map(row => Number(row.split(',')[2])); fs.writeFileSync('results/summary.json', JSON.stringify({mean: values.reduce((a,b) => a+b,0)/values.length, n: values.length}));\n",
+    "results/summary.json": "{\"mean\":11,\"n\":2}\n",
+    "results/diagnostics.json": "{\"missing_outcomes\":0,\"interpretation\":\"Synthetic descriptive output only\"}\n"
+  },
+  "run_plan": {
+    "kind": "analysis",
+    "objective": "Demonstrate an auditable descriptive summary without claiming district policy identification.",
+    "claim_boundary": "Descriptive sample mean only. No causal or stable-entity interpretation.",
+    "inputs": [
+      {
+        "source_ref": "inputs/panel.csv",
+        "path": "inputs/panel.csv"
+      }
+    ],
+    "target": "Observed rows in the supplied synthetic input",
+    "population": "The two observed synthetic rows",
+    "treatment": "None; descriptive summary",
+    "comparator": "None; no causal contrast",
+    "outcome": "outcome",
+    "timing": "All supplied waves",
+    "estimand": "Arithmetic mean of observed row outcomes",
+    "design_id": "descriptive_association",
+    "estimator": "Sample arithmetic mean",
+    "exclusions": [],
+    "diagnostics": ["Count observed rows and missing outcomes."]
+  },
+  "run_cases": [
+    {
+      "id": "completed-run",
+      "start_request": {
+        "event_id": "event-run-start",
+        "expected_project_id": "project-demo",
+        "expected_last_event_id": "event-identifier-correction",
+        "run_id": "run-summary-1",
+        "plan_from": "run_plan"
+      },
+      "managed_files_from": ["code/summary.cjs", "results/summary.json", "results/diagnostics.json"],
+      "finalize_request": {
+        "event_id": "event-run-complete",
+        "expected_project_id": "project-demo",
+        "expected_last_event_id": "event-run-start",
+        "run_id": "run-summary-1",
+        "code_paths": ["code/summary.cjs"],
+        "output_paths": ["results/summary.json"],
+        "diagnostic_paths": ["results/diagnostics.json"],
+        "environment": {"runtime": "node", "execution_context": "synthetic contract fixture"},
+        "deviations": []
+      },
+      "expect": {
+        "plan_frozen_before_run_started": true,
+        "status_after_start": "in_progress",
+        "status_after_finalize": "completed",
+        "manifest_binds_plan_inputs_code_outputs": true,
+        "managed_write_after_finalize_rejected": true,
+        "changed_output_detected_by_verify": true
+      }
+    },
+    {
+      "id": "failed-run",
+      "start_request": {
+        "event_id": "event-failed-run-start",
+        "expected_project_id": "project-demo",
+        "expected_last_event_id": "event-identifier-correction",
+        "run_id": "run-summary-failed",
+        "plan_from": "run_plan"
+      },
+      "terminal_operation": "fail-run",
+      "terminal_request": {
+        "event_id": "event-run-failed",
+        "expected_project_id": "project-demo",
+        "expected_last_event_id": "event-failed-run-start",
+        "run_id": "run-summary-failed",
+        "reason": "The runtime failed before any output was completed."
+      },
+      "expect": {"status": "failed", "completed_result": false}
+    },
+    {
+      "id": "abandoned-run",
+      "start_request": {
+        "event_id": "event-abandoned-run-start",
+        "expected_project_id": "project-demo",
+        "expected_last_event_id": "event-identifier-correction",
+        "run_id": "run-summary-abandoned",
+        "plan_from": "run_plan"
+      },
+      "terminal_operation": "abandon-run",
+      "terminal_request": {
+        "event_id": "event-run-abandoned",
+        "expected_project_id": "project-demo",
+        "expected_last_event_id": "event-abandoned-run-start",
+        "run_id": "run-summary-abandoned",
+        "reason": "The user no longer needs this descriptive output."
+      },
+      "expect": {"status": "abandoned", "completed_result": false}
+    }
+  ]
+}

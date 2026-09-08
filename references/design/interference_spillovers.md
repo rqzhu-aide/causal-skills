@@ -4,8 +4,9 @@ Use this file to plan or review an interference or spillover analysis: SUTVA/no-
 
 Work in this order: define units, mechanism, interference restriction, exposure mapping, timing, support, design source, dependence-aware inference, and claim boundary. Do not treat ordinary cluster-robust standard errors as a repair for interference.
 
-Runtime contract: `references/design_execution_contract.md`, design id
-`interference_spillovers`.
+Use with [design_worker](../design_worker.md), design ID `interference_spillovers`.
+Feasibility uses the data requirements, assumptions, and planned diagnostics;
+new target computation additionally follows the recorded-run instructions there.
 
 ## Use When
 
@@ -37,14 +38,19 @@ Facts that usually must be inspected, not merely assumed: exposure map, timing, 
 
 ## Design-Specific Twists
 
+These are possible revisions, not permission to change the user's target.
+A changed population, contrast, follow-up, or estimand stays an explicit
+alternative until the user adopts it. Base data construction and restriction
+on design evidence, not attractive target results.
+
 - `direct_fit`: units, mechanism, exposure mapping, timing, support, and dependence-aware inference support a direct/spillover estimand.
 - `data_shape_twist`: construct network, cluster, market, or geographic exposure map; compute treated-neighbor share; build saturation groups; define lags/radii; or mark contamination of controls.
-- `estimand_twist`: convert isolated-unit ATE into direct, indirect, spillover, total, overall, saturation, exposure-response, contamination-audit, or descriptive map target.
+- `estimand_twist`: consider reframing isolated-unit ATE into direct, indirect, spillover, total, overall, saturation, exposure-response, contamination-audit, or descriptive map target.
 - `diagnostic_twist`: prioritize exposure-map support, own-by-spillover exposure cells, timing of ties, homophily/confounding, contamination, sensitivity to radius/tie weights, and dependence-aware inference.
 - `implementation_twist`: use two-stage randomized estimators, partial-interference IPW, exposure-mapping estimators, network/spatial robust inference, generalized propensity, AIPW/TMLE-style logic, or randomization inference only when the design supports them.
 - `fallback_twist`: if exposure mapping, support, timing, or dependence fails, use contamination audit, descriptive spillover map, or recommendation to repair another design's no-interference assumption.
 
-## Diagnostics for Approved Execution
+## Design Diagnostics
 
 Perform the analytic diagnostics relevant to the interference design and chosen estimator lane:
 
@@ -81,29 +87,28 @@ Never rescue these failures by "controlling for peers" or by ordinary cluster-ro
 - Partial interference and clustered spillovers: R `inferference`, `interferenceCI`, `clusteredinterference`.
 - Network or spatial exposure construction: R `igraph`, `tidygraph`, `sf`; Python `networkx`, `geopandas`, `shapely`.
 - Spatial/spatiotemporal causal support: R/GitHub `SpatialEffect`, R `geocausal`; use only when assumptions match the data.
-- IV/noncompliance plus spillovers: R `latenetwork`; return to `causal_check`
-  for `instrumental_variables` when the instrument is primary.
+- IV/noncompliance plus spillovers: R `latenetwork`; flag to the lead a possible switch to
+  `instrumental_variables` when the instrument is primary.
 - Dependence-aware inference: Python `networkinference`, network HAC/spatial HAC/custom resampling; R custom randomization/permutation or spatial robust workflows.
 - Flexible nuisance after exposure map is fixed: R `grf`, `SuperLearner`, `xgboost`; Python `DoubleML`, `EconML`, sklearn/xgboost; do not let ML define the estimand.
 - Regression analogs and diagnostics: R `fixest`, `lme4`, `mgcv`; Python `statsmodels`; useful only after exposure map and confounding story are explicit.
 
 Key literature anchors: SUTVA/no-interference violations, partial interference, two-stage randomized designs, exposure mapping, direct/indirect/total/overall effects, network interference, spatial spillovers, spillover-robust experimental design, and peer-effect homophily cautions.
 
-## Rerouting Cues
+## Changes to Discuss with the Lead
 
-- Return to `causal_check` for `instrumental_variables` when an instrument and
+- Flag to the lead a possible switch to `instrumental_variables` when an instrument and
   noncompliance become the primary identification frame.
-- Return to `causal_check` for `difference_in_differences`,
+- Flag to the lead a possible switch to `difference_in_differences`,
   `regression_discontinuity`, or `synthetic_control_time_series` when
   interference is only a threat to that primary comparison design.
 
-`causal_check` owns support-route selection. If a different support becomes
-central to the bound work, flag it in chamber feedback rather than loading the
-catalog or switching routes.
-
+A material change of identification frame or target returns to the lead;
+do not execute another design in this turn. A relevant support guide stays
+inside this same review and does not add a specialist.
 
 ## Execution Record
 
-In the artifact `summary`, emphasize units and exposure mapping,
+In the saved review and run summary, emphasize units and exposure mapping,
 the direct/spillover estimand, support and dependence diagnostics,
 confounding/homophily limits, and the interference claim boundary.

@@ -1,6 +1,6 @@
 # Support: dose-response
 
-Context only. Relevant when treatment or exposure is continuous, ordinal, multi-level, cumulative, duration-based, intensity-based, threshold-based, or naturally framed as an exposure-response curve. The selected design route owns execution, diagnostics, and the controller submission.
+Context only. Relevant when treatment or exposure is continuous, ordinal, multi-level, cumulative, duration-based, intensity-based, threshold-based, or naturally framed as an exposure-response curve. The selected design worker owns this review and its diagnostics.
 
 ## Additional Information
 

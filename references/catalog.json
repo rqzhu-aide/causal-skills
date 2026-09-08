@@ -1,0 +1,30 @@
+{
+  "specialists": {
+    "data_audit": ["review", "prepare"],
+    "domain_expert": ["review"],
+    "causal_check": ["readiness", "design_elicitation"],
+    "causal_discovery": ["discovery"],
+    "design_worker": ["feasibility", "execution"],
+    "report_writer": ["reporting"]
+  },
+  "designs": [
+    "randomized_assignment",
+    "single_time_observational",
+    "longitudinal_gmethods",
+    "difference_in_differences",
+    "regression_discontinuity",
+    "instrumental_variables",
+    "synthetic_control_time_series",
+    "interference_spillovers",
+    "descriptive_association",
+    "custom_identification"
+  ],
+  "supports": [
+    "heterogeneous-effects",
+    "dose-response",
+    "mediation",
+    "policy-making-and-transportability",
+    "non-continuous-outcomes",
+    "statistical-validity"
+  ]
+}

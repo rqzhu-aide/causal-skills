@@ -4,8 +4,9 @@ Use this file to plan or review a regression discontinuity analysis: sharp or fu
 
 Work in this order: verify the cutoff rule, define the running variable, check the treatment jump, establish local support, choose the RD lane, specify manipulation/continuity diagnostics, choose estimator settings, then set the local claim boundary. Do not treat an analyst-created split as RD.
 
-Runtime contract: `references/design_execution_contract.md`, design id
-`regression_discontinuity`.
+Use with [design_worker](../design_worker.md), design ID `regression_discontinuity`.
+Feasibility uses the data requirements, assumptions, and planned diagnostics;
+new target computation additionally follows the recorded-run instructions there.
 
 ## Use When
 
@@ -35,14 +36,19 @@ Facts that usually must be inspected, not merely assumed: cutoff rule, running-v
 
 ## Design-Specific Twists
 
+These are possible revisions, not permission to change the user's target.
+A changed population, contrast, follow-up, or estimand stays an explicit
+alternative until the user adopts it. Base data construction and restriction
+on design evidence, not attractive target results.
+
 - `direct_fit`: the cutoff is real, the running variable is pre-treatment, treatment changes at the cutoff, local support exists, and manipulation risk is acceptable.
 - `data_shape_twist`: orient the running variable, center at cutoff, restrict local windows, encode treatment jump, build local sample counts, or construct distance-to-boundary.
-- `estimand_twist`: convert a broad effect request into local threshold effect, local Wald/fuzzy RD effect, kink effect, border effect, multiple-cutoff effect, or local-randomization estimand.
+- `estimand_twist`: consider reframing a broad effect request into local threshold effect, local Wald/fuzzy RD effect, kink effect, border effect, multiple-cutoff effect, or local-randomization estimand.
 - `diagnostic_twist`: prioritize density/manipulation, treatment jump, covariate continuity, RD plot, bandwidth sensitivity, donut checks, placebo cutoffs, or boundary/spillover checks.
 - `implementation_twist`: use robust bias-corrected local polynomial, fuzzy local IV, local randomization, kink, geographic RD, or multiple-cutoff methods only when design facts fit.
 - `fallback_twist`: if the cutoff is artificial, manipulation is severe, support fails, or a date cutoff is trend-driven, use descriptive discontinuity audit, ITS/DiD review, or future-design requirements.
 
-## Diagnostics for Approved Execution
+## Design Diagnostics
 
 Perform the analytic diagnostics relevant to the RD design and chosen estimator lane:
 
@@ -88,21 +94,20 @@ Never rescue these failures with covariates, flexible models, or polished plots.
 
 Key literature anchors: continuity-based RD, local polynomial RD, robust bias correction, McCrary/density testing, local randomization, fuzzy RD as local IV, regression kink, geographic RD, and local external validity.
 
-## Rerouting Cues
+## Changes to Discuss with the Lead
 
-- Keep fuzzy local-IV assumptions inside this RD scope. Return to `causal_check`
-  for `instrumental_variables` only when the instrument rather than the cutoff
+- Keep fuzzy local-IV assumptions inside this RD review. Flag to the lead a
+  possible switch to `instrumental_variables` only when the instrument rather than the cutoff
   becomes the primary identification frame.
-- Return to `causal_check` for `interference_spillovers` when spillovers become
+- Flag to the lead a possible switch to `interference_spillovers` when spillovers become
   the primary estimand; otherwise retain them as RD contamination diagnostics.
 
-`causal_check` owns support-route selection. If a different support becomes
-central to the bound work, flag it in chamber feedback rather than loading the
-catalog or switching routes.
-
+A material change of identification frame or target returns to the lead;
+do not execute another design in this turn. A relevant support guide stays
+inside this same review and does not add a specialist.
 
 ## Execution Record
 
-In the artifact `summary`, emphasize the cutoff and running
+In the saved review and run summary, emphasize the cutoff and running
 variable, treatment jump, local estimand, manipulation/support and bandwidth
 diagnostics, and the local claim boundary.

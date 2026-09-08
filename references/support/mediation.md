@@ -1,6 +1,6 @@
 # Support: mediation
 
-Context only. Relevant when the causal target asks how an effect works, whether a mediator explains the effect, whether to adjust for an intermediate variable, or how to describe pathways. The selected design route owns execution, diagnostics, and the controller submission.
+Context only. Relevant when the causal target asks how an effect works, whether a mediator explains the effect, whether to adjust for an intermediate variable, or how to describe pathways. The selected design worker owns this review and its diagnostics.
 
 ## Additional Information
 

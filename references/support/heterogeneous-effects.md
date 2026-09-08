@@ -1,6 +1,6 @@
 # Support: heterogeneous-effects
 
-Context only. Relevant when the causal target asks whether effects differ across baseline groups, strata, sites, cohorts, risk levels, time periods, or effect modifiers. The selected design route owns execution, diagnostics, and the controller submission.
+Context only. Relevant when the causal target asks whether effects differ across baseline groups, strata, sites, cohorts, risk levels, time periods, or effect modifiers. The selected design worker owns this review and its diagnostics.
 
 ## Additional Information
 

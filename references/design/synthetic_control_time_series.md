@@ -4,8 +4,9 @@ Use this file to plan or review a synthetic-control or aggregate time-series cau
 
 Work in this order: define treated unit(s), intervention timing, donor/control pool, outcome scale, pre-period evidence, estimand, inference route, time-series diagnostics, then claim boundary. Do not let a forecast model hide donor contamination, poor pre-fit, or concurrent shocks.
 
-Runtime contract: `references/design_execution_contract.md`, design id
-`synthetic_control_time_series`.
+Use with [design_worker](../design_worker.md), design ID `synthetic_control_time_series`.
+Feasibility uses the data requirements, assumptions, and planned diagnostics;
+new target computation additionally follows the recorded-run instructions there.
 
 ## Use When
 
@@ -36,14 +37,19 @@ Facts that usually must be inspected, not merely assumed: pre-period fit, donor 
 
 ## Design-Specific Twists
 
+These are possible revisions, not permission to change the user's target.
+A changed population, contrast, follow-up, or estimand stays an explicit
+alternative until the user adopts it. Base data construction and restriction
+on design evidence, not attractive target results.
+
 - `direct_fit`: treated unit, intervention date, donor/control pool, pre-period fit, and inference route support an aggregate counterfactual.
 - `data_shape_twist`: reshape to unit-time panel, create treated/post indicators, define donor pool, construct control series, align denominators, or mark pre/post windows.
-- `estimand_twist`: convert a broad policy-effect request into treated-unit gap, cumulative gap, synthetic DiD ATT, ITS level/slope change, comparative ITS contrast, or descriptive forecast audit.
+- `estimand_twist`: consider reframing a broad policy-effect request into treated-unit gap, cumulative gap, synthetic DiD ATT, ITS level/slope change, comparative ITS contrast, or descriptive forecast audit.
 - `diagnostic_twist`: prioritize pre-fit, donor weights, predictor balance, placebo/permutation, leave-one-out, alternative dates, seasonality, autocorrelation, and concurrent-shock review.
 - `implementation_twist`: use classic SCM, augmented SCM, generalized SCM, synthetic DiD, matrix completion, BSTS/CausalImpact, comparative ITS, or treated-only ITS only when the data structure fits.
 - `fallback_twist`: if donor pool, pre-period, intervention timing, measurement stability, or shocks fail, use descriptive time-series audit, donor feasibility memo, or DiD/ITS caveat.
 
-## Diagnostics for Approved Execution
+## Design Diagnostics
 
 Perform the analytic diagnostics relevant to the synthetic/time-series design and chosen estimator lane:
 
@@ -81,27 +87,26 @@ Never rescue these failures by adding more donors, more predictors, or a richer 
 - Classic SCM: R `Synth`, `tidysynth`; Stata `synth_runner`; Python `pysyncon`.
 - Augmented SCM: R `augsynth`; useful when donor structure is credible but pre-fit is imperfect.
 - Generalized SCM/matrix completion: R `gsynth`, `fect`; useful for multiple treated units/time periods with latent-factor assumptions.
-- Synthetic DiD: R `synthdid`; Stata `SDID`; return to `causal_check` for
+- Synthetic DiD: R `synthdid`; Stata `SDID`; flag to the lead a possible switch to
   `difference_in_differences` when group-time identification is primary.
 - BSTS/CausalImpact/comparative ITS: R `CausalImpact`, `bsts`; Python CausalImpact-style ports; Python `statsmodels` for segmented regression/SARIMAX/autocorrelation diagnostics.
 - Time-series benchmarks: R `forecast`, `bsts`, `strucchange`; Python `statsmodels`; use as diagnostics or forecast support, not automatic causal identification.
 
 Key literature anchors: synthetic control, augmented SCM, generalized SCM, synthetic DiD, interrupted time series, comparative ITS, Bayesian structural time series, placebo/permutation inference, conformal inference, and matrix completion for counterfactual panels.
 
-## Rerouting Cues
+## Changes to Discuss with the Lead
 
-- Return to `causal_check` for `difference_in_differences` when group-time or
+- Flag to the lead a possible switch to `difference_in_differences` when group-time or
   multi-cohort identification becomes primary.
-- Return to `causal_check` for `interference_spillovers` when spillovers become
+- Flag to the lead a possible switch to `interference_spillovers` when spillovers become
   the primary estimand; otherwise retain donor contamination as a design threat.
 
-`causal_check` owns support-route selection. If a different support becomes
-central to the bound work, flag it in chamber feedback rather than loading the
-catalog or switching routes.
-
+A material change of identification frame or target returns to the lead;
+do not execute another design in this turn. A relevant support guide stays
+inside this same review and does not add a specialist.
 
 ## Execution Record
 
-In the artifact `summary`, emphasize treated and donor units,
+In the saved review and run summary, emphasize treated and donor units,
 intervention timing and estimand, pre-fit/placebo and time-series diagnostics,
 concurrent shocks, and the aggregate claim boundary.

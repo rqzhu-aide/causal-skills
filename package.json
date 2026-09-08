@@ -1,20 +1,13 @@
 {
-  "name": "causal-consultant-skill",
-  "version": "6.3.0",
+  "name": "causal-consultant-v7",
+  "version": "7.0.1",
   "private": true,
-  "description": "Build and test tooling for the causal-consultant skill runtime.",
   "type": "commonjs",
-  "engines": {
-    "node": ">=18"
-  },
+  "description": "Lead-mediated causal consultation with auditable local project memory.",
+  "engines": { "node": ">=18.18" },
+  "files": ["SKILL.md", "README.md", "LICENSE", "agents", "references", "scripts"],
   "scripts": {
-    "build": "node scripts/build-runtime.cjs",
-    "check:bundle": "node scripts/build-runtime.cjs --check",
-    "test": "node --test tests/statectl.test.cjs",
-    "validate": "node scripts/validate-package.cjs"
-  },
-  "devDependencies": {
-    "esbuild": "0.28.1",
-    "yaml": "2.9.0"
+    "test": "node tests/run.cjs",
+    "validate": "node scripts/validate.cjs"
   }
 }

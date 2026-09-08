@@ -4,8 +4,9 @@ Use this file to plan or review a difference-in-differences or event-study analy
 
 Work in this order: define unit-time structure, treatment timing, comparison group, pre-period evidence, estimand, timing hazards, composition/support, inference level, then claim boundary. Do not let fixed effects or a modern estimator substitute for a credible comparison.
 
-Runtime contract: `references/design_execution_contract.md`, design id
-`difference_in_differences`.
+Use with [design_worker](../design_worker.md), design ID `difference_in_differences`.
+Feasibility uses the data requirements, assumptions, and planned diagnostics;
+new target computation additionally follows the recorded-run instructions there.
 
 ## Use When
 
@@ -36,14 +37,19 @@ Facts that usually must be inspected, not merely assumed: treatment timing, comp
 
 ## Design-Specific Twists
 
+These are possible revisions, not permission to change the user's target.
+A changed population, contrast, follow-up, or estimand stays an explicit
+alternative until the user adopts it. Base data construction and restriction
+on design evidence, not attractive target results.
+
 - `direct_fit`: treatment timing, comparison group, pre-period evidence, and inference level support a credible DiD/event-study estimand.
 - `data_shape_twist`: reshape to unit-time or cohort-time, create treatment cohort/event time, build repeated-cross-section cells, encode exposure windows, or mark panel composition changes.
-- `estimand_twist`: convert a generic pre/post request into two-period ATT, group-time ATT, event-time effects, aggregate ATT, repeated-cross-section ATT, synthetic DiD, or descriptive trend comparison.
+- `estimand_twist`: consider reframing a generic pre/post request into two-period ATT, group-time ATT, event-time effects, aggregate ATT, repeated-cross-section ATT, synthetic DiD, or descriptive trend comparison.
 - `diagnostic_twist`: prioritize raw trends, pre-period diagnostics, treatment timing maps, composition/missingness checks, comparison sensitivity, TWFE decomposition, clustering, or parallel-trend sensitivity.
 - `implementation_twist`: use modern staggered-adoption estimators, DR-DiD, synthetic DiD, imputation, interaction-weighted event studies, or HonestDiD only when their comparison and estimand match the data.
 - `fallback_twist`: if comparison credibility fails, use descriptive trend audit, interrupted-time-series warning, synthetic-control review, or future-design requirements.
 
-## Diagnostics for Approved Execution
+## Design Diagnostics
 
 Perform the analytic diagnostics relevant to the DiD design and chosen estimator lane:
 
@@ -80,26 +86,24 @@ Never rescue these failures by adding fixed effects, covariates, or a newer esti
 - Two-group/two-period or conditional DiD: R `DRDID`, `did`; Python `moderndid`, `diff-diff`, custom `statsmodels`/`linearmodels` benchmarks.
 - Event-study and FE benchmarks: R `fixest`, `lfe`; Python `statsmodels`, `linearmodels`; keep TWFE labeled when not primary.
 - Sensitivity to parallel-trend violations: R/Stata `HonestDiD`; custom sensitivity after event-study estimates.
-- Synthetic DiD or weak comparison group: R `synthdid`, `augsynth`; return to
-  `causal_check` for `synthetic_control_time_series` if donor-weighted
+- Synthetic DiD or weak comparison group: R `synthdid`, `augsynth`; flag to the lead a possible switch to `synthetic_control_time_series` if donor-weighted
   identification becomes primary.
 - DML/orthogonal DiD: R/Python `DoubleML`; use only when conditional parallel trends and nuisance roles are explicit.
 - TWFE diagnostics: R `bacondecomp`, decomposition helpers, or manual comparison/weight diagnostics.
 
 Key literature anchors: canonical DiD, parallel trends, Callaway-Sant'Anna group-time ATT, Sun-Abraham interaction-weighted event studies, Borusyak-Jaravel-Spiess imputation, Gardner did2s, de Chaisemartin-D'Haultfoeuille estimators, DR-DiD, synthetic DiD, and HonestDiD sensitivity.
 
-## Rerouting Cues
+## Changes to Discuss with the Lead
 
-- Return to `causal_check` for `interference_spillovers` when spillovers become
+- Flag to the lead a possible switch to `interference_spillovers` when spillovers become
   the primary estimand; otherwise record control contamination as a DiD threat.
 
-`causal_check` owns support-route selection. If a different support becomes
-central to the bound work, flag it in chamber feedback rather than loading the
-catalog or switching routes.
-
+A material change of identification frame or target returns to the lead;
+do not execute another design in this turn. A relevant support guide stays
+inside this same review and does not add a specialist.
 
 ## Execution Record
 
-In the artifact `summary`, emphasize treatment cohorts and
+In the saved review and run summary, emphasize treatment cohorts and
 comparison units, the DiD/event-time estimand, pre-period and timing diagnostics,
 inference level, and the parallel-trends claim boundary.

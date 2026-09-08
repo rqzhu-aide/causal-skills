@@ -1,6 +1,6 @@
 # Support: policy-making-and-transportability
 
-Context only. Relevant when the target concerns action choice, prioritization, treatment rules, policy value, deployment, external validity, or applying results to a different population, site, time, or setting. The selected design route owns execution, diagnostics, and the controller submission.
+Context only. Relevant when the target concerns action choice, prioritization, treatment rules, policy value, deployment, external validity, or applying results to a different population, site, time, or setting. The selected design worker owns this review and its diagnostics.
 
 ## Additional Information
 

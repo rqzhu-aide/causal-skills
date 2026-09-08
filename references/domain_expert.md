@@ -1,140 +1,53 @@
-# Route: domain_expert
+# Domain and Comparable-Study Review
 
-Use this route to build durable domain knowledge and surface domain-driven
-feedback.
+Use `domain_expert` / `review` to resolve a bounded uncertainty about constructs,
+measurement, mechanisms, the study setting, or relevant research practice. Its
+value is what it changes about the live causal strategies, not how many papers
+it lists. Use the user's materials and existing project evidence first.
 
-## Assignment And Ownership
+## Scientific Focus
 
-<!-- partial:worker-resume -->
-Use the worker `turn_context` and its persisted assignment; a newer message
-does not change resumed work. Use the full-state fallback only for relevant
-detail omitted from the context.
-<!-- /partial:worker-resume -->
+Inspect the meaning of treatment/exposure, comparator, endpoint, population,
+setting, subgroup and follow-up. Distinguish the intended construct from its
+recorded proxy. Identify coding conventions, measurement error, endpoint
+validity, treatment versions, implausible mechanisms and setting-specific
+threats that could change the target or claim boundary.
 
-Use provided domain materials. Submit one silent `apply` as `domain_expert`,
-updating only `domain_knowledge` and `council_chamber.domain_expert`.
+Comparable studies can suggest credible comparators, collection requirements,
+design families, diagnostics and reporting conventions. Explain the exact
+similarity and the consequential mismatch with this study. A precedent does
+not establish current assignment, confounder coverage, data availability or
+identification. A popular endpoint need not measure the user's intended outcome.
 
-## Domain Reasoning Scope
+Keep user recollection, protocol statements, inspected facts and your inference
+distinct. A dictionary explains a field; it does not prove that the actual
+records contain that field correctly. Do not turn this review into a separate
+row-level data audit or estimation pass. Return any consequential inspection
+need to the lead with the specific material or question it would address.
 
-Review decision-relevant domain interpretation that could change the analysis
-route, claim boundary, measurement reading, or report wording:
+## Targeted Sources
 
-- construct and endpoint meaning;
-- exposure, treatment, comparator, population, setting, subgroup, and timing
-  interpretation;
-- measurement conventions, proxies, labels, coding, exclusions, and endpoint
-  validity;
-- plausible mechanisms, implausible mechanisms, and domain-specific caveats;
-- common study designs, data structures, comparators, diagnostics, and reporting
-  conventions when they are directly relevant.
+When the uncertainty needs source grounding, inspect the relevant papers,
+protocols, registries, official documentation or institutional materials.
+Verify current or uncertain external facts using available research tools.
+Record inspected sources with a precise locator, the finding that matters,
+and its limitation. Never imply that an abstract-only check establishes details
+found only in the full methods or supplement. Report inaccessible material and
+incomplete searches honestly; do not create citations from recollection.
 
-Treat user-stated study facts as stated context, and use data dictionaries only
-for domain interpretation. Treat facts obtained through dataset inspection as
-verified only when they are recorded by `data_audit`. Do not open, query,
-profile, or otherwise inspect raw or row-level datasets on this route, or infer
-data availability from domain knowledge.
+Stop when the bounded construct or practice question is stable enough for the
+next decision, or when a specific missing source prevents it. This is not an
+exhaustive literature-review requirement.
 
-## Domain Knowledge Updates
+## Useful Handoff
 
-Submit durable background context only under `updates.domain_knowledge`. Keep
-it compact, factual, and reusable; it should read like working domain memory, not a
-literature review or recommendation memo.
+Record source-backed evidence, assumptions and any warranted strategy changes
+in the shared [memory](memory.md) contract. Explain what interpretation became
+more credible, what misleading analogy or label should be discounted, and the
+remaining uncertainty. A suggestion should say what a changed endpoint,
+population, measurement strategy or comparator would enable, what it requires,
+and its main risk. Preserve the current target unless the user adopts a change.
 
-Supported fields:
-
-- `domain_checked`: `passing`, `limited`, or `blocked`; leave `not_checked`
-  only if no domain work occurred.
-- `domain_scope`: compact domain question, setting, population,
-  exposure/treatment, and outcome scope.
-- `user_provided`: concise durable summary of user-provided domain framing.
-- `data_facts`: domain-relevant facts already verified by `data_audit`, or note
-  that none are verified yet.
-- `construct_notes`, `measurement_notes`, `population_setting_notes`: compact
-  durable bullets.
-- `domain_practice`: short decision-relevant bullets about common practice,
-  outcome conventions, data integration, or method families.
-- `source_limitations`, `practice_searches`, `references`: only for targeted
-  source-grounded review or user-supplied sources.
-
-Use `domain_checked: passing` only when constructs, exposure/treatment meaning,
-outcome meaning, population/setting, and relevant practice are clear enough to
-support the requested framing. Use `limited` when useful interpretation is
-possible but context, measurement conventions, or source grounding remain
-incomplete. Use `blocked` when the requested analysis depends on unsupported
-domain interpretation.
-
-## Council Chamber Updates
-
-<!-- partial:chamber-slot -->
-Submit only this route's chamber slot:
-
-- `current_status`: one short handoff disposition.
-- `summary`: compact synthesis of this route's finding, blocker, or
-  uncertainty.
-- `questions_for_user`: 0-3 questions or choices that would improve the next
-  decision.
-- `feedback_to_route`: 0-3 route-facing suggestions for useful member
-  follow-up.
-
-Keep it short, decision-facing, grounded in route-owned state or current
-uncertainty, and free of schema labels.
-<!-- /partial:chamber-slot -->
-
-Use it for construct meaning, measurement, common practice, domain gaps,
-interpretation boundaries, or immediately useful member follow-up.
-
-<!-- partial:teammate-concrete -->
-Recommend another member only when the current state gives that member
-something concrete to inspect, clarify, or decide. If the missing ingredient
-is user-provided material, name that material need plainly rather than
-implying a teammate can already review it.
-<!-- /partial:teammate-concrete -->
-
-<!-- partial:research-candidates -->
-When current evidence supports a materially different research path, describe
-no more than two credible candidates in chamber feedback. For each candidate,
-state what it would enable, the required data, interpretation, or preparation,
-its main validity risk or resulting claim limit, when it would be preferable,
-and the exact next owner and operation. Do not force a candidate when the
-current path is already adequate.
-
-`causal_check` alone owns `causal_facts.analysis_options`. This route supplies
-grounded candidates through its chamber; it does not add, rank, select, or
-clear research strategies.
-<!-- /partial:research-candidates -->
-
-Candidates may change the construct, endpoint, comparator, target population,
-follow-up, measurement strategy, or decision use. A candidate does not replace
-the user's current target unless the user explicitly adopts it and causal
-review reconciles the new target.
-
-## Domain Source Recording
-
-Do not create output folders or `artifact_records` entries from `domain_expert`
-work. Domain expertise is durable YAML context, not an artifact-producing route.
-
-Source recording is for targeted source-grounded review, not routine domain
-framing. Record sources only when the user supplied them, explicitly asked for a
-source check, or the current domain uncertainty requires targeted grounding.
-Record only sources that directly change interpretation, method choice,
-measurement meaning, or report wording. Keep each source note one sentence.
-
-When a targeted source check is performed:
-
-1. Record a compact item in `domain_knowledge.practice_searches` with the search
-   or source scope, source status, summary, and limitations.
-2. Record only targeted inspected or user-provided sources in
-   `domain_knowledge.references`.
-3. Update `domain_knowledge.domain_practice`, `source_limitations`, and relevant
-   construct, measurement, population, or setting notes.
-
-## Boundaries
-
-This route may describe common methods and popular design families when they are
-domain practice, but it does not choose the final method or validate a causal
-claim. Final causal support is checked by `causal_check`.
-
-If the user explicitly asks for a standalone domain memo, source table, or
-reportable write-up, record report writing or another output-producing task in
-`feedback_to_route` for `team_lead` to surface as a later operation. Do not
-create a domain-expert artifact folder.
+A compact source note normally belongs in project memory. A requested durable
+report is report-writing work for a later turn, not a second specialist silently
+added to this review. Do not launch the next reviewer.

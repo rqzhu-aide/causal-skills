@@ -1,7 +1,5 @@
-# Keep sources and generated bundles byte-stable across platforms.
-# The build compares committed bundles and rendered references byte-for-byte
-# (after newline normalization); LF-normalized checkouts keep working-tree
-# diffs and file sizes stable on Windows as well.
+# Keep runtime sources and evidence documents byte-stable across platforms.
+# Historical recorded hashes still refer to their original captured bytes.
 * text=auto
 *.cjs text eol=lf
 *.js text eol=lf
@@ -10,3 +8,5 @@
 *.yaml text eol=lf
 *.yml text eol=lf
 *.html text eol=lf
+# Preserve exact captured evidence bytes and their recorded hashes.
+architecture/** -text

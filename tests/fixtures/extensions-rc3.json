@@ -1,0 +1,168 @@
+{
+  "fixture_version": 1,
+  "target_version": "7.0.0-rc.3",
+  "purpose": "Synthetic serialization and lifecycle examples. These are not scientific validation or observed consultation evidence.",
+  "semantic_request": {
+    "event_id": "event-composed-review",
+    "expected_project_id": "project-extensions",
+    "expected_last_event_id": "event-init",
+    "type": "review_completed",
+    "payload": {
+      "checkpoint": {
+        "checkpoint_id": "checkpoint-composed",
+        "status": "ready_for_specialist",
+        "primary_uncertainty": "Which assignment information is needed for this spillover target?",
+        "why_it_matters": "Allocation and exposure definitions jointly determine the proposed comparison.",
+        "user_contribution_refs": ["user-composed"]
+      },
+      "changes": {
+        "evidence": [{
+          "evidence_id": "user-composed",
+          "kind": "user_statement",
+          "source_ref": "fixture:user-message-1",
+          "summary": "The user requests one feasibility review and recalls randomized allocation, without claiming it was verified.",
+          "source_excerpt": "I think the offers were randomized. Please check what that would imply for spillovers."
+        }],
+        "candidate_routes": [{
+          "strategy_id": "strategy-spillover",
+          "target": "The effect of neighborhood offer saturation on untreated participants",
+          "approach": "A bounded review of joint assignment and exposure requirements",
+          "status": "conditional",
+          "reason": "The assignment mechanism and exposure map still require evidence.",
+          "design_id": "interference_spillovers",
+          "additional_design_ids": ["randomized_assignment"],
+          "evidence_for": ["user-composed"],
+          "last_review_id": "review-composed"
+        }]
+      },
+      "review": {
+        "review_id": "review-composed",
+        "summary": "Synthetic handoff retaining both reference identities and the user's qualification.",
+        "assignment": {
+          "specialist_id": "design_worker",
+          "operation": "feasibility",
+          "design_id": "interference_spillovers",
+          "additional_design_ids": ["randomized_assignment"],
+          "strategy_ids": ["strategy-spillover"]
+        },
+        "question_addressed": "What would identify the requested spillover contrast?",
+        "selection_basis": {
+          "checkpoint_id": "checkpoint-composed",
+          "user_contribution_refs": ["user-composed"]
+        },
+        "work_performed": ["Serialization fixture only; no scientific investigation was performed."],
+        "findings": ["Both reference identities belong to the same bounded review."],
+        "evidence_refs": ["user-composed"],
+        "route_changes": ["strategy-spillover"],
+        "remaining_uncertainty": ["Who set the offer allocation and which rule was used?"]
+      }
+    }
+  },
+  "assignments": {
+    "preparation": {"specialist_id": "data_audit", "operation": "prepare"},
+    "custom": {"specialist_id": "design_worker", "operation": "feasibility", "design_id": "custom_identification"},
+    "composed": {"specialist_id": "design_worker", "operation": "execution", "design_id": "interference_spillovers", "additional_design_ids": ["randomized_assignment"]},
+    "custom_with_reference": {"specialist_id": "design_worker", "operation": "feasibility", "design_id": "custom_identification", "additional_design_ids": ["single_time_observational"]}
+  },
+  "plans": {
+    "standard": {
+      "kind": "analysis",
+      "objective": "Exercise unchanged analysis serialization",
+      "claim_boundary": "Synthetic schema fixture only; not an actual effect estimate",
+      "inputs": [],
+      "target": "The declared synthetic population",
+      "population": "The synthetic fixture population",
+      "treatment": "Offer",
+      "comparator": "No offer",
+      "outcome": "Follow-up outcome",
+      "timing": "Baseline assignment precedes follow-up",
+      "estimand": "Average offer effect",
+      "design_id": "randomized_assignment",
+      "estimator": "Declared difference in means",
+      "exclusions": [],
+      "diagnostics": []
+    },
+    "composed": {
+      "kind": "analysis",
+      "objective": "Exercise composed-plan serialization",
+      "claim_boundary": "Synthetic schema fixture only; no identifying assumptions have been verified",
+      "inputs": [],
+      "target": "Untreated participants at two neighborhood saturation levels",
+      "population": "The synthetic neighborhood population",
+      "treatment": "Higher assigned neighborhood offer saturation",
+      "comparator": "Lower assigned neighborhood offer saturation",
+      "outcome": "Follow-up outcome",
+      "timing": "Saturation allocation precedes individual offers and follow-up",
+      "estimand": "Declared spillover contrast among untreated participants",
+      "design_id": "interference_spillovers",
+      "additional_design_ids": ["randomized_assignment"],
+      "identification_basis": {
+        "argument": "Synthetic example of a joint randomization and exposure-map argument, supplied only to exercise serialization.",
+        "assumptions": ["Known allocation probabilities", "Specified exposure mapping"],
+        "source_refs": ["fixture:synthetic-allocation-protocol"]
+      },
+      "estimator": "Declared probability-weighted contrast",
+      "exclusions": [],
+      "diagnostics": ["Check assignment and exposure support"]
+    },
+    "custom": {
+      "kind": "analysis",
+      "objective": "Exercise a custom argument without forcing a catalog family",
+      "claim_boundary": "Synthetic schema fixture only; this does not validate a custom estimator",
+      "inputs": [],
+      "target": "The declared synthetic population",
+      "population": "The synthetic fixture population",
+      "treatment": "Exposure",
+      "comparator": "No exposure",
+      "outcome": "Follow-up outcome",
+      "timing": "Proxy measurements and exposure precede outcome",
+      "estimand": "Declared average exposure effect",
+      "design_id": "custom_identification",
+      "identification_basis": {
+        "argument": "Synthetic example retaining a separate proxy identifying argument rather than asserting measured exchangeability.",
+        "assumptions": ["Specified bridge restrictions", "Relevant completeness conditions"],
+        "source_refs": ["fixture:synthetic-custom-method-note"]
+      },
+      "estimator": "Declared bridge-based estimator",
+      "exclusions": [],
+      "diagnostics": ["Check the declared proxy requirements"]
+    },
+    "preparation": {
+      "kind": "audit",
+      "objective": "Join enrollment and attendance using the documented subject identifier",
+      "claim_boundary": "Preparation and linkage diagnostics only; no treatment effect is estimated",
+      "inputs": [
+        {"source_ref": "data/enrollment.json", "path": "data/enrollment.json"},
+        {"source_ref": "data/visits.json", "path": "data/visits.json"}
+      ],
+      "question": "Which enrolled subjects have a recorded attendance event?",
+      "transformations": ["Left join enrollment to the unique visit record by subject_id; preserve missing attendance as null"],
+      "diagnostics": ["Check key uniqueness, match counts, row preservation and attendance after enrollment"]
+    },
+    "ordinary_audit": {
+      "kind": "audit",
+      "objective": "Preserve the existing ordinary-audit contract",
+      "claim_boundary": "Synthetic bookkeeping fixture only",
+      "inputs": [],
+      "question": "Can an ordinary authored audit retain its existing lifecycle?",
+      "diagnostics": []
+    }
+  },
+  "preparation_truth": {
+    "enrollment": [
+      {"subject_id": "s01", "enrollment_day": 1},
+      {"subject_id": "s02", "enrollment_day": 2},
+      {"subject_id": "s03", "enrollment_day": 3}
+    ],
+    "visits": [
+      {"subject_id": "s01", "attendance_day": 4},
+      {"subject_id": "s03", "attendance_day": 5}
+    ],
+    "derived": [
+      {"subject_id": "s01", "enrollment_day": 1, "attendance_day": 4},
+      {"subject_id": "s02", "enrollment_day": 2, "attendance_day": null},
+      {"subject_id": "s03", "enrollment_day": 3, "attendance_day": 5}
+    ],
+    "diagnostics": {"enrolled": 3, "matched": 2, "unmatched": 1, "duplicate_keys": 0, "attendance_before_enrollment": 0}
+  }
+}
