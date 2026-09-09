@@ -33,9 +33,9 @@ function add(root, name, content) {
 
 test("the active release identity agrees across package, skill, README and CLI", () => {
   const pkg = require("../package.json");
-  assert.equal(pkg.version, "7.0.2");
-  assert.match(fs.readFileSync(path.join(repository, "SKILL.md"), "utf8"), /metadata:\r?\n  version: "7\.0\.2"/);
-  assert.match(fs.readFileSync(path.join(repository, "README.md"), "utf8"), /^Version: \*\*7\.0\.2\*\*/m);
+  assert.equal(pkg.version, "7.0.4");
+  assert.match(fs.readFileSync(path.join(repository, "SKILL.md"), "utf8"), /metadata:\r?\n  version: "7\.0\.4"/);
+  assert.match(fs.readFileSync(path.join(repository, "README.md"), "utf8"), /^Version: \*\*7\.0\.4\*\*/m);
   const result = spawnSync(process.execPath, [path.join(repository, "scripts/project.cjs"), "help"], { encoding: "utf8", windowsHide: true });
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stderr);
@@ -46,8 +46,8 @@ for (const file of ["SKILL.md", "README.md"]) {
   test("distribution validation detects version drift in " + file, t => {
     const root = fixture(t), target = path.join(root, file);
     const original = fs.readFileSync(target, "utf8");
-    assert.ok(original.includes("7.0.2"));
-    fs.writeFileSync(target, original.replace("7.0.2", "7.0.3"));
+    assert.ok(original.includes("7.0.4"));
+    fs.writeFileSync(target, original.replace("7.0.4", "7.0.5"));
     const result = validate(root);
     assert.equal(result.ok, false);
     assert.ok(result.errors.some(error => error.includes(file + " version must match package.json")));
@@ -57,7 +57,7 @@ for (const file of ["SKILL.md", "README.md"]) {
 test("the CLI reads its version from the installed package", t => {
   const root = fixture(t), target = path.join(root, "package.json");
   const pkg = JSON.parse(fs.readFileSync(target, "utf8"));
-  pkg.version = "7.0.3";
+  pkg.version = "7.0.5";
   fs.writeFileSync(target, JSON.stringify(pkg));
   const result = spawnSync(process.execPath, [path.join(root, "scripts/project.cjs"), "help"], { encoding: "utf8", windowsHide: true });
   assert.ifError(result.error);

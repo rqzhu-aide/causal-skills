@@ -1,6 +1,9 @@
 # Causal Consultant v7
 
-Version: **7.0.2**, the active candidate at this repository's root.
+Version: **7.0.4**, the active candidate at this repository's root.
+The consultant and `interactive-test-cc` use the same release number. This
+version aligns release metadata with the four-persona testing package; the
+consultation behavior and project format remain those of 7.0.2.
 The September 7 folder reorganization moved the actual pre-v7 working files,
 including uncommitted edits, to the sibling `causal-consultant-v6` archive.
 Existing consultation projects are unchanged. This layout promotion is not a
