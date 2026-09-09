@@ -6,6 +6,14 @@ and interpretation for this bounded review. Necessary fit checks and requested
 execution may happen together; do not impose a separate feasibility turn when
 the request and evidence are already sufficient.
 
+Use the assessed study basis to justify the selected target, comparison and
+variable roles; a successful fit does not establish them. An explicitly
+descriptive assignment may execute without resolving the original causal
+question, but cannot close it or supply causal adjustment claims. If a material
+study-process gap prevents the requested causal work, return that need to the
+lead for causal assessment; do not silently substitute an associational target
+or perform a second specialist review.
+
 ## Load the Selected Science
 
 Choose and read the primary guide for the selected target's identifying argument.
@@ -98,6 +106,9 @@ and claim boundary are traceable. Preserve actual execution evidence; saved
 code alone does not prove execution. Failed work stays failed/incomplete with its
 reason. Package failure does not establish scientific infeasibility.
 Retain invalidating diagnostics and weaken the claim, not force an estimate.
+Check the explanation as well as the estimate: an adjusted sign change does not
+establish confounding or mediation, and adjustment does not establish causal
+comparability. Attribute variable roles to evidence or explicit assumptions.
 Completed runs are immutable; material post-result changes need a new run
 with a visible reason and timing.
 

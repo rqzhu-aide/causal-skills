@@ -115,6 +115,12 @@ can share one event. `payload.checkpoint` is the selection checkpoint; put a
 new question's checkpoint in `changes.consultation`, not the completed review's
 selection basis. `consultation: null` clears the checkpoint, not open questions.
 
+Use the existing checkpoint's `primary_uncertainty` and `why_it_matters` to
+record what the selected check could change and its attainable source. The
+review records the actual finding and its effect on the strategy, including a
+justified unchanged recommendation. Do not create artificial comparison records
+when one check is clearly useful.
+
 ## Shared Question Handoff
 
 When useful, the specialist proposes answerable wording, consequence and source
@@ -127,6 +133,13 @@ ask; defer while open with reason and return condition; or close with resolution
 and provenance/reason, including unavailable or declined. Do not accidentally
 bury user-resolvable issues as limitations; provisional limitations are honest.
 Retirement does not establish an assumption.
+Preserve the distinction between unasked, explicitly unknown, unavailable and
+assumed in the question's reason and linked evidence/assumptions. An absent
+field is not an unavailable record. Authorization for an analysis is a decision,
+not an answer to its scientific questions. Complete an intermediate deliverable
+without closing the original causal question; if the user narrows or ends that
+inquiry, record the scope decision and remaining limits rather than claiming
+the missing facts were established.
 Use loaded state or expand to status/history when focused context cannot cover
 relevant older open questions.
 

@@ -4,6 +4,13 @@ Use `causal_check` with operation `design_elicitation` or `readiness`. Review
 what the study can support, not how persuasively a causal sentence can be written.
 A user's preferred estimator is a question to investigate, not validity evidence.
 
+For an initially underspecified causal request, assess the consequential study
+process before endorsing a final strategy or an exhausted-evidence fallback.
+This is substantive work, not a required checklist of status fields. Reuse
+established facts and earlier adequate assessments; ask or inspect only gaps
+that could change the target, design or advice. Explicit descriptive work can
+proceed within its own claim boundary while the causal question remains open.
+
 ## Design Elicitation
 
 Interpret available user accounts, protocols, allocation rules, eligibility
@@ -53,6 +60,21 @@ correction as altered artifact bytes or automatically invalidate other targets.
 
 ## Strategies and the Next Discriminator
 
+Compare plausible accounts against the original causal question, not only the
+currently preferred analysis. For a leading check, identify what different
+answers would enable or rule out and a source capable of distinguishing them.
+An important but difficult gap remains a limit on the claim; prioritize a
+feasible investigation of it rather than replacing it with easier diagnostics.
+
+For example, a spending/outcome snapshot may reflect funding received before
+the studied cohort's exposure, or spending recorded after its outcome. Inspect
+the period/cohort definitions to distinguish these accounts. If timing aligns,
+investigate how funding differed and whether a relevant allocation record exists.
+A rule is a lead to assess, not an identification certificate. If timing or
+assignment cannot be recovered, distinguish an established access/knowledge limit
+from a source that has simply not been examined. No fixed question order follows
+from this example.
+
 Maintain project-specific candidates through [memory](memory.md). Recommend a
 default only when evidence can rank a responsible route for the current target.
 Useful alternatives may involve different data construction, linkage, collection,
@@ -80,6 +102,13 @@ recommendation and stop. Residual assumptions need not be repeatedly sent back
 to the user as factual questions. Apply the shared question disposition in memory.
 
 ## Claim and Work Boundary
+
+Make the assessment's basis inspectable: connect consequential facts and their
+sources, unresolved conditions, the live routes they support or undermine, and
+the reason for the recommended next action or stopping. Unknowns need not all
+be resolved. An open, attainable check that could materially improve the answer
+prevents calling the evidence exhausted; a bounded result or explicit user
+closure can still be complete. Preserve which question was actually settled.
 
 State whether the evidence supports a causal claim under named assumptions,
 a narrower qualified causal claim, association-only analysis, or planning only.

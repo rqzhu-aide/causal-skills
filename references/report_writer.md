@@ -46,6 +46,12 @@ discovery and unvalidated subgroup screens stay exploratory. Words such as
 narrowest applicable boundary in project evidence, source run and report purpose
 governs. Audience, format and brevity never widen it.
 
+Check explanations of mechanisms and adjustment against the source evidence
+for variable roles and timing. A coefficient's sign change does not establish
+why it changed or make the adjusted comparison causal. Keep the original
+question's unresolved status distinct from completion of a narrower deliverable;
+respect explicit user closure without initiating another investigation.
+
 For a decision-bearing quantitative finding, give the estimate, uncertainty,
 population and governing assumptions, then explain the same finding in the
 study's units and setting. The plain-language rendering must not change the

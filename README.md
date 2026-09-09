@@ -1,6 +1,6 @@
 # Causal Consultant v7
 
-Version: **7.0.1**, the active version at this repository's root.
+Version: **7.0.2**, the active candidate at this repository's root.
 The September 7 folder reorganization moved the actual pre-v7 working files,
 including uncommitted edits, to the sibling `causal-consultant-v6` archive.
 Existing consultation projects are unchanged. This layout promotion is not a
@@ -23,11 +23,15 @@ Start with [SKILL.md](SKILL.md). The skill is explicit-use, not an implicit
 replacement for ordinary statistical discussion. Its metadata retains
 `allow_implicit_invocation: false`.
 
-This revision makes material specialist questions the lead's responsibility:
-ask, explicitly defer, or close with a reason. Answers retain their qualifications
-and must inform advice. It adds focused memory retrieval and a measured replay
-optimization, while retaining rc.2's run-identity, retry and report-binding fixes.
-The lead-user-specialist loop and one-specialist-per-turn limit are unchanged.
+This revision requires an investigated basis before settling an underspecified
+causal question. The lead chooses checks by what different answers could change,
+including whether an accessible fact could reveal a stronger design. Descriptive
+deliverables can be completed while the original causal question remains open;
+explicit user narrowing and ready-to-execute work retain direct paths.
+Answers keep their qualifications and must inform advice. Existing memory,
+run integrity and the one-specialist-per-turn limit are unchanged. New behavioral
+fixtures test investigation and appropriate stopping; their existence is not
+evidence of a completed live comparison.
 
 ## Use the Skill
 

@@ -2,7 +2,7 @@
 name: causal-consultant
 description: Explicit-use interactive causal consulting. Use when the user explicitly requests causal-consultant or its persistent lead-and-specialist workflow for causal study design, data audit, domain research, feasibility, analysis, or evidence-bound reporting.
 metadata:
-  version: "7.0.1"
+  version: "7.0.2"
 ---
 
 # Causal Consultant
@@ -14,11 +14,20 @@ an automatic method sequence. v7 never converts a v6
 
 ## Consultation
 
-Load current understanding and the latest message. Identify the uncertainty
-whose resolution would most change the target, design, evidence or claim.
-Weigh plausible decision change, accessible evidence and user constraints, not
-uncertainty alone. Distinguish resolvable facts, user-owned choices, residual
-assumptions and unobtainable resources.
+Load current understanding and the latest message. Keep the original decision
+and causal target in view even when the immediate deliverable is narrower.
+Reconstruct consequential intervention, measurement/timing, assignment and
+population facts from available evidence. Consider plausible alternative accounts
+that could invalidate the current approach or reveal a stronger one; do not
+infer the study process from variable names or file shape.
+
+For leading candidate checks, explain what different plausible answers would
+change in the target, design, claim or next action, and whether the proposed
+source could establish that fact. Prioritize consequence and plausibility, then
+reliable access and effort. Easy diagnostics must not displace an unresolved
+issue that determines the claim. Distinguish unasked facts, explicit unknowns,
+unavailable evidence, user-owned choices and adopted assumptions. Do not invent
+alternatives or require a fixed number of checks.
 
 Normally explain this before selecting a specialist: why it matters, how the
 user could help, what you could inspect and your recommended direction.
@@ -28,6 +37,14 @@ ban on ordinary essential clarification. Choose sources by reliability, access
 and effort, not a mandatory data-first order. Ask about observations, records
 and decisions, not certification of causal assumptions. Explain consequences
 without suggesting a preferred answer.
+
+An initially underspecified causal request needs a substantive formulation and
+readiness assessment before endorsing a final analytical strategy or concluding
+that a descriptive fallback is the strongest attainable answer. Use
+[causal_check](references/causal_check.md) when consequential study-process gaps
+remain; a review label alone is insufficient. Reuse an adequate source-supported
+assessment. A fully documented design can go directly to design-worker fit and
+execution; an explicit descriptive-only request needs no causal clearance.
 
 Proceed on a clear in-bound instruction, substantive checkpoint answer, selected
 option, bounded delegation or resumed agreed work. Enough information means
@@ -45,11 +62,21 @@ confident. Preserve qualifiers
 and provenance; prompting does not discredit a clarified answer. Do not
 reflexively rephrase an unambiguous unknown.
 
-When saved evidence suffices or another equivalent review cannot plausibly
-change advice, stop with the recommendation and limits. Where useful, offer
-conditional analysis, sensitivity work, attainable design improvement or a
-user-directed revised question. Do not invent uncertainty or re-request
-unavailable/declined material without a new reason.
+After a finding, change the strategy or explain why it remains appropriate.
+Before concluding, revisit consequential gaps in the original question,
+including those not yet recorded. Distinguish evidence already inspected from
+attainable evidence still unexamined; absence from the supplied file does not
+establish unavailability. Stop with supported advice when further attainable
+investigation would not materially change it, or when the user ends or narrows
+the inquiry. Do not invent uncertainty or re-request unavailable/declined material
+without a new reason.
+
+A requested descriptive result may be completed while causal questions remain
+open. Distinguish completion of that deliverable from resolution of the original
+question; acceptance of an intermediate result does not itself end the inquiry.
+Honor explicit descriptive-only scope and user-directed closure without another
+causal review. Where useful, offer conditional analysis, attainable design
+improvement or a revised question, preserving the unresolved limits.
 
 ## One Specialist Per Turn
 
